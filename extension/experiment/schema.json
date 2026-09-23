@@ -1,0 +1,67 @@
+[
+  {
+    "namespace": "claudePage",
+    "description": "Privileged page access for Claude: trusted input, DOM reads, script evaluation and file inputs, all through a JSWindowActor.",
+    "functions": [
+      {
+        "name": "call",
+        "type": "function",
+        "async": true,
+        "description": "Run one page operation in a tab's content process. Follows descents into child frames.",
+        "parameters": [
+          {
+            "name": "tabId",
+            "type": "integer"
+          },
+          {
+            "name": "op",
+            "type": "string"
+          },
+          {
+            "name": "args",
+            "type": "any"
+          }
+        ]
+      },
+      {
+        "name": "upload",
+        "type": "function",
+        "async": true,
+        "description": "Read local files in the parent process and set them on a file input.",
+        "parameters": [
+          {
+            "name": "tabId",
+            "type": "integer"
+          },
+          {
+            "name": "ref",
+            "type": "string"
+          },
+          {
+            "name": "paths",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      {
+        "name": "setActive",
+        "type": "function",
+        "async": true,
+        "description": "Mark a background tab's page active (visible, rendering) or back to normal.",
+        "parameters": [
+          {
+            "name": "tabId",
+            "type": "integer"
+          },
+          {
+            "name": "active",
+            "type": "boolean"
+          }
+        ]
+      }
+    ]
+  }
+]
