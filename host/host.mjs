@@ -7,7 +7,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
-const DIR = path.join(os.homedir(), ".claude-firefox");
+const DIR = path.join(os.homedir(), ".firefox-agent-bridge");
 const SOCKET = path.join(DIR, "bridge.sock");
 const LOG = path.join(DIR, "host.log");
 

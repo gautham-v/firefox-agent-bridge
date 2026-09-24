@@ -39,7 +39,7 @@ creates events in chrome code and dispatches them through the pres shell
 Other details:
 
 - **Actor modules.** Content processes can't read `~/Code`, so the actor modules are copied into
-  `<profile>/chrome/claude-firefox/` at startup and served from a `resource://` alias.
+  `<profile>/chrome/firefox-agent-bridge/` at startup and served from a `resource://` alias.
 - **Background tabs.** Normally hidden tabs don't render and IntersectionObserver never fires,
   so lazy lists stay empty. Session tabs are therefore marked active (`docShellIsActive`)
   without being shown.
@@ -64,7 +64,7 @@ Differences from Chrome:
 ## Security
 
 - Signature checks are off for the whole profile, so use a separate Developer Edition profile.
-- Anything running as your user can reach `~/.claude-firefox/bridge.sock` (mode 0600) and
+- Anything running as your user can reach `~/.firefox-agent-bridge/bridge.sock` (mode 0600) and
   drive the browser with your logins.
 - `javascript_tool` runs in the page and ignores its CSP.
 
@@ -79,8 +79,8 @@ Requires macOS, Firefox Developer Edition 140+, Node and Claude Code.
 
 The install script:
 
-- writes the native host manifest to `~/Library/Application Support/Mozilla/NativeMessagingHosts/claude_firefox.json`
-- writes a proxy file at `<profile>/extensions/claude-firefox@local` that points at `extension/`
+- writes the native host manifest to `~/Library/Application Support/Mozilla/NativeMessagingHosts/firefox_agent_bridge.json`
+- writes a proxy file at `<profile>/extensions/firefox-agent-bridge@local` that points at `extension/`
 - adds `xpinstall.signatures.required=false`, `extensions.experiments.enabled=true` and
   `extensions.autoDisableScopes=14` to `user.js`
 - runs `claude mcp add --scope user firefox`
@@ -91,8 +91,8 @@ The install script:
   the experiment schema, and content processes cache the actor modules.
 - Test a single tool without a Claude session:
   `node scripts/ffctl.mjs navigate '{"url":"example.com"}' my-session`
-- Logs are in `~/.claude-firefox/host.log`. Screenshots saved with `save_to_disk` go to
-  `~/.claude-firefox/screenshots/`.
+- Logs are in `~/.firefox-agent-bridge/host.log`. Screenshots saved with `save_to_disk` go to
+  `~/.firefox-agent-bridge/screenshots/`.
 
 ## Caveats
 

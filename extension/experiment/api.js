@@ -7,7 +7,7 @@ const { ExtensionError } = ExtensionUtils;
 // which runs inside each frame's content process, where events it creates are trusted.
 
 const ACTOR = "ClaudePage";
-const RES_HOST = "claude-firefox";
+const RES_HOST = "firefox-agent-bridge";
 const MODULES = ["actor-child.sys.mjs", "actor-parent.sys.mjs"];
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const MAX_FRAME_HOPS = 8;
@@ -42,7 +42,7 @@ function unregisterActor() {
 this.claudePage = class extends ExtensionAPI {
   onStartup() {
     this.ready = this.registerActor();
-    this.ready.catch((e) => console.error("claude-firefox: actor registration failed", e));
+    this.ready.catch((e) => console.error("firefox-agent-bridge: actor registration failed", e));
   }
 
   async registerActor() {

@@ -11,8 +11,8 @@ set -e
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 FF="$HOME/Library/Application Support/Firefox"
-EXT_ID="claude-firefox@local"
-HOST_NAME="claude_firefox"
+EXT_ID="firefox-agent-bridge@local"
+HOST_NAME="firefox_agent_bridge"
 NODE="$(command -v node)"
 
 PROFILE="$1"
@@ -29,7 +29,7 @@ if pgrep -f "Firefox Developer Edition.app/Contents/MacOS/firefox" >/dev/null; t
 fi
 
 # Native host: Firefox launches it without a shell PATH, so pin the node binary.
-LAUNCHER="$REPO/host/claude-firefox-host"
+LAUNCHER="$REPO/host/firefox-agent-bridge-host"
 cat > "$LAUNCHER" <<EOF
 #!/bin/sh
 exec "$NODE" "$REPO/host/host.mjs" "\$@"
@@ -41,7 +41,7 @@ mkdir -p "$NMH_DIR"
 cat > "$NMH_DIR/$HOST_NAME.json" <<EOF
 {
   "name": "$HOST_NAME",
-  "description": "Firefox Agent Bridge bridge",
+  "description": "Firefox Agent Bridge native host",
   "path": "$LAUNCHER",
   "type": "stdio",
   "allowed_extensions": ["$EXT_ID"]

@@ -10,7 +10,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { randomUUID } from "node:crypto";
 
-const DIR = path.join(os.homedir(), ".claude-firefox");
+const DIR = path.join(os.homedir(), ".firefox-agent-bridge");
 const SOCKET = path.join(DIR, "bridge.sock");
 const SCREENSHOT_DIR = path.join(DIR, "screenshots");
 const CALL_TIMEOUT_MS = 90_000;

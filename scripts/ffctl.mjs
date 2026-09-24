@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Calls one tool through the bridge, for testing without a Claude Code session.
 //   node scripts/ffctl.mjs <tool> '<json args>' [session]
-// Images are written to ~/.claude-firefox/ffctl-<n>.jpg and their paths printed.
+// Images are written to ~/.firefox-agent-bridge/ffctl-<n>.jpg and their paths printed.
 
 import fs from "node:fs";
 import net from "node:net";
@@ -13,7 +13,7 @@ if (!tool) {
   console.error("usage: ffctl.mjs <tool> '<json args>' [session]");
   process.exit(2);
 }
-const dir = path.join(os.homedir(), ".claude-firefox");
+const dir = path.join(os.homedir(), ".firefox-agent-bridge");
 const socket = net.createConnection(path.join(dir, "bridge.sock"));
 let buf = "";
 socket.setEncoding("utf8");

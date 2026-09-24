@@ -4,7 +4,7 @@
 // the calling session's "Claude" tab group. Page work goes through browser.claudePage, the
 // privileged experiment API in experiment/.
 
-const NATIVE_HOST = "claude_firefox";
+const NATIVE_HOST = "firefox_agent_bridge";
 const GROUP_COLORS = ["orange", "blue", "purple", "cyan", "green", "pink", "yellow", "red"];
 const SCREENSHOT_MAX_EDGE = 1568;
 const SCREENSHOT_MAX_PIXELS = 1_150_000;
