@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installs Claude for Firefox into a Firefox Developer Edition profile:
+# Installs Firefox Agent Bridge into a Firefox Developer Edition profile:
 #   - native messaging host manifest + launcher
 #   - the extension, as an unpacked proxy install (edits in extension/ apply on restart)
 #   - the prefs that let an unsigned privileged extension load
@@ -41,7 +41,7 @@ mkdir -p "$NMH_DIR"
 cat > "$NMH_DIR/$HOST_NAME.json" <<EOF
 {
   "name": "$HOST_NAME",
-  "description": "Claude for Firefox bridge",
+  "description": "Firefox Agent Bridge bridge",
   "path": "$LAUNCHER",
   "type": "stdio",
   "allowed_extensions": ["$EXT_ID"]
@@ -58,7 +58,7 @@ touch "$PROFILE/user.js"
 add_pref() {
   grep -q "\"$1\"" "$PROFILE/user.js" || printf 'user_pref("%s", %s);\n' "$1" "$2" >> "$PROFILE/user.js"
 }
-grep -q "Claude for Firefox" "$PROFILE/user.js" || printf '\n// Claude for Firefox (unsigned privileged extension, installed from %s)\n' "$REPO/extension" >> "$PROFILE/user.js"
+grep -q "Firefox Agent Bridge" "$PROFILE/user.js" || printf '\n// Firefox Agent Bridge (unsigned privileged extension, installed from %s)\n' "$REPO/extension" >> "$PROFILE/user.js"
 add_pref xpinstall.signatures.required false
 add_pref extensions.experiments.enabled true
 add_pref extensions.autoDisableScopes 14

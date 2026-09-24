@@ -1,15 +1,19 @@
-# Claude for Firefox
+# Firefox Agent Bridge
 
 Browser tools for Claude Code that drive Firefox Developer Edition the way Claude in Chrome
 drives Chrome, running on your Claude subscription through Claude Code.
+
+Unofficial. Not affiliated with Anthropic or Mozilla.
+
+![Claude Code drawing a diagram in a background Firefox tab](docs/demo.gif)
 
 - Tabs live in a per-session **Claude** tab group and stay in the background. Nothing takes
   focus, and the OS cursor never moves. Tabs a page opens (`target=_blank`, `window.open`)
   join the group, focus is handed back to your tab, and the click result names the new tab.
 - Clicks and keys are **trusted** (`isTrusted: true`, with user activation), including inside
   cross-origin iframes.
-- A cursor (the macOS arrow, in #261F25) shows where Claude is pointing and clicking, with a ripple on each click.
-  It's drawn as anonymous content, so the page can't see it or hit it, and it's hidden while
+- A cursor shows where Claude is pointing and clicking, with a ripple on each click. It's
+  drawn as anonymous content, so the page can't see it or hit it, and it's hidden while
   screenshots are taken.
 - Page scripts run without being blocked by the page's CSP. File inputs are filled directly,
   without opening a native picker.
@@ -57,7 +61,16 @@ Differences from Chrome:
   frame.
 - There is no `gif_creator`, console reading, network reading or shortcuts.
 
+## Security
+
+- Signature checks are off for the whole profile, so use a separate Developer Edition profile.
+- Anything running as your user can reach `~/.claude-firefox/bridge.sock` (mode 0600) and
+  drive the browser with your logins.
+- `javascript_tool` runs in the page and ignores its CSP.
+
 ## Install
+
+Requires macOS, Firefox Developer Edition 140+, Node and Claude Code.
 
 1. Quit Firefox Developer Edition.
 2. Run `scripts/install.sh [profile-dir]`. With no argument, it picks the Developer Edition
@@ -88,7 +101,9 @@ The install script:
 - It relies on internal Firefox APIs: JSWindowActors, the pres-shell dispatch helper and
   nsITextInputProcessor. A Developer Edition update could break it. If one does, check
   `host.log` and the Browser Console first.
-- Anything that can reach the local socket (`~/.claude-firefox/bridge.sock`, mode 0600) can
-  drive the browser as you.
 - Sessions don't survive a browser restart. Claude tab groups that session restore brings back
   are kept, renamed "Claude (earlier)" and greyed out, so staged work survives; close them when done.
+
+## License
+
+[MPL-2.0](LICENSE)

@@ -207,7 +207,7 @@ async function callFirefox(tool, args) {
     socket = await connectBridge();
   } catch {
     throw new Error(
-      "Firefox isn't connected. Open Firefox Developer Edition (the Claude for Firefox extension connects on startup) and retry.",
+      "Firefox isn't connected. Open Firefox Developer Edition (the extension connects on startup) and retry.",
     );
   }
   const id = nextId++;
@@ -249,7 +249,7 @@ async function handle(msg) {
       return {
         protocolVersion: params?.protocolVersion ?? "2025-06-18",
         capabilities: { tools: {} },
-        serverInfo: { name: "claude-firefox", version: VERSION },
+        serverInfo: { name: "firefox-agent-bridge", version: VERSION },
         instructions:
           "Browser tools for Firefox Developer Edition. Tabs live in a per-session 'Claude' tab group and run in the background; input is trusted and never moves the user's cursor.",
       };

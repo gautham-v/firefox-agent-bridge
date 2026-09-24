@@ -1067,7 +1067,7 @@ async function evaluate(doc, { code }) {
       sandboxPrototype: win,
       wantXrays: false,
       sameZoneAs: win,
-      sandboxName: "Claude for Firefox javascript_tool",
+      sandboxName: "Firefox Agent Bridge javascript_tool",
     });
     sandbox.__claudeRun = Cu.evalInSandbox(SANDBOX_RUNNER, sandbox);
     sandboxes.set(win, sandbox);
