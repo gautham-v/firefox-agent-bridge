@@ -5,7 +5,7 @@ drives Chrome, running on your Claude subscription through Claude Code.
 
 Unofficial. Not affiliated with Anthropic or Mozilla.
 
-![Claude Code drawing a diagram in a background Firefox tab](docs/demo.gif)
+![Claude Code searching Wikipedia and drawing a diagram in a background Firefox tab](docs/demo.gif)
 
 - Tabs live in a per-session **Claude** tab group and stay in the background. Nothing takes
   focus, and the OS cursor never moves. Tabs a page opens (`target=_blank`, `window.open`)
