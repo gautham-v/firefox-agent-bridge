@@ -509,6 +509,13 @@ function modifierInit(modifiers) {
   return init;
 }
 
+// Event coordinates. Events dispatched through the pres shell take their position from
+// screenX/screenY, read as device pixels, so clientX/clientY alone are overwritten.
+function at(win, x, y) {
+  const dpr = win.devicePixelRatio;
+  return { clientX: x, clientY: y, screenX: (win.mozInnerScreenX + x) * dpr, screenY: (win.mozInnerScreenY + y) * dpr };
+}
+
 function fire(win, target, Ctor, type, init) {
   const event = new win[Ctor](type, {
     bubbles: true,
@@ -626,6 +633,16 @@ async function moveCursor(doc, x, y) {
   else if (first) await new Promise((r) => setTimeout(r, 150));
 }
 
+// Puts the cursor at (x, y) at once, so it follows a drag instead of easing behind it.
+function trackCursor(doc, x, y) {
+  const c = cursors.get(doc);
+  if (!c) return;
+  c.arrow.style.transition = "none";
+  c.arrow.style.transform = `translate(${x - 5}px, ${y - 4}px)`;
+  c.x = x;
+  c.y = y;
+}
+
 function pressCursor(doc, down) {
   const c = cursors.get(doc);
   if (!c) return;
@@ -670,7 +687,7 @@ async function click(doc, args) {
   const button = args.button ?? 0;
   const buttons = button === 2 ? 2 : button === 1 ? 4 : 1;
   const count = args.clickCount ?? 1;
-  const base = { clientX: x, clientY: y, screenX: win.mozInnerScreenX + x, screenY: win.mozInnerScreenY + y, button, ...modifierInit(args.modifiers) };
+  const base = { ...at(win, x, y), button, ...modifierInit(args.modifiers) };
   const pointer = { ...base, pointerId: 1, pointerType: "mouse", isPrimary: true };
 
   await moveCursor(doc, x, y);
@@ -703,7 +720,7 @@ async function hover(doc, args) {
   }
   const { el, x, y } = pointTarget(doc, args);
   const win = doc.defaultView;
-  const base = { clientX: x, clientY: y, buttons: 0 };
+  const base = { ...at(win, x, y), buttons: 0 };
   const pointer = { ...base, pointerId: 1, pointerType: "mouse", isPrimary: true };
   await moveCursor(doc, x, y);
   fire(win, el, "PointerEvent", "pointerover", pointer);
@@ -715,6 +732,9 @@ async function hover(doc, args) {
   return `Hovered ${el.tagName.toLowerCase()}`;
 }
 
+const DRAG_STEPS = 24;
+const DRAG_STEP_MS = 20;
+
 async function drag(doc, { x0, y0, x, y }) {
   const win = doc.defaultView;
   const start = deepElementFromPoint(doc, x0, y0);
@@ -722,21 +742,24 @@ async function drag(doc, { x0, y0, x, y }) {
   await moveCursor(doc, x0, y0);
   pressCursor(doc, true);
   const pointer = { pointerId: 1, pointerType: "mouse", isPrimary: true };
-  fire(win, start, "PointerEvent", "pointerdown", { ...pointer, clientX: x0, clientY: y0, buttons: 1 });
-  fire(win, start, "MouseEvent", "mousedown", { clientX: x0, clientY: y0, buttons: 1 });
-  const steps = 10;
-  for (let i = 1; i <= steps; i++) {
-    const cx = x0 + ((x - x0) * i) / steps;
-    const cy = y0 + ((y - y0) * i) / steps;
+  fire(win, start, "PointerEvent", "pointerdown", { ...pointer, ...at(win, x0, y0), buttons: 1 });
+  fire(win, start, "MouseEvent", "mousedown", { ...at(win, x0, y0), buttons: 1 });
+  // Moves are spread over frames: canvas apps (Excalidraw, Figma) handle pointermove once per
+  // animation frame, so a burst of moves followed by pointerup draws nothing.
+  for (let i = 1; i <= DRAG_STEPS; i++) {
+    const cx = x0 + ((x - x0) * i) / DRAG_STEPS;
+    const cy = y0 + ((y - y0) * i) / DRAG_STEPS;
     const over = deepElementFromPoint(doc, cx, cy) ?? start;
-    fire(win, over, "PointerEvent", "pointermove", { ...pointer, clientX: cx, clientY: cy, buttons: 1 });
-    fire(win, over, "MouseEvent", "mousemove", { clientX: cx, clientY: cy, buttons: 1 });
+    trackCursor(doc, cx, cy);
+    fire(win, over, "PointerEvent", "pointermove", { ...pointer, ...at(win, cx, cy), buttons: 1 });
+    fire(win, over, "MouseEvent", "mousemove", { ...at(win, cx, cy), buttons: 1 });
+    await new Promise((r) => setTimeout(r, DRAG_STEP_MS));
   }
   await moveCursor(doc, x, y);
   const end = deepElementFromPoint(doc, x, y) ?? start;
   pressCursor(doc, false);
-  fire(win, end, "PointerEvent", "pointerup", { ...pointer, clientX: x, clientY: y, buttons: 0 });
-  fire(win, end, "MouseEvent", "mouseup", { clientX: x, clientY: y, buttons: 0 });
+  fire(win, end, "PointerEvent", "pointerup", { ...pointer, ...at(win, x, y), buttons: 0 });
+  fire(win, end, "MouseEvent", "mouseup", { ...at(win, x, y), buttons: 0 });
   return `Dragged from ${start.tagName.toLowerCase()} to ${end.tagName.toLowerCase()}`;
 }
 
@@ -764,7 +787,7 @@ function scroll(doc, args) {
   const target = (el && scrollableAncestor(win, el, vertical)) || doc.scrollingElement || doc.documentElement;
   if (el) {
     fire(win, el, "WheelEvent", "wheel", {
-      clientX: x, clientY: y, deltaMode: 0,
+      ...at(win, x, y), deltaMode: 0,
       deltaX: vertical ? 0 : delta, deltaY: vertical ? delta : 0,
     });
   }
