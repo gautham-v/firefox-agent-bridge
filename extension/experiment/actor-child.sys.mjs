@@ -560,22 +560,24 @@ const CURSOR_CSS = `
   .layer { position: fixed; inset: 0; pointer-events: none; z-index: 2147483647; overflow: hidden; }
   .arrow {
     position: absolute; left: 0; top: 0; width: 20px; height: 28px; opacity: 0;
-    filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.4));
+    filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.4)) drop-shadow(0 0 2.7px rgba(144,89,255,.5))
+      drop-shadow(0 0 8.8px rgba(144,89,255,.54));
     transition: transform ${CURSOR_MOVE_MS}ms cubic-bezier(.3,.7,.3,1), opacity 300ms ease;
   }
   .arrow.on { opacity: 1; }
   .arrow.down svg { transform: scale(.92); transform-origin: 5px 4px; }
   .ripple {
     position: absolute; left: 0; top: 0; width: 36px; height: 36px; margin: -18px 0 0 -18px;
-    border-radius: 50%; border: 2px solid #261F25; box-shadow: 0 0 0 1.5px rgba(255,255,255,.85), inset 0 0 0 1.5px rgba(255,255,255,.85); opacity: 0;
+    border-radius: 50%; border: 2px solid #7542E5; box-shadow: 0 0 0 1.5px rgba(255,255,255,.85), inset 0 0 0 1.5px rgba(255,255,255,.85); opacity: 0;
   }
   .ripple.go { animation: ripple 450ms ease-out; }
   @keyframes ripple { from { opacity: .9; scale: .3; } to { opacity: 0; scale: 1.4; } }
 `;
 
-// The macOS arrow at its default size (tip at 5,4), filled #261F25 instead of black. Built with
-// createElementNS rather than parsed, since some pages (LinkedIn) break DOMParser for SVG.
-const ARROW_PATH = "M5 4 L5 20.6 L9.1 16.7 L11.8 23.1 L14.6 21.9 L11.9 15.6 L17.4 15.6 Z";
+// A tailless pointer (tip at 5,4) in Firefox purple with a purple glow, so it can't be mistaken
+// for the user's cursor. Built with createElementNS rather than parsed, since some pages
+// (LinkedIn) break DOMParser for SVG.
+const ARROW_PATH = "M5 4 L5 19.6 L9.6 15.3 L16.4 14.9 Z";
 
 function arrowSvg(doc) {
   const NS = "http://www.w3.org/2000/svg";
@@ -583,7 +585,7 @@ function arrowSvg(doc) {
   for (const [k, v] of [["width", "20"], ["height", "28"], ["viewBox", "0 0 20 28"]]) svg.setAttribute(k, v);
   const path = doc.createElementNS(NS, "path");
   for (const [k, v] of [
-    ["d", ARROW_PATH], ["fill", "#261F25"], ["stroke", "#fff"], ["stroke-width", "1.6"],
+    ["d", ARROW_PATH], ["fill", "#7542E5"], ["stroke", "#fff"], ["stroke-width", "1.8"],
     ["stroke-linejoin", "round"], ["paint-order", "stroke"],
   ]) path.setAttribute(k, v);
   svg.appendChild(path);
