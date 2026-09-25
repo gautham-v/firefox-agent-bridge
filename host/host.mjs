@@ -29,8 +29,15 @@ process.stdin.on("data", (chunk) => {
   while (pending.length >= 4) {
     const len = pending.readUInt32LE(0);
     if (pending.length < 4 + len) break;
-    const msg = JSON.parse(pending.subarray(4, 4 + len).toString());
+    const body = pending.subarray(4, 4 + len).toString();
     pending = pending.subarray(4 + len);
+    let msg;
+    try {
+      msg = JSON.parse(body);
+    } catch {
+      log(`ignoring malformed extension message (${body.length} bytes)`);
+      continue;
+    }
     onExtensionMessage(msg);
   }
 });
@@ -38,7 +45,7 @@ process.stdin.on("end", shutdown);
 
 // ---- MCP server side ----------------------------------------------------------------------
 
-const clients = new Map(); // client id -> socket
+const clients = new Map(); // client id -> { socket, info: {name, version, pid, cwd} | null }
 let nextClient = 1;
 
 function onExtensionMessage(msg) {
@@ -46,9 +53,29 @@ function onExtensionMessage(msg) {
     log("extension connected, version", msg.version);
     return;
   }
+  if (msg.type === "disconnect_client") {
+    const client = clients.get(Number(msg.clientId));
+    if (client) {
+      log(`client ${msg.clientId} (${client.info?.name ?? "no hello"}) disconnected by the user in Firefox`);
+      client.socket.destroy();
+    }
+    return;
+  }
   const [clientId, callId] = String(msg.id).split(":");
-  const socket = clients.get(Number(clientId));
+  const socket = clients.get(Number(clientId))?.socket;
   if (socket && !socket.destroyed) socket.write(JSON.stringify({ id: Number(callId), result: msg.result }) + "\n");
+}
+
+function announce(clientId, client, hello) {
+  client.info = {
+    name: typeof hello.client?.name === "string" ? hello.client.name : "unknown client",
+    version: typeof hello.client?.version === "string" ? hello.client.version : null,
+    pid: typeof hello.pid === "number" ? hello.pid : null,
+    cwd: typeof hello.cwd === "string" ? hello.cwd : null,
+  };
+  const { name, version, pid, cwd } = client.info;
+  log(`client ${clientId} connected: ${name}${version ? ` ${version}` : ""} pid=${pid} cwd=${cwd}`);
+  send({ type: "client", event: "connected", client: { id: clientId, ...client.info } });
 }
 
 try {
@@ -59,8 +86,10 @@ try {
 
 const server = net.createServer((socket) => {
   const clientId = nextClient++;
-  clients.set(clientId, socket);
+  const client = { socket, info: null };
+  clients.set(clientId, client);
   let buf = "";
+  socket.setEncoding("utf8");
   socket.on("data", (chunk) => {
     buf += chunk;
     let nl;
@@ -68,12 +97,39 @@ const server = net.createServer((socket) => {
       const line = buf.slice(0, nl);
       buf = buf.slice(nl + 1);
       if (!line.trim()) continue;
-      const req = JSON.parse(line);
-      send({ type: "call", id: `${clientId}:${req.id}`, session: req.session, tool: req.tool, args: req.args });
+      let req;
+      try {
+        req = JSON.parse(line);
+      } catch {
+        log(`client ${clientId}: ignoring malformed line (${line.length} chars)`);
+        continue;
+      }
+      if (!req || typeof req !== "object") {
+        log(`client ${clientId}: ignoring non-object line (${line.length} chars)`);
+        continue;
+      }
+      if (req.type === "hello") {
+        announce(clientId, client, req);
+        continue;
+      }
+      if (!client.info) announce(clientId, client, {});
+      send({
+        type: "call",
+        id: `${clientId}:${req.id}`,
+        session: req.session,
+        tool: req.tool,
+        args: req.args,
+        client: { id: clientId, name: client.info.name },
+      });
     }
   });
-  socket.on("close", () => clients.delete(clientId));
-  socket.on("error", () => clients.delete(clientId));
+  socket.on("close", () => {
+    clients.delete(clientId);
+    if (!client.info) return;
+    log(`client ${clientId} disconnected: ${client.info.name} pid=${client.info.pid}`);
+    send({ type: "client", event: "disconnected", client: { id: clientId } });
+  });
+  socket.on("error", (e) => log(`client ${clientId} socket error: ${e.message}`));
 });
 server.listen(SOCKET, () => {
   fs.chmodSync(SOCKET, 0o600);

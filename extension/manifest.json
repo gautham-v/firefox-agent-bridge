@@ -2,12 +2,25 @@
   "manifest_version": 2,
   "name": "Firefox Agent Bridge",
   "version": "0.1.0",
-  "description": "Lets Claude Code drive Firefox tabs with trusted input, through a local native-messaging bridge.",
+  "description": "Lets an AI agent drive Firefox tabs with trusted input, through a local native-messaging bridge.",
   "browser_specific_settings": {
     "gecko": { "id": "firefox-agent-bridge@local", "strict_min_version": "140.0" }
   },
-  "background": { "scripts": ["background.js"] },
+  "background": { "scripts": ["control.js", "background.js"] },
   "permissions": ["tabs", "tabGroups", "<all_urls>", "nativeMessaging", "storage"],
+  "icons": { "48": "icons/icon.svg", "96": "icons/icon.svg" },
+  "browser_action": {
+    "default_icon": "icons/icon.svg",
+    "default_title": "Firefox Agent Bridge",
+    "default_popup": "popup/popup.html",
+    "default_area": "navbar"
+  },
+  "commands": {
+    "stop-agents": {
+      "suggested_key": { "default": "Alt+Shift+X" },
+      "description": "Stop: pause every agent session"
+    }
+  },
   "experiment_apis": {
     "claudePage": {
       "schema": "experiment/schema.json",
