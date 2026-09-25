@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "name": "Firefox Agent Bridge",
   "version": "0.1.0",
-  "description": "Lets Claude Code drive Firefox tabs with trusted input, through a local native-messaging bridge.",
+  "description": "Lets an AI agent drive Firefox tabs with trusted input, through a local native-messaging bridge.",
   "browser_specific_settings": {
     "gecko": { "id": "firefox-agent-bridge@local", "strict_min_version": "140.0" }
   },

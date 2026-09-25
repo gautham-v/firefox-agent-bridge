@@ -14,17 +14,17 @@ const event = () => {
   return { addListener: (f) => listeners.push(f), fire: (...a) => Promise.all(listeners.map((f) => f(...a))), listeners };
 };
 
-function mockBrowser() {
+function mockBrowser({ store = {}, groups: initialGroups = [] } = {}) {
   const tabs = new Map([[1, { id: 1, windowId: 10, groupId: -1, active: true, url: "https://user.example/", status: "complete", title: "user" }]]);
-  const groups = new Map();
+  const groups = new Map(initialGroups.map((g) => [g.id, { ...g }]));
   let nextTab = 2;
   let nextGroup = 100;
   const native = { sent: [], onMessage: event(), onDisconnect: event() };
   const badge = {};
-  const store = {};
   const b = {
     native,
     badge,
+    store,
     tabsMap: tabs,
     groups,
     runtime: {
@@ -32,7 +32,7 @@ function mockBrowser() {
       getManifest: () => ({ version: "0.1.0" }),
       onConnect: event(),
     },
-    storage: { local: { get: async (k) => ({ [k]: store[k] }), set: async (o) => Object.assign(store, o) } },
+    storage: { local: { get: async (k) => ({ [k]: store[k] }), set: async (o) => Object.assign(store, o), remove: async (k) => delete store[k] } },
     windows: { getLastFocused: async () => ({ id: 10, incognito: false }), create: async () => ({ id: 11 }) },
     tabs: {
       onActivated: event(),
@@ -78,8 +78,8 @@ function mockBrowser() {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function load() {
-  const browser = mockBrowser();
+async function load(opts) {
+  const browser = mockBrowser(opts);
   const ctx = vm.createContext({ browser, console, setTimeout, clearTimeout, URL, Date, Promise });
   for (const f of ["control.js", "background.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "..", f), "utf8"), ctx, { filename: f });
   await wait(20);
@@ -99,62 +99,80 @@ async function load() {
     p.last = () => msgs.at(-1).state;
     return p;
   };
-  return { browser, callTool, replies, popup };
+  return { browser, callTool, replies, popup, ctx };
 }
 
-test("first call asks, popup Allow runs it, tool behavior unchanged", async () => {
+test("calls run without any prompt; group is named after the client", async () => {
   const { browser, callTool, popup } = await load();
   assert.equal(JSON.stringify(browser.native.sent[0]), JSON.stringify({ type: "hello", version: "0.1.0" }));
-  await browser.native.onMessage.fire({ type: "client", event: "connected", client: { id: 1, name: "Claude Code", version: "2", pid: 9, cwd: "/p" } });
-  await wait(80);
-  assert.equal(browser.badge.text, "?");
+  await browser.native.onMessage.fire({ type: "client", event: "connected", client: { id: 1, name: "claude-code", version: "2", pid: 9, cwd: "/p" } });
   const ui = popup();
-  assert.equal(ui.last().approvals[0].name, "Claude Code");
-  const pending = callTool("tabs_create_mcp");
-  await wait(30);
-  ui.send({ cmd: "allow", name: "Claude Code" });
-  const r = await pending;
+  const r = await callTool("tabs_create_mcp", {}, "s1", { id: 1, name: "claude-code" });
   assert.match(r.result.content[0].text, /Created tab 2 in the Claude tab group/);
   assert.equal(browser.groups.get(100).title, "Claude");
   await wait(80);
   assert.equal(browser.badge.text, "RUN");
-  assert.equal(ui.last().log.at(-1).outcome, "ok");
-  assert.equal(ui.last().sessions[0].label, "Claude");
+  const state = ui.last();
+  assert.equal(state.log.at(-1).outcome, "ok");
+  assert.equal(state.log.at(-1).client, "claude-code");
+  assert.equal(state.sessions[0].label, "Claude");
+  assert.equal(state.clients[0].calls, 1);
+  assert.equal(state.approvals, undefined);
 });
 
-test("switching to a session tab pauses it; resume restores the title", async () => {
-  const env = await loadAllowed();
+test("labels per client: Codex, ffctl, first word, numbered repeats", async () => {
+  const env = await load();
+  const label = env.ctx.clientLabel;
+  assert.equal(label("Claude Code"), "Claude");
+  assert.equal(label("codex-mcp-client"), "Codex");
+  assert.equal(label("ffctl"), "ffctl");
+  assert.equal(label("my-agent"), "My");
+  assert.equal(label("supercalifragilisticexpialidocious"), "Supercalifragili");
+  assert.equal(label(""), "Agent");
+  await env.callTool("tabs_create_mcp", {}, "s1", { id: 1, name: "codex-mcp-client" });
+  await env.callTool("tabs_create_mcp", {}, "s2", { id: 2, name: "codex-mcp-client" });
+  const r = await env.callTool("tabs_create_mcp", {}, "s3", { id: 3, name: "goose" });
+  assert.match(r.result.content[0].text, /in the Goose tab group/);
+  assert.deepEqual([...env.browser.groups.values()].map((g) => g.title), ["Codex", "Codex 2", "Goose"]);
+  assert.equal(JSON.stringify(env.browser.store.groupLabels), JSON.stringify(["Claude", "Codex", "Goose"]));
+  const wrong = await env.callTool("tabs_close_mcp", { tabId: 2 }, "s3", { id: 3, name: "goose" });
+  assert.match(wrong.result.content[0].text, /not in this session's tab group \("Goose"\)/);
+});
+
+test("on restart, groups with any remembered label become '<label> (earlier)'", async () => {
+  const groups = [
+    { id: 1, title: "Claude" },
+    { id: 2, title: "Codex 2 (paused)" },
+    { id: 3, title: "Goose" },
+    { id: 4, title: "Shopping" },
+    { id: 5, title: "Claude (earlier)" },
+  ];
+  const { browser } = await load({ store: { groupLabels: ["Claude", "Codex", "Goose"], allowedClients: ["x"] }, groups });
+  assert.deepEqual(
+    [...browser.groups.values()].map((g) => [g.title, g.color]),
+    [
+      ["Claude (earlier)", "grey"],
+      ["Codex (earlier)", "grey"],
+      ["Goose (earlier)", "grey"],
+      ["Shopping", undefined],
+      ["Claude (earlier)", undefined],
+    ],
+  );
+  assert.equal(browser.store.allowedClients, undefined, "old consent storage is dropped");
+});
+
+test("switching to a session tab does not pause it", async () => {
+  const env = await load();
   await env.callTool("tabs_create_mcp");
-  const sessionTab = 2;
-
-  // Firefox activating a tab after the active one closed (no previousTabId) is not a takeover.
-  await env.browser.tabs.onActivated.fire({ tabId: sessionTab, windowId: 10 });
-  assert.equal((await env.callTool("tabs_context_mcp")).result.isError, undefined);
-
-  // The user clicks the session tab.
-  await env.browser.tabs.onActivated.fire({ tabId: sessionTab, previousTabId: 1, windowId: 10 });
-  await wait(20);
-  assert.equal(env.browser.groups.get(100).title, "Claude (paused)");
-  const r = await env.callTool("tabs_context_mcp");
-  assert.equal(r.result.isError, true);
-  assert.match(r.result.content[0].text, /took over.*toolbar button/);
-  const ui = env.popup();
-  assert.equal(ui.last().sessions[0].paused, "takeover");
-  ui.send({ cmd: "resume", session: "s1" });
+  await env.browser.tabs.onActivated.fire({ tabId: 2, previousTabId: 1, windowId: 10 });
   await wait(20);
   assert.equal(env.browser.groups.get(100).title, "Claude");
   assert.equal((await env.callTool("tabs_context_mcp")).result.isError, undefined);
+  assert.equal(env.popup().last().sessions[0].paused, false);
 });
 
-async function loadAllowed() {
+test("a tab the session page opens is handed back, and focus goes back to the user", async () => {
   const env = await load();
-  env.popup().send({ cmd: "allow", name: "Claude Code" });
-  await wait(10);
-  return env;
-}
-
-test("a tab the session page opens is handed back, not treated as a takeover", async () => {
-  const env = await loadAllowed();
   await env.callTool("tabs_create_mcp");
   // Page in tab 2 opens tab 3; Firefox makes it active.
   const t3 = { id: 3, windowId: 10, groupId: -1, active: true, openerTabId: 2, url: "https://x.example/", status: "complete", title: "x" };
@@ -164,26 +182,11 @@ test("a tab the session page opens is handed back, not treated as a takeover", a
   await wait(20);
   assert.equal(env.browser.tabsMap.get(3).groupId, 100);
   assert.equal(env.browser.tabsMap.get(1).active, true, "focus handed back to the user's tab");
-  assert.equal(env.popup().last().sessions[0].paused, null);
-});
-
-test("focus the extension hands back is not a takeover, even onto a tab since dragged into the group", async () => {
-  const env = await loadAllowed();
-  await env.callTool("tabs_create_mcp");
-  // The user drags their tab 1 into the session group, then a session page opens tab 3.
-  env.browser.tabsMap.get(1).groupId = 100;
-  const t3 = { id: 3, windowId: 10, groupId: -1, active: true, openerTabId: 2, url: "https://x.example/", status: "complete", title: "x" };
-  env.browser.tabsMap.set(3, t3);
-  await env.browser.tabs.onCreated.fire({ ...t3 });
-  // Firefox reports the activation the extension just made.
-  await env.browser.tabs.onActivated.fire({ tabId: 1, previousTabId: 3, windowId: 10 });
-  await wait(20);
-  assert.equal(env.browser.tabsMap.get(1).active, true);
-  assert.equal(env.popup().last().sessions[0].paused, null);
+  assert.equal(env.popup().last().sessions[0].paused, false);
 });
 
 test("Stop command answers the in-flight call, pauses, and resume all clears it", async () => {
-  const env = await loadAllowed();
+  const env = await load();
   await env.callTool("tabs_create_mcp");
   let release;
   env.browser.claudePage.call = (tabId, op) => (op === "click" ? new Promise((r) => (release = r)) : Promise.resolve(10));
@@ -196,7 +199,6 @@ test("Stop command answers the in-flight call, pauses, and resume all clears it"
   await wait(700);
   assert.equal(env.replies().filter((x) => x.id === r.id).length, 1, "late result dropped");
   assert.equal(env.browser.groups.get(100).title, "Claude (paused)");
-  await wait(3100);
   assert.equal(env.browser.badge.text, "||");
   const blocked = await env.callTool("tabs_context_mcp", {}, "s2");
   assert.match(blocked.result.content[0].text, /paused this session/);
@@ -206,9 +208,18 @@ test("Stop command answers the in-flight call, pauses, and resume all clears it"
   assert.equal((await env.callTool("tabs_context_mcp", {}, "s2")).result.isError, undefined);
 });
 
-test("Revoke sends disconnect_client to the host", async () => {
-  const env = await loadAllowed();
+test("Disconnect sends disconnect_client, blocks the name, Unblock lets it back", async () => {
+  const env = await load();
   await env.browser.native.onMessage.fire({ type: "client", event: "connected", client: { id: 4, name: "Claude Code", pid: 1, cwd: "/" } });
-  env.popup().send({ cmd: "revoke", name: "Claude Code" });
+  const ui = env.popup();
+  ui.send({ cmd: "disconnect", clientId: 4 });
   assert.equal(JSON.stringify(env.browser.native.sent.at(-1)), JSON.stringify({ type: "disconnect_client", clientId: 4 }));
+  await env.browser.native.onMessage.fire({ type: "client", event: "connected", client: { id: 5, name: "Claude Code", pid: 1, cwd: "/" } });
+  const r = await env.callTool("tabs_context_mcp", {}, "s1", { id: 5, name: "Claude Code" });
+  assert.match(r.result.content[0].text, /disconnected this client/);
+  assert.equal(env.browser.groups.size, 0, "nothing ran");
+  await wait(80);
+  assert.equal(JSON.stringify(ui.last().blocked), JSON.stringify(["Claude Code"]));
+  ui.send({ cmd: "unblock", name: "Claude Code" });
+  assert.equal((await env.callTool("tabs_context_mcp", {}, "s1", { id: 5, name: "Claude Code" })).result.isError, undefined);
 });

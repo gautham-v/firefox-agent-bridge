@@ -56,7 +56,7 @@ function onExtensionMessage(msg) {
   if (msg.type === "disconnect_client") {
     const client = clients.get(Number(msg.clientId));
     if (client) {
-      log(`client ${msg.clientId} (${client.info?.name ?? "no hello"}) revoked by extension`);
+      log(`client ${msg.clientId} (${client.info?.name ?? "no hello"}) disconnected by the user in Firefox`);
       client.socket.destroy();
     }
     return;

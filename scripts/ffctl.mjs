@@ -47,7 +47,7 @@ socket.on("data", (chunk) => {
 });
 socket.on("close", () => {
   if (!buf.includes("\n")) {
-    console.error("bridge: connection closed before a reply (access revoked?)");
+    console.error("bridge: connection closed before a reply (Firefox quit, or the client was disconnected in the popup?)");
     process.exitCode = 1;
   }
 });

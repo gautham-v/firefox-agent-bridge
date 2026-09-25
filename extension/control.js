@@ -1,19 +1,16 @@
 "use strict";
 
-// The user's side of the bridge: which clients may drive the browser, which sessions are
+// The user's side of the bridge: which clients are connected or blocked, which sessions are
 // paused, and a log of every call. No DOM or tab work here; background.js wires it to the
-// browser, and extension/test/ runs it in node with a mocked storage.
+// browser, and extension/test/ runs it in node.
 
-const APPROVAL_TIMEOUT_MS = 45_000; // must stay under the MCP server's CALL_TIMEOUT_MS (90s)
 const RECENT_MS = 3_000;
 const LOG_SIZE = 500;
 const ERROR_CHARS = 160;
-const ALLOWED_KEY = "allowedClients";
 
 const RESUME_HINT = "Ask the user to resume it from the Firefox Agent Bridge toolbar button, then retry.";
 
 const BADGES = {
-  approval: { text: "?", color: "#b45309" },
   acting: { text: "RUN", color: "#1d4ed8" },
   paused: { text: "||", color: "#4b5563" },
   idle: { text: "", color: null },
@@ -75,38 +72,24 @@ function logError(tool, args, message) {
   return msg.length > ERROR_CHARS ? msg.slice(0, ERROR_CHARS - 1) + "…" : msg;
 }
 
-function createControl({
-  storage,
-  send,
-  onChange = () => {},
-  onPauseChange = () => {},
-  now = Date.now,
-  timers = { setTimeout, clearTimeout },
-  approvalTimeoutMs = APPROVAL_TIMEOUT_MS,
-} = {}) {
-  const connected = new Map(); // client id -> { id, name, version, pid, cwd }
-  const allowed = new Set(); // client names, persisted
-  const denied = new Set(); // client names, until the browser restarts
-  const paused = new Map(); // session -> "stopped" | "takeover"
+function createControl({ send, onChange = () => {}, onPauseChange = () => {}, now = Date.now } = {}) {
+  const connected = new Map(); // client id -> { id, name, version, pid, cwd, connectedAt, calls }
+  // Names the user disconnected, until they unblock them or Firefox restarts. Blocking by name
+  // is what makes Disconnect stick: the MCP server reconnects on its next call.
+  const blocked = new Set();
+  const paused = new Set(); // sessions paused by Stop
   const sessions = new Map(); // session -> { client, clientId, firstAt, lastAt }
-  const calls = new Map(); // call id -> call waiting for approval or running
+  const calls = new Map(); // call id -> running call
   const log = [];
   let pauseNew = false; // after Stop, sessions not seen yet start out paused
-  let lastFinishedAt = -Infinity;
   const lastBySession = new Map();
 
-  const ready = Promise.resolve(storage?.get(ALLOWED_KEY))
-    .then((got) => {
-      for (const name of got?.[ALLOWED_KEY] ?? []) allowed.add(name);
-    })
-    .catch(() => {});
-
-  const persist = () => Promise.resolve(storage?.set({ [ALLOWED_KEY]: [...allowed] })).catch(() => {});
+  const nameOf = (c) => (typeof c?.name === "string" && c.name ? c.name : "unknown client");
 
   function clientFor(c) {
     const id = typeof c?.id === "number" ? c.id : null;
     if (id != null && connected.has(id)) return connected.get(id);
-    const client = { id, name: typeof c?.name === "string" && c.name ? c.name : "unknown client", version: null, pid: null, cwd: null };
+    const client = { id, name: nameOf(c), version: null, pid: null, cwd: null, connectedAt: now(), calls: 0 };
     if (id != null) connected.set(id, client);
     return client;
   }
@@ -116,33 +99,25 @@ function createControl({
     if (msg.event === "connected" && typeof c.id === "number") {
       connected.set(c.id, {
         id: c.id,
-        name: typeof c.name === "string" && c.name ? c.name : "unknown client",
+        name: nameOf(c),
         version: c.version ?? null,
         pid: c.pid ?? null,
         cwd: c.cwd ?? null,
+        connectedAt: now(),
+        calls: connected.get(c.id)?.calls ?? 0,
       });
     } else if (msg.event === "disconnected") {
       connected.delete(c.id);
-      for (const call of [...calls.values()]) {
-        if (call.clientId === c.id && call.phase === "waiting") finish(call, "error", "The client disconnected before the user answered.", "client disconnected");
-      }
     }
     onChange();
   }
 
-  function decision(name) {
-    if (allowed.has(name)) return "allowed";
-    if (denied.has(name)) return "denied";
-    return "ask";
+  function pausedMessage() {
+    return `The user paused this session in Firefox, so nothing was done. Don't retry on your own. ${RESUME_HINT}`;
   }
 
-  function pausedMessage(session) {
-    const why = paused.get(session) === "takeover" ? " (they switched to this session's tab and took over)" : "";
-    return `The user paused this session in Firefox${why}, so nothing was done. Don't retry on your own. ${RESUME_HINT}`;
-  }
-
-  function deniedMessage(name) {
-    return `The user denied "${name}" access to Firefox, so nothing was done. If that was a mistake, ask the user to allow it from the Firefox Agent Bridge toolbar button.`;
+  function blockedMessage(name) {
+    return `The user disconnected this client ("${name}") in Firefox, so nothing was done. Calls from it are refused until the user clicks Unblock in the Firefox Agent Bridge toolbar popup or restarts Firefox. Don't retry on your own; ask the user.`;
   }
 
   function reply(id, outcome, payload) {
@@ -150,12 +125,11 @@ function createControl({
     send?.({ id, result });
   }
 
-  // Answers a call exactly once; a result that arrives after Stop or a timeout is dropped.
+  // Answers a call exactly once; a result that arrives after Stop or a disconnect is dropped.
   function finish(call, outcome, payload, note) {
     if (call.done) return false;
     call.done = true;
     calls.delete(call.id);
-    if (call.timer) timers.clearTimeout(call.timer);
     reply(call.id, outcome, payload);
     const t = now();
     const entry = call.entry;
@@ -164,18 +138,15 @@ function createControl({
     if (outcome !== "ok") entry.error = note ?? logError(call.tool, call.args, payload);
     log.push(entry);
     if (log.length > LOG_SIZE) log.splice(0, log.length - LOG_SIZE);
-    if (call.phase === "running") {
-      lastFinishedAt = t;
-      lastBySession.set(call.session, t);
-    }
+    if (call.running) lastBySession.set(call.session, t);
     onChange();
     return true;
   }
 
   async function handleCall(msg, run, tabOrigin = async () => null) {
-    await ready;
     const args = msg.args ?? {};
     const client = clientFor(msg.client);
+    client.calls++;
     const t0 = now();
     const summary = summarizeArgs(msg.tool, args);
     const call = {
@@ -186,11 +157,8 @@ function createControl({
       clientId: client.id,
       clientName: client.name,
       t0,
-      phase: "new",
+      running: false,
       done: false,
-      timer: null,
-      run,
-      tabOrigin,
       entry: {
         time: new Date(t0).toISOString(),
         session: msg.session,
@@ -207,45 +175,23 @@ function createControl({
     };
     if (!sessions.has(msg.session)) {
       sessions.set(msg.session, { client: client.name, clientId: client.id, firstAt: t0, lastAt: t0 });
-      if (pauseNew) setPaused(msg.session, "stopped");
+      if (pauseNew) setPaused(msg.session);
     } else {
       Object.assign(sessions.get(msg.session), { client: client.name, clientId: client.id, lastAt: t0 });
     }
     calls.set(call.id, call);
 
-    if (paused.has(call.session)) return finish(call, "blocked-paused", pausedMessage(call.session), `session paused (${paused.get(call.session)})`);
-    const d = decision(client.name);
-    if (d === "denied") return finish(call, "blocked-not-allowed", deniedMessage(client.name), "client denied");
-    if (d === "ask") {
-      call.phase = "waiting";
-      call.timer = timers.setTimeout(() => {
-        finish(
-          call,
-          "blocked-not-allowed",
-          `Firefox Agent Bridge asked the user whether to allow "${client.name}" and got no answer within ${approvalTimeoutMs / 1000}s, so nothing was done. Ask the user to click the Firefox Agent Bridge toolbar button, choose Allow, and then retry.`,
-          "no answer to the approval prompt",
-        );
-      }, approvalTimeoutMs);
-      onChange();
-      return;
-    }
-    return proceed(call);
-  }
-
-  async function proceed(call) {
-    if (call.done) return;
-    if (call.timer) timers.clearTimeout(call.timer);
-    call.timer = null;
-    if (paused.has(call.session)) return finish(call, "blocked-paused", pausedMessage(call.session), `session paused (${paused.get(call.session)})`);
-    call.phase = "running";
+    if (blocked.has(client.name)) return finish(call, "blocked-disconnected", blockedMessage(client.name), "client disconnected by the user");
+    if (paused.has(call.session)) return finish(call, "blocked-paused", pausedMessage(), "session paused");
+    call.running = true;
     onChange();
     const tabId = call.entry.tabId;
-    if (tabId != null) call.entry.origin = pageOrigin(await Promise.resolve(call.tabOrigin(tabId)).catch(() => null));
+    if (tabId != null) call.entry.origin = pageOrigin(await Promise.resolve(tabOrigin(tabId)).catch(() => null));
     if (call.done) return;
     let outcome;
     let payload;
     try {
-      payload = await call.run(call.session, call.tool, call.args);
+      payload = await run(call.session, call.tool, call.args, client.name);
       outcome = "ok";
     } catch (e) {
       payload = e?.message ?? String(e);
@@ -254,15 +200,15 @@ function createControl({
     if (!finish(call, outcome, payload)) return;
     if (tabId != null) {
       // Pages move (navigate, clicks); log where the tab ended up if it still exists.
-      const after = pageOrigin(await Promise.resolve(call.tabOrigin(tabId)).catch(() => null));
+      const after = pageOrigin(await Promise.resolve(tabOrigin(tabId)).catch(() => null));
       if (after) call.entry.origin = after;
     }
   }
 
-  function setPaused(session, reason) {
-    const was = paused.has(session);
-    paused.set(session, reason);
-    if (!was) onPauseChange(session, true);
+  function setPaused(session) {
+    if (paused.has(session)) return;
+    paused.add(session);
+    onPauseChange(session, true);
   }
 
   function stopCallsFor(pred, message, note) {
@@ -273,16 +219,8 @@ function createControl({
 
   function stopAll() {
     pauseNew = true;
-    for (const session of sessions.keys()) if (!paused.has(session)) setPaused(session, "stopped");
+    for (const session of sessions.keys()) setPaused(session);
     stopCallsFor(() => true, stoppedMessage, "stopped by the user");
-    onChange();
-  }
-
-  function pauseSession(session, reason = "stopped") {
-    if (!sessions.has(session)) return;
-    if (paused.get(session) === reason) return;
-    setPaused(session, reason);
-    stopCallsFor((c) => c.session === session, stoppedMessage, reason === "takeover" ? "user took over" : "stopped by the user");
     onChange();
   }
 
@@ -293,43 +231,24 @@ function createControl({
 
   function resumeAll() {
     pauseNew = false;
-    for (const session of [...paused.keys()]) resume(session);
+    for (const session of [...paused]) resume(session);
     onChange();
   }
 
-  function allow(name) {
-    denied.delete(name);
-    allowed.add(name);
-    persist();
-    for (const call of [...calls.values()]) if (call.phase === "waiting" && call.clientName === name) proceed(call);
+  // Cuts one connection and refuses its name until unblock(), so the reconnect that follows
+  // the client's next call fails fast too.
+  function disconnect(clientId) {
+    const c = connected.get(clientId);
+    if (!c) return;
+    blocked.add(c.name);
+    stopCallsFor((call) => call.clientName === c.name, blockedMessage(c.name), "client disconnected by the user");
+    send?.({ type: "disconnect_client", clientId });
+    connected.delete(clientId);
     onChange();
   }
 
-  function deny(name) {
-    allowed.delete(name);
-    denied.add(name);
-    persist();
-    for (const call of [...calls.values()]) {
-      if (call.phase === "waiting" && call.clientName === name) finish(call, "blocked-not-allowed", deniedMessage(name));
-    }
-    onChange();
-  }
-
-  // Revoking also cuts the connections, so a running client has to reconnect and ask again.
-  function revoke(name) {
-    allowed.delete(name);
-    persist();
-    stopCallsFor((c) => c.clientName === name, `The user revoked "${name}"'s access to Firefox, so this call was stopped.`, "client revoked");
-    for (const c of [...connected.values()]) {
-      if (c.name !== name || c.id == null) continue;
-      send?.({ type: "disconnect_client", clientId: c.id });
-      connected.delete(c.id);
-    }
-    onChange();
-  }
-
-  function forget(name) {
-    denied.delete(name);
+  function unblock(name) {
+    blocked.delete(name);
     onChange();
   }
 
@@ -345,52 +264,33 @@ function createControl({
     onChange();
   }
 
+  // Sessions paused by Stop don't count as recently acting, so the badge shows the pause at once.
   function isActing(t = now()) {
-    for (const c of calls.values()) if (c.phase === "running") return true;
-    return t - lastFinishedAt < RECENT_MS;
-  }
-
-  function approvalsNeeded() {
-    const byName = new Map();
-    const add = (name, client) => {
-      if (decision(name) !== "ask") return;
-      const a = byName.get(name) ?? { name, clients: [], waiting: 0 };
-      if (client && !a.clients.some((x) => x.id === client.id)) a.clients.push({ id: client.id, pid: client.pid, cwd: client.cwd, version: client.version });
-      byName.set(name, a);
-      return a;
-    };
-    for (const c of connected.values()) add(c.name, c);
-    for (const call of calls.values()) {
-      if (call.phase !== "waiting") continue;
-      const a = add(call.clientName, connected.get(call.clientId));
-      if (a) a.waiting++;
-    }
-    return [...byName.values()];
+    for (const c of calls.values()) if (c.running) return true;
+    for (const [session, last] of lastBySession) if (!paused.has(session) && t - last < RECENT_MS) return true;
+    return false;
   }
 
   function badge(t = now()) {
     let state = "idle";
-    if (approvalsNeeded().length) state = "approval";
-    else if (isActing(t)) state = "acting";
+    if (isActing(t)) state = "acting";
     else if (paused.size || pauseNew) state = "paused";
     return { state, ...BADGES[state] };
   }
 
   function snapshot(t = now()) {
-    const running = new Set([...calls.values()].filter((c) => c.phase === "running").map((c) => c.session));
+    const running = new Set([...calls.values()].filter((c) => c.running).map((c) => c.session));
     return {
       badge: badge(t),
       pauseNew,
-      approvals: approvalsNeeded(),
-      allowed: [...allowed].sort(),
-      denied: [...denied].sort(),
-      connected: [...connected.values()],
+      clients: [...connected.values()].map((c) => ({ ...c, blocked: blocked.has(c.name) })).sort((a, b) => a.connectedAt - b.connectedAt),
+      blocked: [...blocked].sort(),
       sessions: [...sessions.entries()]
         .map(([id, s]) => ({
           id,
           client: s.client,
           lastAt: s.lastAt,
-          paused: paused.get(id) ?? null,
+          paused: paused.has(id),
           acting: running.has(id) || t - (lastBySession.get(id) ?? -Infinity) < RECENT_MS,
         }))
         .sort((a, b) => b.lastAt - a.lastAt),
@@ -399,20 +299,15 @@ function createControl({
   }
 
   return {
-    ready,
     RECENT_MS,
     clientEvent,
     handleCall,
     stopAll,
-    pauseSession,
     resume,
     resumeAll,
     isPaused: (session) => paused.has(session),
-    pausedReason: (session) => paused.get(session) ?? null,
-    allow,
-    deny,
-    revoke,
-    forget,
+    disconnect,
+    unblock,
     hostDisconnected,
     clearLog,
     badge,
@@ -420,4 +315,4 @@ function createControl({
   };
 }
 
-if (typeof module !== "undefined") module.exports = { createControl, summarizeArgs, logError, pageOrigin, APPROVAL_TIMEOUT_MS };
+if (typeof module !== "undefined") module.exports = { createControl, summarizeArgs, logError, pageOrigin };

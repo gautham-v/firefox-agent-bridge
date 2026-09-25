@@ -23,49 +23,61 @@ function el(tag, props = {}, ...children) {
 
 const button = (label, onclick, cls = "small") => el("button", { class: cls, textContent: label, onclick });
 
+// State arrives after every call, so lists are updated in place: an item keeps its element and
+// its unchanged buttons. Replacing a button between mousedown and mouseup would lose the click.
+function morph(old, fresh) {
+  if (old.isEqualNode(fresh)) return old;
+  if (old.nodeType !== 1 || old.nodeName !== fresh.nodeName || old.nodeName === "BUTTON" || old.childNodes.length !== fresh.childNodes.length) {
+    old.replaceWith(fresh);
+    return fresh;
+  }
+  for (const a of [...old.attributes]) if (!fresh.hasAttribute(a.name)) old.removeAttribute(a.name);
+  for (const a of fresh.attributes) if (old.getAttribute(a.name) !== a.value) old.setAttribute(a.name, a.value);
+  [...old.childNodes].forEach((child, i) => morph(child, fresh.childNodes[i]));
+  return old;
+}
+
+function syncList(list, items, key, build) {
+  const current = new Map([...list.children].map((node) => [node.dataset.key, node]));
+  const next = items.map((item) => {
+    const fresh = build(item);
+    fresh.dataset.key = key(item);
+    const old = current.get(fresh.dataset.key);
+    return old ? morph(old, fresh) : fresh;
+  });
+  if (next.length !== list.children.length || next.some((node, i) => node !== list.children[i])) list.replaceChildren(...next);
+}
+
 function statusText(s) {
   const pausedCount = s.sessions.filter((x) => x.paused).length;
   switch (s.badge.state) {
-    case "approval":
-      return "A client is waiting for your approval.";
     case "acting":
       return "An agent is acting in Firefox.";
     case "paused":
       return pausedCount ? `Paused: ${pausedCount} session${pausedCount === 1 ? "" : "s"}.` : "Paused. New sessions start paused.";
     default:
-      return s.allowed.length || s.sessions.length ? "Idle." : "Idle. No agent has connected yet.";
+      return s.clients.length || s.sessions.length ? "Idle." : "Idle. No agent has connected yet.";
   }
 }
 
 function clientLine(c) {
   const parts = [];
-  if (c.pid != null) parts.push(`pid ${c.pid}`);
   if (c.version) parts.push(`version ${c.version}`);
+  if (c.pid != null) parts.push(`pid ${c.pid}`);
   if (c.cwd) parts.push(c.cwd);
   return parts.join(" · ") || "no process details";
 }
 
-function renderApprovals(s) {
-  $("approvals").hidden = !s.approvals.length;
-  $("approval-list").replaceChildren(
-    ...s.approvals.map((a) =>
-      el(
-        "li",
-        { class: "approval" },
-        el("div", {}, "Allow ", el("strong", { textContent: a.name }), " to control Firefox?"),
-        ...a.clients.map((c) => el("div", { class: "mono muted", textContent: clientLine(c) })),
-        a.waiting ? el("div", { class: "small muted", textContent: `${a.waiting} call${a.waiting === 1 ? "" : "s"} waiting (each gives up after 45s)` }) : null,
-        el("div", { class: "buttons" }, button("Allow", () => send("allow", { name: a.name }), "primary"), button("Deny", () => send("deny", { name: a.name }), "")),
-      ),
-    ),
-  );
-}
+const clock = (t) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
 function renderSessions(s) {
   $("sessions-section").hidden = !s.sessions.length;
-  $("session-list").replaceChildren(
-    ...s.sessions.map((x) => {
-      const stateText = x.paused ? (x.paused === "takeover" ? "paused, you took over" : "paused") : x.acting ? "acting" : "idle";
+  syncList(
+    $("session-list"),
+    s.sessions,
+    (x) => x.id,
+    (x) => {
+      const stateText = x.paused ? "paused" : x.acting ? "acting" : "idle";
       const cls = x.paused ? "paused" : x.acting ? "acting" : "";
       return el(
         "li",
@@ -74,26 +86,36 @@ function renderSessions(s) {
         el("span", { class: `state ${cls}`, textContent: stateText }),
         x.paused ? button("Resume", () => send("resume", { session: x.id })) : null,
       );
-    }),
+    },
   );
 }
 
 function renderClients(s) {
-  $("allowed-empty").hidden = !!s.allowed.length;
-  $("allowed-list").replaceChildren(
-    ...s.allowed.map((name) => {
-      const live = s.connected.filter((c) => c.name === name).length;
-      return el(
+  $("clients-empty").hidden = !!s.clients.length;
+  syncList(
+    $("client-list"),
+    s.clients,
+    (c) => String(c.id ?? c.name),
+    (c) =>
+      el(
         "li",
-        { class: "item" },
-        el("span", { class: "grow" }, el("strong", { textContent: name }), live ? el("span", { class: "muted", textContent: ` · ${live} connected` }) : null),
-        button("Revoke", () => send("revoke", { name })),
-      );
-    }),
+        { class: "client" },
+        el(
+          "div",
+          { class: "item" },
+          el("span", { class: "grow" }, el("strong", { textContent: c.name }), el("span", { class: "muted small", textContent: c.blocked ? " (self-reported, blocked)" : " (self-reported)" })),
+          c.id != null ? button("Disconnect", () => send("disconnect", { clientId: c.id })) : null,
+        ),
+        el("div", { class: "mono muted", textContent: clientLine(c) }),
+        el("div", { class: "small muted", textContent: `connected ${clock(c.connectedAt)} · ${c.calls} call${c.calls === 1 ? "" : "s"}` }),
+      ),
   );
-  $("denied-block").hidden = !s.denied.length;
-  $("denied-list").replaceChildren(
-    ...s.denied.map((name) => el("li", { class: "item" }, el("span", { class: "grow", textContent: name }), button("Forget", () => send("forget", { name })))),
+  $("blocked-block").hidden = !s.blocked.length;
+  syncList(
+    $("blocked-list"),
+    s.blocked,
+    (name) => name,
+    (name) => el("li", { class: "item" }, el("span", { class: "grow", textContent: name }), button("Unblock", () => send("unblock", { name }))),
   );
 }
 
@@ -108,14 +130,18 @@ function renderLog(s) {
   const seen = new Map();
   for (const x of s.sessions) seen.set(x.id, x.label);
   for (const e of s.log) if (!seen.has(e.session)) seen.set(e.session, e.sessionLabel);
-  filter.replaceChildren(el("option", { value: "", textContent: "All sessions" }), ...[...seen].map(([id, label]) => el("option", { value: id, textContent: label })));
-  filter.value = seen.has(current) ? current : "";
+  // Rebuilt only when the sessions change, so an open dropdown isn't closed by every call.
+  const options = [el("option", { value: "", textContent: "All sessions" }), ...[...seen].map(([id, label]) => el("option", { value: id, textContent: label }))];
+  if (options.length !== filter.options.length || options.some((o, i) => !o.isEqualNode(filter.options[i]))) {
+    filter.replaceChildren(...options);
+    filter.value = seen.has(current) ? current : "";
+  }
 
   const entries = filteredLog().slice(-LOG_SHOWN).reverse();
   $("log-empty").hidden = !!entries.length;
   $("log").replaceChildren(
     ...entries.map((e) => {
-      const time = new Date(e.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      const time = clock(e.time);
       const what = [e.tool + (e.action ? `: ${e.action}` : ""), e.tabId != null ? `tab ${e.tabId}` : null, e.origin, e.detail].filter(Boolean).join(" · ");
       return el(
         "li",
@@ -134,7 +160,6 @@ function render(s) {
   $("status").textContent = statusText(s);
   const anyPaused = s.pauseNew || s.sessions.some((x) => x.paused);
   $("resume-all").hidden = !anyPaused;
-  renderApprovals(s);
   renderSessions(s);
   renderClients(s);
   renderLog(s);

@@ -225,7 +225,7 @@ try {
     mcpClientId = ev.client.id;
   });
 
-  await test("in-flight MCP call fails with a clear error when the client is revoked", async () => {
+  await test("in-flight MCP call fails with a clear error when the user disconnects the client", async () => {
     const pCall = mcp.request("tools/call", { name: "get_page_text", arguments: { tabId: 1 } });
     await expectHost("in-flight call", isCall("get_page_text"));
     toHost({ type: "disconnect_client", clientId: mcpClientId });
@@ -261,7 +261,7 @@ try {
     assert.match(logText, /connected: raw 0 pid=4242 cwd=\/raw/);
     assert.match(logText, /connected: ffctl pid=\d+ cwd=/);
     assert.match(logText, /disconnected: test-client/);
-    assert.match(logText, /revoked by extension/);
+    assert.match(logText, /disconnected by the user in Firefox/);
     assert.match(logText, /malformed line \(\d+ chars\)/);
     assert.doesNotMatch(logText, /this is not json/);
     assert.match(logText, /malformed extension message/);

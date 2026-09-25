@@ -59,8 +59,10 @@ component. That is browser-wide and binary. It does not say which program is dri
 it may touch, or how to stop it. `navigator.webdriver` tells pages, not the person. BiDi has
 nothing for "who is the client", "ask the user before this action", or "the user took over,
 pause". The bridge's socket protocol has each client send its name, version, pid and working
-directory in its first message, so the extension can show it and the user can revoke it. That is
-the shape the platform needs.
+directory in its first message. The extension doesn't ask before a client's calls and doesn't
+pause an agent when the user switches to its tab; instead it lists every connected client and
+what it did, and the user can stop all sessions or disconnect a client and block its name. That
+is the shape the platform needs.
 
 ### Background tabs that keep rendering
 
@@ -102,18 +104,16 @@ Standardize:
   every browser's UI something to show.
 - **Scoped sessions** limited to a user context or a set of top-level contexts. It is the
   protocol half of attaching to a live browser safely.
-- **A "paused by user" error and event.** Clients need a standard way to learn that a person
-  took control, whatever the browser's UI looks like.
+- **"Paused by user" and "disconnected by user" errors and events.** Clients need a standard
+  way to learn that a person stopped or cut them off, whatever the browser's UI looks like.
 
 Keep Firefox-only (browser UI and policy, where Firefox can lead):
 
 - **Toolbar stop button.** One click (or a shortcut) pauses every agent session and answers
   their pending calls; the UI belongs to the browser.
-- **Takeover pause.** Switching to an agent's tab pauses that agent until the user resumes it.
-  The trigger rule is a product decision; the resulting event is the standard part.
-- **Per-client consent.** The first call from a client name the user hasn't allowed waits for
-  the user, who sees the identity it reported and can revoke it later. How and when to ask is
-  policy.
+- **Client list and Disconnect.** The user sees every connected client with the identity it
+  reported and its call count, and can disconnect one and block its name. Whether to also ask
+  before a client's first call, or pause when the user switches to an agent's tab, is policy.
 - **Activity log.** A per-client record of what was done in which tab, readable by the user.
   The format and retention are Firefox's call.
 - **Agent tab groups and visible cursor.** Showing where the agent works and points is UX and

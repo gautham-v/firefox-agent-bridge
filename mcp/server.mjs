@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// MCP server for Claude Code (stdio). Forwards tool calls to the Firefox extension through the
-// native host's Unix socket. One process per Claude Code session; the session id keeps each
-// session in its own tab group.
+// MCP server (stdio) for any MCP client, such as Claude Code or Codex. Forwards tool calls to
+// the Firefox extension through the native host's Unix socket. One process per agent session;
+// the session id keeps each session in its own tab group.
 
 import fs from "node:fs";
 import net from "node:net";
@@ -19,14 +19,14 @@ const VERSION = "0.1.0";
 
 const tabId = (what = "Tab ID to act on") => ({
   type: "number",
-  description: `${what}. Must be a tab in this session's Claude tab group. Use tabs_context_mcp first if you don't have a valid tab ID.`,
+  description: `${what}. Must be a tab in the agent's tab group. Use tabs_context_mcp first if you don't have a valid tab ID.`,
 });
 
 const TOOLS = [
   {
     name: "tabs_context_mcp",
     description:
-      "Get the tabs in this session's Claude tab group in Firefox. You must call this at least once before other browser tools so you know which tabs exist. Each new conversation should use its own tab (tabs_create_mcp) rather than reusing tabs, unless the user asks.",
+      "Get the tabs in the agent's tab group in Firefox. You must call this at least once before other browser tools so you know which tabs exist. Each new conversation should use its own tab (tabs_create_mcp) rather than reusing tabs, unless the user asks.",
     inputSchema: {
       type: "object",
       properties: {
@@ -37,12 +37,12 @@ const TOOLS = [
   {
     name: "tabs_create_mcp",
     description:
-      "Open a new background tab in this session's Claude tab group. Tabs open without taking focus, so the user can keep working. Close tabs you create with tabs_close_mcp when done, unless the user wants them kept.",
+      "Open a new background tab in the agent's tab group. Tabs open without taking focus, so the user can keep working. Close tabs you create with tabs_close_mcp when done, unless the user wants them kept.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "tabs_close_mcp",
-    description: "Close a tab in this session's Claude tab group.",
+    description: "Close a tab in the agent's tab group.",
     inputSchema: { type: "object", properties: { tabId: { type: "integer", description: "The tab to close." } }, required: ["tabId"] },
   },
   {
@@ -210,7 +210,7 @@ function connectBridge() {
       reject(err);
     };
     socket.on("error", fail);
-    socket.once("close", () => fail(new Error("Firefox closed the connection (the browser quit, or access was revoked).")));
+    socket.once("close", () => fail(new Error("Firefox closed the connection (the browser quit, or the user disconnected this client in the Firefox Agent Bridge popup).")));
   });
   bridge = attempt;
   return bridge;
@@ -270,7 +270,7 @@ async function handle(msg) {
         capabilities: { tools: {} },
         serverInfo: { name: "firefox-agent-bridge", version: VERSION },
         instructions:
-          "Browser tools for Firefox Developer Edition. Tabs live in a per-session 'Claude' tab group and run in the background; input is trusted and never moves the user's cursor.",
+          "Browser tools for Firefox Developer Edition. Tabs live in the agent's own per-session tab group and run in the background; input is trusted and never moves the user's cursor.",
       };
     }
     case "tools/list":

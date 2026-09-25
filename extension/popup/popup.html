@@ -12,16 +12,11 @@
       <h1>Firefox Agent Bridge</h1>
       <p id="status" class="muted">Idle</p>
     </div>
-    <button id="stop" class="danger">Stop</button>
+    <!-- Resume all goes left of Stop, so Stop doesn't move under the cursor when it appears. -->
     <button id="resume-all" hidden>Resume all</button>
+    <button id="stop" class="danger">Stop</button>
   </header>
   <p class="muted small" id="shortcut"></p>
-
-  <section id="approvals" hidden>
-    <h2>Waiting for you</h2>
-    <p class="muted small">Client names are self-reported by the program that connects. Check the process id and folder before you allow it.</p>
-    <ul id="approval-list"></ul>
-  </section>
 
   <section id="sessions-section" hidden>
     <h2>Sessions</h2>
@@ -29,12 +24,13 @@
   </section>
 
   <section>
-    <h2>Allowed clients</h2>
-    <ul id="allowed-list"></ul>
-    <p id="allowed-empty" class="muted small">None yet. You'll be asked the first time a client connects.</p>
-    <div id="denied-block" hidden>
-      <h3>Denied until Firefox restarts</h3>
-      <ul id="denied-list"></ul>
+    <h2>Clients</h2>
+    <p class="muted small">Names are self-reported by the program that connects; check the process id and folder.</p>
+    <ul id="client-list"></ul>
+    <p id="clients-empty" class="muted small">No client connected.</p>
+    <div id="blocked-block" hidden>
+      <h3>Disconnected until you unblock them or Firefox restarts</h3>
+      <ul id="blocked-list"></ul>
     </div>
   </section>
 

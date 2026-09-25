@@ -63,7 +63,6 @@ button {
 }
 button:hover { background: var(--button-hover); }
 button.danger { background: var(--danger); border-color: var(--danger); color: var(--bg); font-weight: 600; }
-button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
 button.small { padding: 1px 8px; font-size: 12px; }
 
 select { font: inherit; max-width: 180px; background: var(--button); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; }
@@ -74,9 +73,10 @@ select { font: inherit; max-width: 180px; background: var(--button); color: var(
 li.item { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
 li.item > .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
-li.approval { padding: 6px 0; border-bottom: 1px solid var(--line); }
-li.approval:last-child { border-bottom: 0; }
-li.approval .buttons { display: flex; gap: 6px; margin-top: 4px; }
+li.client { padding: 4px 0; border-bottom: 1px solid var(--line); }
+li.client:last-child { border-bottom: 0; }
+li.client .item { display: flex; align-items: center; gap: 6px; }
+li.client .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .mono { font-family: ui-monospace, monospace; font-size: 11px; overflow-wrap: anywhere; }
 
 .state { font-size: 11px; font-weight: 600; }
@@ -89,4 +89,4 @@ li.approval .buttons { display: flex; gap: 6px; margin-top: 4px; }
 #log li .err { grid-column: 2 / 4; color: var(--muted); overflow-wrap: anywhere; }
 .outcome-ok { color: var(--ok); }
 .outcome-error, .outcome-stopped { color: var(--danger); }
-.outcome-blocked-paused, .outcome-blocked-not-allowed { color: var(--warn); }
+.outcome-blocked-paused, .outcome-blocked-disconnected { color: var(--warn); }

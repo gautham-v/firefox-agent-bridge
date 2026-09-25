@@ -1,8 +1,8 @@
 "use strict";
 
-// Receives tool calls from Claude Code (via the native host) and runs them against tabs in
-// the calling session's "Claude" tab group. Page work goes through browser.claudePage, the
-// privileged experiment API in experiment/.
+// Receives tool calls from MCP clients (via the native host) and runs them against tabs in
+// the calling session's tab group, named after its client ("Claude", "Codex", ...). Page work
+// goes through browser.claudePage, the privileged experiment API in experiment/.
 
 const NATIVE_HOST = "firefox_agent_bridge";
 const GROUP_COLORS = ["orange", "blue", "purple", "cyan", "green", "pink", "yellow", "red"];
@@ -29,10 +29,9 @@ function connect() {
   port.postMessage({ type: "hello", version: browser.runtime.getManifest().version });
 }
 
-// Pause state, client approval and the activity log live in control.js; every call passes
+// Pause state, blocked clients and the activity log live in control.js; every call passes
 // through it before runTool.
 const control = createControl({
-  storage: browser.storage.local,
   send: (msg) => port?.postMessage(msg),
   onChange: scheduleRefresh,
   onPauseChange: (session, isPaused) => setGroupPausedTitle(session, isPaused).catch(() => {}),
@@ -79,7 +78,45 @@ async function targetWindowId() {
   return win.id;
 }
 
-async function createSessionTab(session, url = "about:blank") {
+// Tab group title for a client: a few known agents by name, otherwise the first word of the
+// self-reported name.
+function clientLabel(name) {
+  const n = String(name ?? "").trim();
+  const lower = n.toLowerCase();
+  if (lower.includes("claude")) return "Claude";
+  if (lower.includes("codex")) return "Codex";
+  if (lower.includes("ffctl")) return "ffctl";
+  const word = n.split(/[\s\-_./:@]+/).find(Boolean) ?? "";
+  return (word.charAt(0).toUpperCase() + word.slice(1)).slice(0, 16) || "Agent";
+}
+
+// Every label this extension has titled a group with, kept across restarts so
+// closeOrphanGroups can find its own groups whatever client made them. "Claude" covers groups
+// from versions that always used it.
+const LABELS_KEY = "groupLabels";
+const knownLabels = new Set(["Claude"]);
+const labelsLoaded = browser.storage.local
+  .get(LABELS_KEY)
+  .then((got) => {
+    for (const l of got?.[LABELS_KEY] ?? []) knownLabels.add(l);
+  })
+  .catch(() => {});
+
+async function rememberLabel(label) {
+  await labelsLoaded;
+  if (knownLabels.has(label)) return;
+  knownLabels.add(label);
+  await browser.storage.local.set({ [LABELS_KEY]: [...knownLabels] }).catch(() => {});
+}
+
+function newSessionEntry(client) {
+  const base = clientLabel(client);
+  const same = [...sessions.values()].filter((s) => s.base === base).length;
+  const n = sessions.size + 1;
+  return { base, label: same ? `${base} ${same + 1}` : base, color: GROUP_COLORS[(n - 1) % GROUP_COLORS.length] };
+}
+
+async function createSessionTab(session, client, url = "about:blank") {
   let groupId = await sessionGroupId(session);
   const windowId = groupId != null ? (await browser.tabGroups.get(groupId)).windowId : await targetWindowId();
   const tab = await browser.tabs.create({ url, active: false, windowId });
@@ -87,10 +124,10 @@ async function createSessionTab(session, url = "about:blank") {
     await browser.tabs.group({ tabIds: [tab.id], groupId });
   } else {
     groupId = await browser.tabs.group({ tabIds: [tab.id], createProperties: { windowId } });
-    const n = sessions.size + 1;
-    const s = sessions.get(session) ?? { label: n === 1 ? "Claude" : `Claude ${n}`, color: GROUP_COLORS[(n - 1) % GROUP_COLORS.length] };
+    const s = sessions.get(session) ?? newSessionEntry(client);
     s.groupId = groupId;
     sessions.set(session, s);
+    await rememberLabel(s.base);
     await browser.tabGroups.update(groupId, { title: s.label, color: s.color });
   }
   try {
@@ -124,16 +161,17 @@ async function requireTab(session, tabId) {
   }
   const groupId = await sessionGroupId(session);
   if (groupId == null || tab.groupId !== groupId) {
-    throw new Error(`Tab ${tabId} is not in this session's Claude tab group. Use tabs_create_mcp for a new tab, or drag the tab into the group.`);
+    const label = sessions.get(session)?.label;
+    throw new Error(`Tab ${tabId} is not in this session's tab group${label ? ` ("${label}")` : ""}. Use tabs_create_mcp for a new tab, or drag the tab into the group.`);
   }
   await keepActive(tabId);
   return tab;
 }
 
-async function tabContext(session, createIfEmpty) {
+async function tabContext(session, createIfEmpty, client) {
   let tabs = await sessionTabs(session);
   if (!tabs.length && createIfEmpty) {
-    await createSessionTab(session);
+    await createSessionTab(session, client);
     tabs = await sessionTabs(session);
   }
   const s = sessions.get(session);
@@ -172,7 +210,7 @@ async function waitForLoad(tabId) {
 
 // ---------------------------------------------------------------------------------------------
 // Screenshots. The image is scaled so its long edge and pixel count stay inside what the model
-// sees without resizing; coordinates Claude reads off it are mapped back to CSS pixels here.
+// sees without resizing; coordinates the agent reads off it are mapped back to CSS pixels here.
 
 function fitScale(width, height) {
   return Math.min(1, SCREENSHOT_MAX_EDGE / Math.max(width, height), Math.sqrt(SCREENSHOT_MAX_PIXELS / (width * height)));
@@ -322,13 +360,13 @@ async function computer(session, args) {
   }
 }
 
-async function runTool(session, tool, args) {
+async function runTool(session, tool, args, client) {
   switch (tool) {
     case "tabs_context_mcp":
-      return [text(JSON.stringify(await tabContext(session, args.createIfEmpty), null, 2))];
+      return [text(JSON.stringify(await tabContext(session, args.createIfEmpty, client), null, 2))];
 
     case "tabs_create_mcp": {
-      const tab = await createSessionTab(session);
+      const tab = await createSessionTab(session, client);
       return [text(`Created tab ${tab.id} in the ${sessions.get(session).label} tab group.\n` + JSON.stringify(await tabContext(session), null, 2))];
     }
 
@@ -344,7 +382,7 @@ async function runTool(session, tool, args) {
       let context = null;
       if (tabId == null) {
         if (url === "back" || url === "forward") throw new Error("tabId is required for back/forward.");
-        context = await tabContext(session, true);
+        context = await tabContext(session, true, client);
         tabId = context.availableTabs[0].tabId;
       }
       await requireTab(session, tabId);
@@ -416,18 +454,14 @@ async function isSessionTab(tab, groups) {
 // Tabs a session page just opened; if Firefox activates one of these, focus is handed back.
 const justOpened = new Set();
 
-// Tabs this extension activated itself, so onActivated doesn't read them as the user taking over.
-const selfActivated = new Set();
-
 async function restoreUserTab(windowId, tabId) {
   const back = userTabByWindow.get(windowId);
   if (back == null || back === tabId) return;
-  selfActivated.add(back);
-  setTimeout(() => selfActivated.delete(back), 1000);
   await browser.tabs.update(back, { active: true }).catch(() => {});
 }
 
-browser.tabs.onActivated.addListener(async ({ tabId, previousTabId, windowId }) => {
+// Looking at a session tab doesn't pause anything; only Stop does.
+browser.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
   if (justOpened.has(tabId)) return restoreUserTab(windowId, tabId);
   const tab = await browser.tabs.get(tabId).catch(() => null);
   if (!tab) return;
@@ -435,19 +469,10 @@ browser.tabs.onActivated.addListener(async ({ tabId, previousTabId, windowId }) 
     // Activated before onCreated ran for it: same case as above.
     // Ungrouped tabs have groupId -1.
     if (!(tab.groupId >= 0) && recentlyOpened(tab)) return restoreUserTab(windowId, tabId);
-    // The user switched to a session tab: they are taking over, so that session stops. With no
-    // previous tab, the active tab was closed and Firefox picked this one, which isn't a choice.
-    const session = sessionForGroup(tab.groupId);
-    if (session != null && previousTabId != null && !recentlyOpened(tab) && !selfActivated.has(tabId)) control.pauseSession(session, "takeover");
     return;
   }
   userTabByWindow.set(windowId, tabId);
 });
-
-function sessionForGroup(groupId) {
-  for (const [session, s] of sessions) if (s.groupId != null && s.groupId === groupId) return session;
-  return null;
-}
 
 // Tabs a session page opened a moment ago get activated by Firefox, not by the user.
 const createdAt = new Map(); // tab id -> time onCreated saw it
@@ -472,14 +497,28 @@ browser.tabs.onCreated.addListener(async (tab) => {
   if (current?.active) await restoreUserTab(tab.windowId, tab.id);
 });
 
-// Sessions don't survive a browser restart, so Claude tab groups brought back by session
-// restore belong to no one. They often hold work left for him (a staged form on the Needs you
-// list), so they are kept, renamed and greyed out; he closes them when done.
+// Sessions don't survive a browser restart, so session tab groups brought back by session
+// restore belong to no one. They often hold work left for the user (a staged form), so they
+// are kept, renamed "<label> (earlier)" and greyed out; the user closes them when done.
+// A group is ours if its title is a known label, optionally numbered and "(paused)".
+function orphanBase(title) {
+  const base = String(title ?? "")
+    .replace(/ \(paused\)$/, "")
+    .replace(/ \d+$/, "");
+  return knownLabels.has(base) ? base : null;
+}
+
 async function closeOrphanGroups() {
+  await labelsLoaded;
+  const live = await sessionGroupIds();
   for (const g of await browser.tabGroups.query({})) {
-    if (/^Claude( \d+)?( \(paused\))?$/.test(g.title ?? "")) await browser.tabGroups.update(g.id, { title: "Claude (earlier)", color: "grey" });
+    const base = orphanBase(g.title);
+    if (base && !live.has(g.id)) await browser.tabGroups.update(g.id, { title: `${base} (earlier)`, color: "grey" });
   }
 }
+
+// Per-client consent was replaced by Disconnect/Unblock; drop what older versions stored.
+browser.storage.local.remove("allowedClients").catch(() => {});
 
 closeOrphanGroups().catch(() => {});
 
@@ -518,7 +557,6 @@ function refresh() {
   refreshQueued = false;
   const b = control.badge();
   const titles = {
-    approval: "Firefox Agent Bridge: a client is waiting for your approval",
     acting: "Firefox Agent Bridge: an agent is acting in Firefox",
     paused: "Firefox Agent Bridge: paused",
     idle: "Firefox Agent Bridge",
@@ -540,10 +578,8 @@ const popupCommands = {
   stop: () => control.stopAll(),
   resumeAll: () => control.resumeAll(),
   resume: (m) => control.resume(m.session),
-  allow: (m) => control.allow(m.name),
-  deny: (m) => control.deny(m.name),
-  revoke: (m) => control.revoke(m.name),
-  forget: (m) => control.forget(m.name),
+  disconnect: (m) => control.disconnect(m.clientId),
+  unblock: (m) => control.unblock(m.name),
   clearLog: () => control.clearLog(),
 };
 
