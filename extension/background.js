@@ -23,21 +23,25 @@ function connect() {
   port.onMessage.addListener(onRequest);
   port.onDisconnect.addListener(() => {
     port = null;
+    control.hostDisconnected();
     setTimeout(connect, 2000);
   });
   port.postMessage({ type: "hello", version: browser.runtime.getManifest().version });
 }
 
-async function onRequest(msg) {
+// Pause state, client approval and the activity log live in control.js; every call passes
+// through it before runTool.
+const control = createControl({
+  storage: browser.storage.local,
+  send: (msg) => port?.postMessage(msg),
+  onChange: scheduleRefresh,
+  onPauseChange: (session, isPaused) => setGroupPausedTitle(session, isPaused).catch(() => {}),
+});
+
+function onRequest(msg) {
+  if (msg.type === "client") return control.clientEvent(msg);
   if (msg.type !== "call") return;
-  let reply;
-  try {
-    const content = await runTool(msg.session, msg.tool, msg.args ?? {});
-    reply = { id: msg.id, result: { content } };
-  } catch (e) {
-    reply = { id: msg.id, result: { content: [text(e?.message ?? String(e))], isError: true } };
-  }
-  port?.postMessage(reply);
+  control.handleCall(msg, runTool, async (tabId) => (await browser.tabs.get(tabId)).url);
 }
 
 const text = (t) => ({ type: "text", text: t });
@@ -412,25 +416,49 @@ async function isSessionTab(tab, groups) {
 // Tabs a session page just opened; if Firefox activates one of these, focus is handed back.
 const justOpened = new Set();
 
+// Tabs this extension activated itself, so onActivated doesn't read them as the user taking over.
+const selfActivated = new Set();
+
 async function restoreUserTab(windowId, tabId) {
   const back = userTabByWindow.get(windowId);
-  if (back != null && back !== tabId) await browser.tabs.update(back, { active: true }).catch(() => {});
+  if (back == null || back === tabId) return;
+  selfActivated.add(back);
+  setTimeout(() => selfActivated.delete(back), 1000);
+  await browser.tabs.update(back, { active: true }).catch(() => {});
 }
 
-browser.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
+browser.tabs.onActivated.addListener(async ({ tabId, previousTabId, windowId }) => {
   if (justOpened.has(tabId)) return restoreUserTab(windowId, tabId);
   const tab = await browser.tabs.get(tabId).catch(() => null);
   if (!tab) return;
   if (await isSessionTab(tab, await sessionGroupIds())) {
     // Activated before onCreated ran for it: same case as above.
-    if (tab.openerTabId != null && Date.now() - (tab.lastAccessed ?? 0) < 3000 && !tab.groupId) return restoreUserTab(windowId, tabId);
+    // Ungrouped tabs have groupId -1.
+    if (!(tab.groupId >= 0) && recentlyOpened(tab)) return restoreUserTab(windowId, tabId);
+    // The user switched to a session tab: they are taking over, so that session stops. With no
+    // previous tab, the active tab was closed and Firefox picked this one, which isn't a choice.
+    const session = sessionForGroup(tab.groupId);
+    if (session != null && previousTabId != null && !recentlyOpened(tab) && !selfActivated.has(tabId)) control.pauseSession(session, "takeover");
     return;
   }
   userTabByWindow.set(windowId, tabId);
 });
 
+function sessionForGroup(groupId) {
+  for (const [session, s] of sessions) if (s.groupId != null && s.groupId === groupId) return session;
+  return null;
+}
+
+// Tabs a session page opened a moment ago get activated by Firefox, not by the user.
+const createdAt = new Map(); // tab id -> time onCreated saw it
+function recentlyOpened(tab) {
+  return tab.openerTabId != null && Date.now() - (createdAt.get(tab.id) ?? 0) < 3000;
+}
+
 browser.tabs.onCreated.addListener(async (tab) => {
   if (tab.openerTabId == null) return;
+  createdAt.set(tab.id, Date.now());
+  setTimeout(() => createdAt.delete(tab.id), 3000);
   const opener = await browser.tabs.get(tab.openerTabId).catch(() => null);
   if (!opener || !(await sessionGroupIds()).has(opener.groupId)) return;
   const list = openedBy.get(tab.openerTabId) ?? [];
@@ -449,14 +477,91 @@ browser.tabs.onCreated.addListener(async (tab) => {
 // list), so they are kept, renamed and greyed out; he closes them when done.
 async function closeOrphanGroups() {
   for (const g of await browser.tabGroups.query({})) {
-    if (/^Claude( \d+)?$/.test(g.title ?? "")) await browser.tabGroups.update(g.id, { title: "Claude (earlier)", color: "grey" });
+    if (/^Claude( \d+)?( \(paused\))?$/.test(g.title ?? "")) await browser.tabGroups.update(g.id, { title: "Claude (earlier)", color: "grey" });
   }
 }
 
 closeOrphanGroups().catch(() => {});
 
+// ---------------------------------------------------------------------------------------------
+// Toolbar button, Stop shortcut and popup
+
+async function setGroupPausedTitle(session, isPaused) {
+  const s = sessions.get(session);
+  const groupId = await sessionGroupId(session);
+  if (!s || groupId == null) return;
+  await browser.tabGroups.update(groupId, { title: isPaused ? `${s.label} (paused)` : s.label });
+}
+
+const popupPorts = new Set();
+let refreshQueued = false;
+let badgeTimer = null;
+
+function scheduleRefresh() {
+  if (refreshQueued) return;
+  refreshQueued = true;
+  setTimeout(refresh, 50);
+}
+
+function sessionLabel(id) {
+  return sessions.get(id)?.label ?? `session ${String(id).slice(0, 8)}`;
+}
+
+function popupState() {
+  const state = control.snapshot();
+  for (const s of state.sessions) s.label = sessionLabel(s.id);
+  for (const e of state.log) e.sessionLabel = sessionLabel(e.session);
+  return state;
+}
+
+function refresh() {
+  refreshQueued = false;
+  const b = control.badge();
+  const titles = {
+    approval: "Firefox Agent Bridge: a client is waiting for your approval",
+    acting: "Firefox Agent Bridge: an agent is acting in Firefox",
+    paused: "Firefox Agent Bridge: paused",
+    idle: "Firefox Agent Bridge",
+  };
+  browser.browserAction.setBadgeText({ text: b.text });
+  if (b.color) browser.browserAction.setBadgeBackgroundColor({ color: b.color });
+  browser.browserAction.setBadgeTextColor?.({ color: "#ffffff" });
+  browser.browserAction.setTitle({ title: titles[b.state] });
+  // "Acting" lasts a few seconds past the last call; look again once it would lapse.
+  clearTimeout(badgeTimer);
+  if (b.state === "acting") badgeTimer = setTimeout(scheduleRefresh, control.RECENT_MS);
+  if (popupPorts.size) {
+    const state = popupState();
+    for (const p of popupPorts) p.postMessage({ type: "state", state });
+  }
+}
+
+const popupCommands = {
+  stop: () => control.stopAll(),
+  resumeAll: () => control.resumeAll(),
+  resume: (m) => control.resume(m.session),
+  allow: (m) => control.allow(m.name),
+  deny: (m) => control.deny(m.name),
+  revoke: (m) => control.revoke(m.name),
+  forget: (m) => control.forget(m.name),
+  clearLog: () => control.clearLog(),
+};
+
+browser.runtime.onConnect.addListener((p) => {
+  if (p.name !== "popup") return;
+  popupPorts.add(p);
+  p.onDisconnect.addListener(() => popupPorts.delete(p));
+  p.onMessage.addListener((m) => popupCommands[m?.cmd]?.(m));
+  p.postMessage({ type: "state", state: popupState() });
+});
+
+browser.commands.onCommand.addListener((name) => {
+  if (name === "stop-agents") control.stopAll();
+});
+
 browser.tabs.query({ active: true }).then((tabs) => {
   for (const t of tabs) userTabByWindow.set(t.windowId, t.id);
 });
 
+refresh();
 connect();

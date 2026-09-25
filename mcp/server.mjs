@@ -171,33 +171,48 @@ const TOOLS = [
 let bridge = null;
 let nextId = 1;
 const inflight = new Map();
+let clientInfo = { name: "unknown MCP client", version: null }; // from initialize's clientInfo
 
 function connectBridge() {
   if (bridge) return bridge;
-  bridge = new Promise((resolve, reject) => {
+  const attempt = new Promise((resolve, reject) => {
     const socket = net.createConnection(SOCKET);
     let buf = "";
     socket.setEncoding("utf8");
-    socket.once("connect", () => resolve(socket));
+    socket.once("connect", () => {
+      // Identifies this client to Firefox; sent first on every connection, reconnects included.
+      socket.write(JSON.stringify({ type: "hello", client: clientInfo, pid: process.pid, cwd: process.cwd() }) + "\n");
+      resolve(socket);
+    });
     socket.on("data", (chunk) => {
       buf += chunk;
       let nl;
       while ((nl = buf.indexOf("\n")) >= 0) {
-        const msg = JSON.parse(buf.slice(0, nl));
+        const line = buf.slice(0, nl);
         buf = buf.slice(nl + 1);
+        let msg;
+        try {
+          msg = JSON.parse(line);
+        } catch {
+          continue;
+        }
         inflight.get(msg.id)?.resolve(msg.result);
         inflight.delete(msg.id);
       }
     });
+    let failed = false;
     const fail = (err) => {
-      bridge = null;
+      if (failed) return;
+      failed = true;
+      if (bridge === attempt) bridge = null;
       for (const p of inflight.values()) p.reject(err);
       inflight.clear();
       reject(err);
     };
-    socket.once("error", fail);
-    socket.once("close", () => fail(new Error("Firefox closed the connection.")));
+    socket.on("error", fail);
+    socket.once("close", () => fail(new Error("Firefox closed the connection (the browser quit, or access was revoked).")));
   });
+  bridge = attempt;
   return bridge;
 }
 
@@ -245,7 +260,11 @@ const out = (msg) => process.stdout.write(JSON.stringify(msg) + "\n");
 async function handle(msg) {
   const { id, method, params } = msg;
   switch (method) {
-    case "initialize":
+    case "initialize": {
+      const info = params?.clientInfo;
+      if (info && typeof info.name === "string" && info.name) {
+        clientInfo = { name: info.name, version: typeof info.version === "string" ? info.version : null };
+      }
       return {
         protocolVersion: params?.protocolVersion ?? "2025-06-18",
         capabilities: { tools: {} },
@@ -253,6 +272,7 @@ async function handle(msg) {
         instructions:
           "Browser tools for Firefox Developer Edition. Tabs live in a per-session 'Claude' tab group and run in the background; input is trusted and never moves the user's cursor.",
       };
+    }
     case "tools/list":
       return { tools: TOOLS };
     case "tools/call": {

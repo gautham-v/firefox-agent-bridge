@@ -61,11 +61,43 @@ Differences from Chrome:
   frame.
 - There is no `gif_creator`, console reading, network reading or shortcuts.
 
+## Safety controls
+
+The toolbar button shows what agents are doing, and its popup is where you control them.
+
+- **Badge.** `?` (amber) means a client is waiting for your approval, `RUN` (blue) means an agent
+  acted in the last few seconds, and `||` (grey) means sessions are paused. No badge means idle.
+- **Stop.** The Stop button in the popup, or **Alt+Shift+X** from anywhere in Firefox (rebind it
+  in about:addons), pauses every session. Waiting and running calls are answered at once, and
+  sessions that haven't started yet start paused. Resume each session from the popup, or all of
+  them at once. Stop doesn't undo work already under way: a click or page load that has started
+  still finishes, but its result is dropped.
+- **Takeover.** Switching to a tab in a session's group means you're taking over, so that
+  session pauses and its group is renamed "Claude (paused)". Tabs the extension or a session
+  page brings forward don't count. Resume it from the popup when you're done.
+- **Per-client consent.** Each client connecting to the socket announces a name, version, pid and
+  working directory. The first call from a name you haven't allowed waits up to 45s for you to
+  choose Allow or Deny in the popup, then fails. Allowed names are remembered. Denied names stay
+  denied until Firefox restarts (or you click Forget). Revoke removes a name and disconnects its
+  clients. The name is self-reported, so check the pid and folder before you allow it.
+- **Activity log.** The popup lists the last 100 of up to 500 calls: time, session, client,
+  tool, action, tab, page origin, outcome and duration. It can be filtered by session, copied as
+  JSON, or cleared, and it is lost when Firefox restarts. It never records typed text, key
+  sequences, form values, script source, find queries, file paths or full URLs, only their
+  length or count. Error messages have those values cut out, and script errors keep only the
+  error type.
+
+Paused and refused calls fail with a message telling the agent to ask you to resume or allow it.
+
 ## Security
 
 - Signature checks are off for the whole profile, so use a separate Developer Edition profile.
-- Anything running as your user can reach `~/.firefox-agent-bridge/bridge.sock` (mode 0600) and
-  drive the browser with your logins.
+- Your consent in the popup is the main control. `~/.firefox-agent-bridge/bridge.sock` is mode
+  0600 in a 0700 directory, so only processes running as your user can connect, and each one has
+  to be allowed by name before its calls run.
+- There is no shared-secret token on the socket. Any process that can reach the socket runs as
+  your user and could read a token file just as easily, so a token would add nothing. Names are
+  self-reported, so an allowed name can be reused by another program running as you.
 - `javascript_tool` runs in the page and ignores its CSP.
 
 ## Install
@@ -91,6 +123,10 @@ The install script:
   the experiment schema, and content processes cache the actor modules.
 - Test a single tool without a Claude session:
   `node scripts/ffctl.mjs navigate '{"url":"example.com"}' my-session`
+- Run the tests without Firefox: `node scripts/test-bridge.mjs` starts the native host and plays
+  the extension's side against the MCP server, `ffctl` and raw socket clients, and
+  `node --test extension/test/*.test.js` runs the extension's policy and wiring tests against a
+  mocked `browser`.
 - Logs are in `~/.firefox-agent-bridge/host.log`. Screenshots saved with `save_to_disk` go to
   `~/.firefox-agent-bridge/screenshots/`.
 
@@ -103,6 +139,10 @@ The install script:
   `host.log` and the Browser Console first.
 - Sessions don't survive a browser restart. Claude tab groups that session restore brings back
   are kept, renamed "Claude (earlier)" and greyed out, so staged work survives; close them when done.
+
+## Further reading
+
+- [What WebDriver BiDi would need to cover this bridge](docs/bidi-gap-map.md)
 
 ## License
 

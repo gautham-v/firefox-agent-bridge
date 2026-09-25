@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light dark">
+  <title>Firefox Agent Bridge</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Firefox Agent Bridge</h1>
+      <p id="status" class="muted">Idle</p>
+    </div>
+    <button id="stop" class="danger">Stop</button>
+    <button id="resume-all" hidden>Resume all</button>
+  </header>
+  <p class="muted small" id="shortcut"></p>
+
+  <section id="approvals" hidden>
+    <h2>Waiting for you</h2>
+    <p class="muted small">Client names are self-reported by the program that connects. Check the process id and folder before you allow it.</p>
+    <ul id="approval-list"></ul>
+  </section>
+
+  <section id="sessions-section" hidden>
+    <h2>Sessions</h2>
+    <ul id="session-list"></ul>
+  </section>
+
+  <section>
+    <h2>Allowed clients</h2>
+    <ul id="allowed-list"></ul>
+    <p id="allowed-empty" class="muted small">None yet. You'll be asked the first time a client connects.</p>
+    <div id="denied-block" hidden>
+      <h3>Denied until Firefox restarts</h3>
+      <ul id="denied-list"></ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="row">
+      <h2>Activity</h2>
+      <select id="filter" aria-label="Filter by session"><option value="">All sessions</option></select>
+    </div>
+    <div class="row buttons">
+      <button id="copy">Copy as JSON</button>
+      <button id="clear">Clear</button>
+      <span id="copied" class="muted small"></span>
+    </div>
+    <ol id="log"></ol>
+    <p id="log-empty" class="muted small">No calls yet.</p>
+  </section>
+
+  <script src="popup.js"></script>
+</body>
+</html>
