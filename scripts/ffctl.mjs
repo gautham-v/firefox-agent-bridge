@@ -13,11 +13,21 @@ if (!tool) {
   console.error("usage: ffctl.mjs <tool> '<json args>' [session]");
   process.exit(2);
 }
+let args;
+try {
+  args = JSON.parse(rawArgs);
+} catch (e) {
+  console.error(`ffctl: args are not valid JSON: ${e.message}`);
+  process.exit(2);
+}
 const dir = path.join(os.homedir(), ".firefox-agent-bridge");
 const socket = net.createConnection(path.join(dir, "bridge.sock"));
 let buf = "";
 socket.setEncoding("utf8");
-socket.on("connect", () => socket.write(JSON.stringify({ id: 1, session, tool, args: JSON.parse(rawArgs) }) + "\n"));
+socket.on("connect", () => {
+  socket.write(JSON.stringify({ type: "hello", client: { name: "ffctl", version: null }, pid: process.pid, cwd: process.cwd() }) + "\n");
+  socket.write(JSON.stringify({ id: 1, session, tool, args }) + "\n");
+});
 socket.on("data", (chunk) => {
   buf += chunk;
   const nl = buf.indexOf("\n");
@@ -34,6 +44,12 @@ socket.on("data", (chunk) => {
   }
   if (result.isError) process.exitCode = 1;
   socket.end();
+});
+socket.on("close", () => {
+  if (!buf.includes("\n")) {
+    console.error("bridge: connection closed before a reply (Firefox quit, or the client was disconnected in the popup?)");
+    process.exitCode = 1;
+  }
 });
 socket.on("error", (e) => {
   console.error("bridge:", e.message);

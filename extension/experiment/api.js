@@ -82,16 +82,26 @@ this.claudePage = class extends ExtensionAPI {
 
     // Runs op in the tab's top frame. When the child answers { descend: { id, args } } the
     // target lives in a child frame (possibly another process), so the op is re-sent there.
+    // A frame that answers { bubble } couldn't act (a scroll over a frame that can't scroll),
+    // so the op goes back to the frame that descended, with noDescend set.
     async function run(tabId, op, args) {
       await self.ready;
       const top = topContext(tabId);
       let bc = top;
       let current = args ?? {};
-      for (let hop = 0; hop <= MAX_FRAME_HOPS; hop++) {
+      const path = [];
+      for (let hop = 0; hop <= 2 * MAX_FRAME_HOPS; hop++) {
         const wg = bc?.currentWindowGlobal;
         if (!wg) throw new Error("The page is still loading (no window in this frame yet). Wait and retry.");
         const result = await wg.getActor(ACTOR).sendQuery(op, current);
+        if (result?.bubble) {
+          if (!path.length) return result.bubble;
+          [bc, current] = path.pop();
+          current = { ...current, noDescend: true };
+          continue;
+        }
         if (!result?.descend) return result;
+        path.push([bc, current]);
         bc = top.getAllBrowsingContextsInSubtree().find((c) => c.id === result.descend.id);
         current = { ...current, ...result.descend.args };
       }

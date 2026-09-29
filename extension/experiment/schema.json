@@ -1,7 +1,7 @@
 [
   {
     "namespace": "claudePage",
-    "description": "Privileged page access for Claude: trusted input, DOM reads, script evaluation and file inputs, all through a JSWindowActor.",
+    "description": "Privileged page access for the agent: trusted input, DOM reads, script evaluation and file inputs, all through a JSWindowActor.",
     "functions": [
       {
         "name": "call",

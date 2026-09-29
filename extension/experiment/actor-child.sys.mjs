@@ -657,7 +657,7 @@ function pressCursor(doc, down) {
   }
 }
 
-// Hidden while a screenshot is taken, so Claude sees the page as it is.
+// Hidden while a screenshot is taken, so the agent sees the page as it is.
 function cursorVisible(doc, { visible }) {
   const c = cursors.get(doc);
   if (c) c.arrow.style.visibility = visible ? "" : "hidden";
@@ -684,7 +684,7 @@ async function click(doc, args) {
     const descent = frameDescent(deepElementFromPoint(doc, args.x, args.y), args.x, args.y);
     if (descent) return descent;
   }
-  const { el, x, y } = pointTarget(doc, args);
+  let { el, x, y } = pointTarget(doc, args);
   const win = doc.defaultView;
   const button = args.button ?? 0;
   const buttons = button === 2 ? 2 : button === 1 ? 4 : 1;
@@ -693,6 +693,13 @@ async function click(doc, args) {
   const pointer = { ...base, pointerId: 1, pointerType: "mouse", isPrimary: true };
 
   await moveCursor(doc, x, y);
+  // The page may have re-rendered while the cursor moved. Like a real mouse, the click lands
+  // on whatever is at the point now; a ref that was replaced has to be looked up again.
+  if (!el.isConnected || !args.ref) {
+    if (args.ref) throw new Error(`${args.ref} was removed from the page before the click. Call find or read_page again.`);
+    el = deepElementFromPoint(doc, x, y);
+    if (!el) throw new Error("Nothing at that point any more; the page changed. Take a fresh screenshot.");
+  }
   pressCursor(doc, true);
   fire(win, el, "PointerEvent", "pointerover", { ...pointer, buttons: 0 });
   fire(win, el, "MouseEvent", "mouseover", { ...base, buttons: 0 });
@@ -781,13 +788,14 @@ function scroll(doc, args) {
   const x = args.x ?? win.innerWidth / 2;
   const y = args.y ?? win.innerHeight / 2;
   const el = deepElementFromPoint(doc, x, y);
-  const descent = args.x == null ? null : frameDescent(el, x, y);
+  const descent = args.x == null || args.noDescend ? null : frameDescent(el, x, y);
   if (descent) return descent;
   const vertical = direction === "up" || direction === "down";
   const sign = direction === "down" || direction === "right" ? 1 : -1;
   const delta = sign * amount * 100;
   const target = (el && scrollableAncestor(win, el, vertical)) || doc.scrollingElement || doc.documentElement;
-  if (el) {
+  // Coming back up from a frame, the wheel event already went to that frame's element.
+  if (el && !args.noDescend) {
     fire(win, el, "WheelEvent", "wheel", {
       ...at(win, x, y), deltaMode: 0,
       deltaX: vertical ? 0 : delta, deltaY: vertical ? delta : 0,
@@ -797,7 +805,10 @@ function scroll(doc, args) {
   target.scrollBy({ top: vertical ? delta : 0, left: vertical ? 0 : delta, behavior: "instant" });
   const after = vertical ? target.scrollTop : target.scrollLeft;
   const which = target === doc.scrollingElement ? "page" : target.tagName.toLowerCase();
-  return `Scrolled ${which} ${direction} by ${Math.round(Math.abs(after - before))}px`;
+  const text = `Scrolled ${which} ${direction} by ${Math.round(Math.abs(after - before))}px`;
+  // Like a real wheel, a frame that can't scroll any further passes the scroll to its parent.
+  if (after === before && win.browsingContext.parent) return { bubble: text };
+  return text;
 }
 
 function scrollTo(doc, { ref, frameScale = 1 }) {
