@@ -10,12 +10,6 @@ const ERROR_CHARS = 160;
 
 const RESUME_HINT = "Ask the user to resume it from the Firefox Agent Bridge toolbar button, then retry.";
 
-const BADGES = {
-  acting: { text: "RUN", color: "#1d4ed8" },
-  paused: { text: "||", color: "#4b5563" },
-  idle: { text: "", color: null },
-};
-
 function pageOrigin(url) {
   if (!url) return null;
   try {
@@ -264,24 +258,24 @@ function createControl({ send, onChange = () => {}, onPauseChange = () => {}, no
     onChange();
   }
 
-  // Sessions paused by Stop don't count as recently acting, so the badge shows the pause at once.
+  // Sessions paused by Stop don't count as recently acting, so the toolbar shows the pause at once.
   function isActing(t = now()) {
     for (const c of calls.values()) if (c.running) return true;
     for (const [session, last] of lastBySession) if (!paused.has(session) && t - last < RECENT_MS) return true;
     return false;
   }
 
-  function badge(t = now()) {
-    let state = "idle";
-    if (isActing(t)) state = "acting";
-    else if (paused.size || pauseNew) state = "paused";
-    return { state, ...BADGES[state] };
+  // What the toolbar button shows: "acting", "paused" or "idle".
+  function status(t = now()) {
+    if (isActing(t)) return "acting";
+    if (paused.size || pauseNew) return "paused";
+    return "idle";
   }
 
   function snapshot(t = now()) {
     const running = new Set([...calls.values()].filter((c) => c.running).map((c) => c.session));
     return {
-      badge: badge(t),
+      status: status(t),
       pauseNew,
       clients: [...connected.values()].map((c) => ({ ...c, blocked: blocked.has(c.name) })).sort((a, b) => a.connectedAt - b.connectedAt),
       blocked: [...blocked].sort(),
@@ -289,6 +283,7 @@ function createControl({ send, onChange = () => {}, onPauseChange = () => {}, no
         .map(([id, s]) => ({
           id,
           client: s.client,
+          clientId: s.clientId,
           lastAt: s.lastAt,
           paused: paused.has(id),
           acting: running.has(id) || t - (lastBySession.get(id) ?? -Infinity) < RECENT_MS,
@@ -310,7 +305,7 @@ function createControl({ send, onChange = () => {}, onPauseChange = () => {}, no
     unblock,
     hostDisconnected,
     clearLog,
-    badge,
+    status,
     snapshot,
   };
 }

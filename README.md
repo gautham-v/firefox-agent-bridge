@@ -69,20 +69,21 @@ The toolbar button shows what agents are doing, and its popup is where you contr
 run without a consent prompt, and switching to a session's tab doesn't pause it; you see every
 client and call, and Stop or Disconnect cuts them off.
 
-- **Badge.** `RUN` (blue) means an agent is acting or acted in the last few seconds, and `||`
-  (grey) means sessions are paused. No badge means idle.
+- **Toolbar icon.** A pointer shaped like the agent cursor. It's an outline when idle, turns the
+  cursor's purple while an agent is acting or acted in the last few seconds, and gets two pause
+  bars when sessions are paused. The popup's header shows the same state and the latest call.
 - **Stop.** The Stop button in the popup, or **Alt+Shift+X** from anywhere in Firefox (rebind it
   in about:addons), pauses every session. Running calls are answered at once, and
   sessions that haven't started yet start paused. Resume each session from the popup, or all of
   them at once. Stop doesn't undo work already under way: a click or page load that has started
   still finishes, but its result is dropped. Paused groups get " (paused)" added to their title.
 - **Clients.** Each client connecting to the socket announces a name, version, pid and working
-  directory, and its calls run right away. The popup lists every connection with those details,
-  when it connected and how many calls it made. The name is self-reported, so check the pid and
-  folder. **Disconnect** closes that connection, stops its calls in progress and blocks the name:
+  directory, and its calls run right away. The popup lists each session with its client; open a
+  row to see the version, pid, folder, when it connected and how many calls it made. The name is
+  self-reported, so check the pid and folder. **Disconnect** (in the opened row) closes that connection, stops its calls in progress and blocks the name:
   calls from any client using it, reconnects included, fail at once until you click **Unblock**
   or restart Firefox.
-- **Activity log.** The popup lists the last 100 of up to 500 calls: time, session, client,
+- **Activity log.** Under Activity, the popup lists the last 100 of up to 500 calls: time, session, client,
   tool, action, tab, page origin, outcome and duration. It can be filtered by session, copied as
   JSON, or cleared, and it is lost when Firefox restarts. It never records typed text, key
   sequences, form values, script source, find queries, file paths or full URLs, only their

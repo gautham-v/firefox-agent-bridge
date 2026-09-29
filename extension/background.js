@@ -534,7 +534,10 @@ async function setGroupPausedTitle(session, isPaused) {
 
 const popupPorts = new Set();
 let refreshQueued = false;
-let badgeTimer = null;
+let statusTimer = null;
+let shownIcon = null;
+const darkScheme = matchMedia("(prefers-color-scheme: dark)");
+darkScheme.addEventListener("change", scheduleRefresh);
 
 function scheduleRefresh() {
   if (refreshQueued) return;
@@ -555,19 +558,24 @@ function popupState() {
 
 function refresh() {
   refreshQueued = false;
-  const b = control.badge();
+  const status = control.status();
   const titles = {
     acting: "Firefox Agent Bridge: an agent is acting in Firefox",
     paused: "Firefox Agent Bridge: paused",
     idle: "Firefox Agent Bridge",
   };
-  browser.browserAction.setBadgeText({ text: b.text });
-  if (b.color) browser.browserAction.setBadgeBackgroundColor({ color: b.color });
-  browser.browserAction.setBadgeTextColor?.({ color: "#ffffff" });
-  browser.browserAction.setTitle({ title: titles[b.state] });
+  // The state is drawn into the icon: an outline pointer when idle, the agent cursor's purple
+  // while acting, and pause bars when stopped. Extension icons can't use context-fill, so each
+  // comes in a light and a dark variant, picked by the color scheme (which follows the toolbar).
+  const icon = `icons/toolbar-${status}-${darkScheme.matches ? "dark" : "light"}.svg`;
+  if (icon !== shownIcon) {
+    shownIcon = icon;
+    browser.browserAction.setIcon({ path: icon });
+    browser.browserAction.setTitle({ title: titles[status] });
+  }
   // "Acting" lasts a few seconds past the last call; look again once it would lapse.
-  clearTimeout(badgeTimer);
-  if (b.state === "acting") badgeTimer = setTimeout(scheduleRefresh, control.RECENT_MS);
+  clearTimeout(statusTimer);
+  if (status === "acting") statusTimer = setTimeout(scheduleRefresh, control.RECENT_MS);
   if (popupPorts.size) {
     const state = popupState();
     for (const p of popupPorts) p.postMessage({ type: "state", state });

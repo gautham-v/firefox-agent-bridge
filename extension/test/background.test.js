@@ -20,10 +20,10 @@ function mockBrowser({ store = {}, groups: initialGroups = [] } = {}) {
   let nextTab = 2;
   let nextGroup = 100;
   const native = { sent: [], onMessage: event(), onDisconnect: event() };
-  const badge = {};
+  const action = {};
   const b = {
     native,
-    badge,
+    action,
     store,
     tabsMap: tabs,
     groups,
@@ -66,10 +66,8 @@ function mockBrowser({ store = {}, groups: initialGroups = [] } = {}) {
     },
     claudePage: { setActive: async () => {}, call: async (tabId, op) => (op === "textSize" ? 10 : "done") },
     browserAction: {
-      setBadgeText: ({ text }) => (badge.text = text),
-      setBadgeBackgroundColor: ({ color }) => (badge.color = color),
-      setBadgeTextColor: () => {},
-      setTitle: ({ title }) => (badge.title = title),
+      setIcon: ({ path }) => (action.icon = path),
+      setTitle: ({ title }) => (action.title = title),
     },
     commands: { onCommand: event() },
   };
@@ -80,7 +78,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function load(opts) {
   const browser = mockBrowser(opts);
-  const ctx = vm.createContext({ browser, console, setTimeout, clearTimeout, URL, Date, Promise });
+  const matchMedia = () => ({ matches: !!opts?.dark, addEventListener: () => {} });
+  const ctx = vm.createContext({ browser, console, setTimeout, clearTimeout, URL, Date, Promise, matchMedia });
   for (const f of ["control.js", "background.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "..", f), "utf8"), ctx, { filename: f });
   await wait(20);
   const replies = () => browser.native.sent.filter((m) => m.result);
@@ -111,13 +110,25 @@ test("calls run without any prompt; group is named after the client", async () =
   assert.match(r.result.content[0].text, /Created tab 2 in the Claude tab group/);
   assert.equal(browser.groups.get(100).title, "Claude");
   await wait(80);
-  assert.equal(browser.badge.text, "RUN");
+  assert.equal(browser.action.icon, "icons/toolbar-acting-light.svg");
   const state = ui.last();
   assert.equal(state.log.at(-1).outcome, "ok");
   assert.equal(state.log.at(-1).client, "claude-code");
   assert.equal(state.sessions[0].label, "Claude");
   assert.equal(state.clients[0].calls, 1);
   assert.equal(state.approvals, undefined);
+  assert.equal(state.sessions[0].clientId, 1);
+});
+
+test("toolbar icon follows the state and the dark color scheme", async () => {
+  const { browser, callTool } = await load({ dark: true });
+  assert.equal(browser.action.icon, "icons/toolbar-idle-dark.svg");
+  await callTool("tabs_context_mcp");
+  await wait(80);
+  assert.equal(browser.action.icon, "icons/toolbar-acting-dark.svg");
+  assert.match(browser.action.title, /acting/);
+  await wait(3100);
+  assert.equal(browser.action.icon, "icons/toolbar-idle-dark.svg");
 });
 
 test("labels per client: Codex, ffctl, first word, numbered repeats", async () => {
@@ -199,7 +210,7 @@ test("Stop command answers the in-flight call, pauses, and resume all clears it"
   await wait(700);
   assert.equal(env.replies().filter((x) => x.id === r.id).length, 1, "late result dropped");
   assert.equal(env.browser.groups.get(100).title, "Claude (paused)");
-  assert.equal(env.browser.badge.text, "||");
+  assert.equal(env.browser.action.icon, "icons/toolbar-paused-light.svg");
   const blocked = await env.callTool("tabs_context_mcp", {}, "s2");
   assert.match(blocked.result.content[0].text, /paused this session/);
   env.popup().send({ cmd: "resumeAll" });

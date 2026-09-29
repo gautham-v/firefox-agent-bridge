@@ -38,17 +38,17 @@ test("any client runs immediately and is logged with its name", async () => {
   const [e] = control.snapshot().log;
   assert.equal(e.outcome, "ok");
   assert.equal(e.client, "codex-mcp-client");
-  assert.equal(control.badge().state, "acting");
+  assert.equal(control.status(), "acting");
 });
 
-test("acting badge lapses after ~3s, idle has no badge", async () => {
+test("acting lapses after ~3s back to idle", async () => {
   const { control, clock } = setup();
-  assert.deepEqual(control.badge(), { state: "idle", text: "", color: null });
+  assert.equal(control.status(), "idle");
   await control.handleCall(call(1), ok);
   clock.advance(2900);
-  assert.equal(control.badge().state, "acting");
+  assert.equal(control.status(), "acting");
   clock.advance(200);
-  assert.equal(control.badge().state, "idle");
+  assert.equal(control.status(), "idle");
 });
 
 test("connected clients are listed with details, connect time and call count", async () => {
@@ -110,7 +110,7 @@ test("Stop answers in-flight calls now and drops late results", async () => {
   let finishRun;
   const p = control.handleCall(call(1), () => new Promise((r) => (finishRun = r)));
   await tick();
-  assert.equal(control.badge().state, "acting");
+  assert.equal(control.status(), "acting");
   control.stopAll();
   assert.equal(replies().length, 1);
   assert.match(replies()[0].result.content[0].text, /stopped this call/);
@@ -119,7 +119,7 @@ test("Stop answers in-flight calls now and drops late results", async () => {
   assert.equal(replies().length, 1, "late result dropped");
   assert.deepEqual(pauses, [["s1", true]]);
   assert.equal(control.snapshot().log[0].outcome, "stopped");
-  assert.equal(control.badge().state, "paused", "no lingering acting badge after Stop");
+  assert.equal(control.status(), "paused", "no lingering acting state after Stop");
 });
 
 test("while paused, calls fail fast; new sessions start paused; resume per session and all", async () => {
@@ -128,7 +128,7 @@ test("while paused, calls fail fast; new sessions start paused; resume per sessi
   await control.handleCall(call(2, "b"), ok);
   control.stopAll();
   clock.advance(5000);
-  assert.equal(control.badge().state, "paused");
+  assert.equal(control.status(), "paused");
   let ran = 0;
   const run = async () => (ran++, []);
   await control.handleCall(call(3, "a"), run);

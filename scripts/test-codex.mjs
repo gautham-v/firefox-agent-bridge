@@ -212,6 +212,10 @@ try {
     r = yield { tool: "navigate", args: { tabId: popupTab, url: POPUP } };
     assert.match(r.text, /Title: Firefox Agent Bridge/, r.text);
 
+    // The activity list starts folded.
+    r = yield { tool: "javascript_tool", args: { action: "javascript_exec", tabId: popupTab, text: "document.getElementById('activity-toggle').click(); 'opened'" } };
+    assert.match(r.text, /opened/, r.text);
+
     r = yield { tool: "get_page_text", args: { tabId: popupTab } };
     seen.popupText = r.text;
     // Codex is still connected here, so this is the moment to look at Firefox from outside.
@@ -230,7 +234,7 @@ try {
     if (plan.error) throw plan.error;
     assert.equal(run.code, 0, `codex exec exited ${run.code ?? run.signal}\n${run.stderr.slice(-3000)}`);
     assert.equal(fs.readFileSync(LAST_MESSAGE, "utf8").trim(), FINAL);
-    assert.equal(results.length, 9, results.map((r) => r.tool).join());
+    assert.equal(results.length, 10, results.map((r) => r.tool).join());
   });
 
   await h.step("the first request is a streaming Responses call with the firefox tools in one namespace", async () => {
@@ -270,7 +274,7 @@ try {
     assert.equal(seen.groups.length, 1, JSON.stringify(seen.groups));
     assert.match(seen.groups[0], /^Codex /);
     assert.ok(seen.popupText.includes(clientName), seen.popupText);
-    assert.match(seen.popupText, /\(self-reported\)/);
+    assert.match(seen.popupText, /names are self-reported/);
     for (const s of ["navigate", "find", "computer: left_click", "javascript_tool", "computer: screenshot"]) assert.ok(seen.popupText.includes(s), `log shows "${s}"`);
     assert.ok(!seen.popupText.includes("JSON.stringify(clicks)"), "script text stays out of the log");
   });

@@ -7,46 +7,49 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <header>
-    <div>
-      <h1>Firefox Agent Bridge</h1>
-      <p id="status" class="muted">Idle</p>
+  <header class="hero">
+    <span id="orb" class="orb"></span>
+    <div class="grow">
+      <div id="status" class="title">Idle</div>
+      <div id="detail" class="cap"></div>
     </div>
-    <!-- Resume all goes left of Stop, so Stop doesn't move under the cursor when it appears. -->
-    <button id="resume-all" hidden>Resume all</button>
-    <button id="stop" class="danger">Stop</button>
+    <!-- Resume all goes left of Stop, and Stop has a fixed width, so Stop doesn't move under the
+         cursor when the state changes. -->
+    <button id="resume-all" class="b" hidden>Resume all</button>
+    <button id="stop" class="b solid">Stop</button>
   </header>
-  <p class="muted small" id="shortcut"></p>
 
-  <section id="sessions-section" hidden>
-    <h2>Sessions</h2>
+  <div class="sep"></div>
+
+  <section>
+    <div class="hdr"><span class="cap">Sessions</span><span class="cap faint">names are self-reported</span></div>
     <ul id="session-list"></ul>
+    <p id="sessions-empty" class="empty cap">No agent has connected yet.</p>
+    <p id="blocked-note" class="empty cap" hidden>Disconnected until you unblock them or Firefox restarts.</p>
   </section>
 
+  <div class="sep"></div>
+
   <section>
-    <h2>Clients</h2>
-    <p class="muted small">Names are self-reported by the program that connects; check the process id and folder.</p>
-    <ul id="client-list"></ul>
-    <p id="clients-empty" class="muted small">No client connected.</p>
-    <div id="blocked-block" hidden>
-      <h3>Disconnected until you unblock them or Firefox restarts</h3>
-      <ul id="blocked-list"></ul>
+    <button id="activity-toggle" class="row btn" aria-expanded="false" aria-controls="activity">
+      <span class="grow">Activity</span><span id="log-count" class="r"></span><span class="chev" aria-hidden="true"></span>
+    </button>
+    <div id="activity" hidden>
+      <div class="hdr">
+        <select id="filter" aria-label="Filter by session"><option value="">All sessions</option></select>
+        <span id="copied" class="cap"></span>
+      </div>
+      <ol id="log"></ol>
+      <p id="log-empty" class="empty cap">No calls yet.</p>
     </div>
   </section>
 
-  <section>
-    <div class="row">
-      <h2>Activity</h2>
-      <select id="filter" aria-label="Filter by session"><option value="">All sessions</option></select>
-    </div>
-    <div class="row buttons">
-      <button id="copy">Copy as JSON</button>
-      <button id="clear">Clear</button>
-      <span id="copied" class="muted small"></span>
-    </div>
-    <ol id="log"></ol>
-    <p id="log-empty" class="muted small">No calls yet.</p>
-  </section>
+  <div class="sep"></div>
+
+  <footer class="foot">
+    <span id="shortcut" class="cap"></span>
+    <span class="links"><button id="copy" class="link">Copy log</button><button id="clear" class="link">Clear</button></span>
+  </footer>
 
   <script src="popup.js"></script>
 </body>

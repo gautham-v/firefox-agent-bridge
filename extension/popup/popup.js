@@ -9,6 +9,7 @@ const send = (cmd, extra = {}) => port.postMessage({ cmd, ...extra });
 const LOG_SHOWN = 100;
 
 let state = null;
+const expanded = new Set(); // session rows opened to show their client's details
 
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
@@ -21,7 +22,36 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
-const button = (label, onclick, cls = "small") => el("button", { class: cls, textContent: label, onclick });
+// Glyphs on a 16px grid, drawn from the agent cursor's shape.
+const POINTER = "M3 1.2 L3 14.9 L7.1 11.2 L13.1 10.8 Z";
+function glyph(kind) {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("aria-hidden", "true");
+  const add = (tag, attrs) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    svg.append(n);
+  };
+  const solid = kind === "acting";
+  add("path", { d: POINTER, fill: solid ? "currentColor" : "none", stroke: "currentColor", "stroke-width": "1.4", "stroke-linejoin": "round" });
+  if (kind === "paused") {
+    add("rect", { x: "11.9", y: "12.4", width: "1.6", height: "3.4", rx: ".6", fill: "currentColor" });
+    add("rect", { x: "14.3", y: "12.4", width: "1.6", height: "3.4", rx: ".6", fill: "currentColor" });
+  }
+  return svg;
+}
+
+const button = (label, onclick, cls = "b") =>
+  el("button", {
+    class: cls,
+    textContent: label,
+    onclick: (e) => {
+      e.stopPropagation();
+      onclick();
+    },
+  });
 
 // State arrives after every call, so lists are updated in place: an item keeps its element and
 // its unchanged buttons. Replacing a button between mousedown and mouseup would lose the click.
@@ -33,7 +63,9 @@ function morph(old, fresh) {
   }
   for (const a of [...old.attributes]) if (!fresh.hasAttribute(a.name)) old.removeAttribute(a.name);
   for (const a of fresh.attributes) if (old.getAttribute(a.name) !== a.value) old.setAttribute(a.name, a.value);
-  [...old.childNodes].forEach((child, i) => morph(child, fresh.childNodes[i]));
+  // Copy the list first: morph moves replaced children out of fresh.
+  const kids = [...fresh.childNodes];
+  [...old.childNodes].forEach((child, i) => morph(child, kids[i]));
   return old;
 }
 
@@ -48,75 +80,124 @@ function syncList(list, items, key, build) {
   if (next.length !== list.children.length || next.some((node, i) => node !== list.children[i])) list.replaceChildren(...next);
 }
 
-function statusText(s) {
+const clock = (t) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const shortClock = (t) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M$/i, "");
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+// "https://example.com" reads as "example.com"; other origins as their scheme, e.g. "moz-extension".
+const host = (origin) => (origin ? (/^https?:\/\//.test(origin) ? origin.replace(/^https?:\/\//, "") : origin.split(":")[0]) : null);
+const callName = (e) => e.tool + (e.action ? `: ${e.action}` : "");
+
+function header(s) {
+  const actingSessions = s.sessions.filter((x) => x.acting && !x.paused);
   const pausedCount = s.sessions.filter((x) => x.paused).length;
-  switch (s.badge.state) {
-    case "acting":
-      return "An agent is acting in Firefox.";
-    case "paused":
-      return pausedCount ? `Paused: ${pausedCount} session${pausedCount === 1 ? "" : "s"}.` : "Paused. New sessions start paused.";
-    default:
-      return s.clients.length || s.sessions.length ? "Idle." : "Idle. No agent has connected yet.";
+  const last = s.log.at(-1);
+  let title;
+  let detail;
+  if (s.status === "acting") {
+    title = actingSessions.length === 1 ? `${actingSessions[0].label} is acting` : actingSessions.length > 1 ? `${actingSessions.length} agents are acting` : "An agent is acting";
+    detail = last ? [callName(last), host(last.origin), Date.now() - last.time < 5000 ? "now" : shortClock(last.time)].filter(Boolean).join(" · ") : "";
+  } else if (s.status === "paused") {
+    title = "Paused";
+    detail = pausedCount ? plural(pausedCount, "session") : "New sessions start paused";
+  } else {
+    title = "Idle";
+    detail = last ? `Last call ${shortClock(last.time)}` : s.clients.length ? "Connected, no calls yet" : "No agent has connected yet";
   }
+  $("status").textContent = title;
+  $("detail").textContent = detail;
+  $("detail").title = detail;
+  const orb = $("orb");
+  if (orb.dataset.kind !== s.status) {
+    orb.dataset.kind = s.status;
+    orb.className = `orb ${s.status}`;
+    orb.replaceChildren(glyph(s.status));
+  }
+  // Stop stays where it is; once everything is paused it just can't be pressed again.
+  const allStopped = s.pauseNew && s.sessions.every((x) => x.paused);
+  $("stop").disabled = allStopped;
+  $("stop").textContent = allStopped ? "Stopped" : "Stop";
+  $("resume-all").hidden = !(s.pauseNew || pausedCount);
+}
+
+// One row per session, with the connection it came from. Connections that haven't made a call
+// and blocked names without a session get rows of their own. A name stays blocked across
+// reconnects, so a row is blocked by its client's name, not by its connection.
+function sessionItems(s) {
+  const blocked = new Set(s.blocked);
+  const shown = new Set(); // blocked names that already have a row
+  const used = new Set();
+  const items = s.sessions.map((x) => {
+    const client = s.clients.find((c) => c.id === x.clientId) ?? null;
+    if (client) used.add(client.id);
+    const isBlocked = blocked.has(x.client);
+    if (isBlocked) shown.add(x.client);
+    return { key: `s:${x.id}`, label: x.label, name: x.client, client: isBlocked ? null : client, session: x, blocked: isBlocked };
+  });
+  for (const c of s.clients) {
+    if (used.has(c.id) || (c.blocked && shown.has(c.name))) continue;
+    if (c.blocked) shown.add(c.name);
+    items.push({ key: `c:${c.id ?? c.name}`, label: c.name, name: null, client: c.blocked ? null : c, session: null, blocked: c.blocked });
+  }
+  for (const name of blocked) if (!shown.has(name)) items.push({ key: `b:${name}`, label: name, name: null, client: null, session: null, blocked: true });
+  return items;
 }
 
 function clientLine(c) {
-  const parts = [];
-  if (c.version) parts.push(`version ${c.version}`);
+  const parts = [c.name + (c.version ? ` ${c.version}` : "")];
   if (c.pid != null) parts.push(`pid ${c.pid}`);
-  if (c.cwd) parts.push(c.cwd);
-  return parts.join(" · ") || "no process details";
+  return parts.join(" · ");
 }
 
-const clock = (t) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+function toggleRow(key) {
+  if (!expanded.delete(key)) expanded.add(key);
+  if (state) renderSessions(state);
+}
+
+function sessionRow(item) {
+  const x = item.session;
+  const kind = item.blocked ? "blocked" : x?.paused ? "paused" : x?.acting ? "acting" : "idle";
+  const open = expanded.has(item.key);
+  let right;
+  if (item.blocked) right = button("Unblock", () => send("unblock", { name: item.name ?? item.label }), "link");
+  else if (x?.paused) right = button("Resume", () => send("resume", { session: x.id }), "link");
+  else right = el("span", { class: "r", textContent: x ? kind : "no calls yet" });
+
+  const row = el(
+    "div",
+    {
+      class: `row btn${item.blocked || (!item.client && !x?.paused) ? " dim" : ""}`,
+      tabIndex: 0,
+      role: "button",
+      ariaExpanded: String(open),
+      // Rows are reused across updates (see morph), so the handler looks the state up.
+      onclick: () => toggleRow(item.key),
+    },
+    glyph(kind === "blocked" ? "idle" : kind),
+    el("span", { class: "grow" }, el("span", { class: "name", textContent: item.label }), item.name ? el("span", { class: "muted", textContent: ` ${item.name}` }) : null),
+    right,
+  );
+
+  let detail = null;
+  if (open) {
+    const c = item.client;
+    const lines = c
+      ? [clientLine(c), c.cwd, `connected ${clock(c.connectedAt)} · ${plural(c.calls, "call")}`]
+      : [item.blocked ? "Disconnected until you unblock it or Firefox restarts." : "Not connected any more."];
+    detail = el(
+      "div",
+      { class: "detail" },
+      ...lines.filter(Boolean).map((t) => el("div", { class: "cap", textContent: t })),
+      c?.id != null ? el("div", { class: "acts" }, button("Disconnect", () => send("disconnect", { clientId: c.id }))) : null,
+    );
+  }
+  return el("li", {}, row, detail);
+}
 
 function renderSessions(s) {
-  $("sessions-section").hidden = !s.sessions.length;
-  syncList(
-    $("session-list"),
-    s.sessions,
-    (x) => x.id,
-    (x) => {
-      const stateText = x.paused ? "paused" : x.acting ? "acting" : "idle";
-      const cls = x.paused ? "paused" : x.acting ? "acting" : "";
-      return el(
-        "li",
-        { class: "item" },
-        el("span", { class: "grow" }, el("strong", { textContent: x.label }), el("span", { class: "muted", textContent: ` · ${x.client}` })),
-        el("span", { class: `state ${cls}`, textContent: stateText }),
-        x.paused ? button("Resume", () => send("resume", { session: x.id })) : null,
-      );
-    },
-  );
-}
-
-function renderClients(s) {
-  $("clients-empty").hidden = !!s.clients.length;
-  syncList(
-    $("client-list"),
-    s.clients,
-    (c) => String(c.id ?? c.name),
-    (c) =>
-      el(
-        "li",
-        { class: "client" },
-        el(
-          "div",
-          { class: "item" },
-          el("span", { class: "grow" }, el("strong", { textContent: c.name }), el("span", { class: "muted small", textContent: c.blocked ? " (self-reported, blocked)" : " (self-reported)" })),
-          c.id != null ? button("Disconnect", () => send("disconnect", { clientId: c.id })) : null,
-        ),
-        el("div", { class: "mono muted", textContent: clientLine(c) }),
-        el("div", { class: "small muted", textContent: `connected ${clock(c.connectedAt)} · ${c.calls} call${c.calls === 1 ? "" : "s"}` }),
-      ),
-  );
-  $("blocked-block").hidden = !s.blocked.length;
-  syncList(
-    $("blocked-list"),
-    s.blocked,
-    (name) => name,
-    (name) => el("li", { class: "item" }, el("span", { class: "grow", textContent: name }), button("Unblock", () => send("unblock", { name }))),
-  );
+  const items = sessionItems(s);
+  $("sessions-empty").hidden = !!items.length;
+  $("blocked-note").hidden = !s.blocked.length;
+  syncList($("session-list"), items, (i) => i.key, sessionRow);
 }
 
 function filteredLog() {
@@ -124,7 +205,11 @@ function filteredLog() {
   return (state?.log ?? []).filter((e) => !f || e.session === f);
 }
 
+const OUTCOME = { ok: null, stopped: "stopped", error: "error", "blocked-paused": "paused", "blocked-disconnected": "blocked" };
+const duration = (ms) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`);
+
 function renderLog(s) {
+  $("log-count").textContent = s.log.length ? String(s.log.length) : "";
   const filter = $("filter");
   const current = filter.value;
   const seen = new Map();
@@ -137,18 +222,20 @@ function renderLog(s) {
     filter.value = seen.has(current) ? current : "";
   }
 
+  if ($("activity").hidden) return;
   const entries = filteredLog().slice(-LOG_SHOWN).reverse();
   $("log-empty").hidden = !!entries.length;
   $("log").replaceChildren(
     ...entries.map((e) => {
-      const time = clock(e.time);
-      const what = [e.tool + (e.action ? `: ${e.action}` : ""), e.tabId != null ? `tab ${e.tabId}` : null, e.origin, e.detail].filter(Boolean).join(" · ");
+      const detail = e.detail?.startsWith("to ") ? `to ${host(e.detail.slice(3))}` : e.detail;
+      const what = [callName(e), host(e.origin), detail].filter(Boolean).join(" · ");
+      const outcome = e.outcome in OUTCOME ? OUTCOME[e.outcome] : e.outcome;
       return el(
         "li",
-        { title: `${e.sessionLabel} · ${e.client}` },
-        el("span", { class: "muted", textContent: time }),
+        { title: [e.sessionLabel, e.client, e.tabId != null ? `tab ${e.tabId}` : null, clock(e.time), `${e.outcome} ${e.ms}ms`].filter(Boolean).join(" · ") },
+        el("span", { class: "t", textContent: shortClock(e.time) }),
         el("span", { class: "what", textContent: what }),
-        el("span", { class: `outcome-${e.outcome}`, textContent: `${e.outcome} ${e.ms}ms` }),
+        el("span", { class: `o ${e.outcome}`, textContent: outcome ?? duration(e.ms) }),
         e.error ? el("span", { class: "err", textContent: e.error }) : null,
       );
     }),
@@ -157,11 +244,8 @@ function renderLog(s) {
 
 function render(s) {
   state = s;
-  $("status").textContent = statusText(s);
-  const anyPaused = s.pauseNew || s.sessions.some((x) => x.paused);
-  $("resume-all").hidden = !anyPaused;
+  header(s);
   renderSessions(s);
-  renderClients(s);
   renderLog(s);
 }
 
@@ -169,10 +253,29 @@ port.onMessage.addListener((m) => {
   if (m.type === "state") render(m.state);
 });
 
+function setActivityOpen(open) {
+  $("activity").hidden = !open;
+  $("activity-toggle").setAttribute("aria-expanded", String(open));
+  try {
+    localStorage.setItem("activityOpen", open ? "1" : "");
+  } catch {}
+  if (state) renderLog(state);
+}
+
 $("stop").addEventListener("click", () => send("stop"));
 $("resume-all").addEventListener("click", () => send("resumeAll"));
 $("clear").addEventListener("click", () => send("clearLog"));
 $("filter").addEventListener("change", () => state && renderLog(state));
+$("activity-toggle").addEventListener("click", () => setActivityOpen($("activity").hidden));
+$("session-list").addEventListener("keydown", (e) => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches(".row")) {
+    e.preventDefault();
+    e.target.click();
+  }
+});
+try {
+  if (localStorage.getItem("activityOpen")) setActivityOpen(true);
+} catch {}
 
 $("copy").addEventListener("click", async () => {
   const json = JSON.stringify(filteredLog(), null, 2);
@@ -185,11 +288,18 @@ $("copy").addEventListener("click", async () => {
     document.execCommand("copy");
     area.remove();
   }
-  $("copied").textContent = "Copied.";
+  $("copied").textContent = "Copied";
   setTimeout(() => ($("copied").textContent = ""), 1500);
 });
 
+// "Alt+Shift+X" reads as "⌥⇧X" on a Mac.
+function formatShortcut(key) {
+  if (!/Mac/.test(navigator.platform)) return key;
+  const sym = { Alt: "⌥", Shift: "⇧", Ctrl: "⌘", Command: "⌘", MacCtrl: "⌃" };
+  return key.split("+").map((k) => sym[k] ?? k).join("");
+}
+
 browser.commands.getAll().then((cmds) => {
   const key = cmds.find((c) => c.name === "stop-agents")?.shortcut;
-  $("shortcut").textContent = key ? `${key} stops every session from anywhere in Firefox.` : "";
+  $("shortcut").textContent = key ? `${formatShortcut(key)} stops every agent` : "";
 });

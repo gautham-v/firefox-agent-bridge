@@ -267,14 +267,18 @@ try {
     popupTab = tabIdIn((await agent.ok("tabs_create_mcp")).text);
     const r = await agent.ok("navigate", { tabId: popupTab, url: POPUP });
     assert.match(r.text, /Title: Firefox Agent Bridge/);
-    const text = (await agent.ok("get_page_text", { tabId: popupTab })).text;
-    assert.match(text, /test-client/);
-    assert.match(text, /\(self-reported\)/);
-    assert.match(text, /version 1\.2\.3/);
-    assert.match(text, new RegExp(`pid \\d+`));
+    let text = (await agent.ok("get_page_text", { tabId: popupTab })).text;
+    assert.match(text, /Test test-client/);
+    assert.match(text, /names are self-reported/);
+    // Opening the row shows the connection's details.
+    await agent.js(popupTab, `[...document.querySelectorAll("#session-list .row")].find((r) => r.textContent.includes("test-client")).click()`);
+    text = (await agent.ok("get_page_text", { tabId: popupTab })).text;
+    assert.match(text, /test-client 1\.2\.3 · pid \d+/);
+    assert.match(text, /connected .* · \d+ calls/);
   });
 
   await h.step("the activity log shows the calls without typed text", async () => {
+    await agent.js(popupTab, "document.getElementById('activity-toggle').click()");
     const text = (await agent.ok("get_page_text", { tabId: popupTab })).text;
     for (const s of ["computer: type", `${TYPED.length} chars typed`, "computer: left_click", "file_upload", "form_input", "javascript_tool", "navigate"]) assert.ok(text.includes(s), `log shows "${s}"`);
     const html = await agent.js(popupTab, "document.body.innerHTML");
@@ -300,7 +304,9 @@ try {
     await until("(paused) group title", async () => (await mn.groupTitles()).includes("Test (paused)"), 5000);
     await mn.toTab(POPUP);
     const status = () => mn.cmd("WebDriver:ExecuteScript", { script: "return document.getElementById('status').textContent" }).then((r) => r.value);
-    await until("popup status Paused", async () => /^Paused: 1 session/.test(await status()), 3000);
+    await until("popup status Paused", async () => (await status()) === "Paused", 3000);
+    const detail = await mn.cmd("WebDriver:ExecuteScript", { script: "return document.getElementById('detail').textContent" });
+    assert.equal(detail.value, "1 session");
     // A second click on Stop must not land on Resume all.
     assert.equal((await mn.cmd("WebDriver:ExecuteScript", { script: stopRect })).value, before, "Stop stays in place");
     await mn.screenshot(path.join(SHOTS, "popup-stopped.png"));
@@ -317,8 +323,10 @@ try {
     await helper.ok("navigate", { tabId: htab, url: POPUP });
     assert.deepEqual((await mn.groupTitles()).sort(), ["Helper", "Test"]);
     const hscale = await screenshotScale(helper, htab);
+    // Disconnect is inside the session's row, which opens on click.
+    await helper.js(htab, `[...document.querySelectorAll("#session-list .row")].find((r) => r.textContent.includes("test-client")).click()`);
     const disconnect = JSON.parse(
-      await helper.js(htab, `(() => { const li = [...document.querySelectorAll("#client-list > li")].find((l) => l.textContent.includes("test-client")); const r = li.querySelector("button").getBoundingClientRect(); return JSON.stringify([r.left + r.width / 2, r.top + r.height / 2]); })()`),
+      await helper.js(htab, `(() => { const li = [...document.querySelectorAll("#session-list > li")].find((l) => l.textContent.includes("test-client")); const r = [...li.querySelectorAll("button")].find((b) => b.textContent === "Disconnect").getBoundingClientRect(); return JSON.stringify([r.left + r.width / 2, r.top + r.height / 2]); })()`),
     ).map((v) => Math.round(v * hscale));
     await helper.ok("computer", { action: "left_click", tabId: htab, coordinate: disconnect });
     const refused = await agent.call("tabs_context_mcp", {});
