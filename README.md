@@ -6,7 +6,7 @@ runs Claude Code or Codex right in Firefox, all on your existing agent subscript
 
 Unofficial. Not affiliated with Anthropic, OpenAI or Mozilla.
 
-![Asking Claude in the Firefox sidebar for Pavement's studio albums, then dragging a second tab into its group and asking about it](docs/demo.gif)
+![Asking Claude in the Firefox sidebar to draw a timeline of Pavement's albums; it opens Excalidraw in its tab group and draws the boxes, labels and arrows with the mouse](docs/demo.gif)
 
 - A [chat panel](#chat-panel) in Firefox's sidebar: click the toolbar button, ask, and the agent
   works in the tab you're on. Drag more tabs into its group and it sees those too.
