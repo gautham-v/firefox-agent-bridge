@@ -9,7 +9,8 @@ Unofficial. Not affiliated with Anthropic, OpenAI or Mozilla.
 ![Claude Code searching Wikipedia and drawing a diagram in a background Firefox tab](docs/demo.gif)
 
 - Tabs live in a per-session tab group named after the client (**Claude**, **Codex**, ...; a
-  second session from the same client gets "Codex 2") and stay in the background. Nothing takes
+  second session from the same client gets "Codex 2") and stay in the background. Every agent
+  group is grey, with a [state icon](#tab-group-icons) in its label. Nothing takes
   focus, and the OS cursor never moves. Tabs a page opens (`target=_blank`, `window.open`)
   join the group, focus is handed back to your tab, and the click result names the new tab.
 - Clicks and keys are **trusted** (`isTrusted: true`, with user activation), including inside
@@ -98,6 +99,30 @@ Nothing is billed beyond your existing subscription, and nothing runs until you 
 The panel's protocol and the host's process handling are described in
 [docs/chat-panel.md](docs/chat-panel.md). Connector toggles and voice input aren't built.
 
+## Tab group icons
+
+Each agent group's label shows what its session is doing, as a small static icon left of the
+title. Marks take the label's text color, so they follow the theme and work in expanded and
+collapsed groups; only Working is purple, the agent cursor's color.
+
+| Icon | State |
+| --- | --- |
+| Outline pointer | Idle: a client is connected and nothing is running |
+| Solid purple pointer | Working: a call is running or ended in the last few seconds |
+| Ring with a dot | Needs you: a chat is waiting on a permission prompt |
+| Pause bars | Paused by Stop |
+| Check | Done: a chat turn finished and you haven't looked since (activated a tab in the group, or had that chat showing in an open panel) |
+| Ring with a slash | Disconnected: the session has no live client (the MCP client exited, or was disconnected or blocked); a chat counts as connected while it exists |
+| Dotted ring | Earlier: a group left by a previous Firefox run |
+
+Firefox's tab group API only has a title, color and collapsed flag, so the icon is drawn by the
+experiment: it adds a stylesheet (`extension/experiment/group-state.css`) to every browser
+window and sets a `fab-state` attribute on the group's `<tab-group>` element. If it can't find
+the label element (a Firefox update changed it), the extension puts a glyph in front of the
+title instead: `●` working, `◉` needs you, `○` paused, `✓` done, `⊖` disconnected, `◌` earlier,
+and nothing for idle. With the collapsed vertical-tabs sidebar, which shows only a label's first
+letter, no icon is drawn.
+
 ## Safety controls
 
 The toolbar button opens the chat panel, and the panel's **⋯** menu holds the controls. Calls
@@ -106,15 +131,15 @@ client and call, and Stop or Disconnect cuts them off.
 
 - **Toolbar icon.** A pointer shaped like the agent cursor. It's an outline when idle, turns the
   cursor's purple while an agent is acting or acted in the last few seconds, and gets two pause
-  bars when sessions are paused. The panel's header shows the same state, and its title row says
-  Working, Paused or Needs approval.
+  bars when sessions are paused. The sidebar's icon is the same pointer, solid only while an agent
+  is acting, and the panel's header says Working, Paused or Needs approval.
 - **Stop.** **Stop all agents** in the panel's ⋯ menu, or **Alt+Shift+X** from anywhere in Firefox
   (rebind it in about:addons), pauses every session and interrupts the chat turn that is running. Running calls are answered at
   once, and sessions that haven't started yet start paused. The panel then offers Resume (which
   resumes all sessions, and typing a message resumes too) and End task; **Agents and activity** in
   the ⋯ menu can also resume one session at a time. Stop doesn't undo
   work already under way: a click or page load that has started still finishes, but its result is
-  dropped. Paused groups get " (paused)" added to their title. The Stop button in the composer is
+  dropped. Paused groups show the pause icon. The Stop button in the composer is
   different: it interrupts only the running chat turn.
 - **Clients.** Each client connecting to the socket announces a name, version, pid and working
   directory, and its calls run right away. **Agents and activity** lists each session with its
@@ -224,9 +249,10 @@ Codex can run on either of these instead:
   nsITextInputProcessor. A Developer Edition update could break it. If one does, check
   `host.log` and the Browser Console first.
 - Sessions don't survive a browser restart. Session tab groups that session restore brings back
-  are kept, renamed "<name> (earlier)" (e.g. "Codex (earlier)") and greyed out, so staged work
-  survives; close them when done. A group of your own with exactly the title of a label the
-  extension has used (e.g. "Codex") is treated the same way.
+  are kept, given the Earlier icon and greyed out, so staged work survives; close them when done.
+  A group of your own with exactly the title of a label the extension has used (e.g. "Codex") is
+  treated the same way. Groups named by earlier versions ("Codex (earlier)", "Codex (paused)")
+  are still recognized.
 
 ## Further reading
 

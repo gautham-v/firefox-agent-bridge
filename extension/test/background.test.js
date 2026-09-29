@@ -15,11 +15,14 @@ const event = () => {
   return { addListener: (f) => listeners.push(f), fire: (...a) => Promise.all(listeners.map((f) => f(...a))), listeners };
 };
 
-function mockBrowser({ store = {}, groups: initialGroups = [] } = {}) {
+// noIcons: the experiment can't find the label element, so setGroupState answers false (or throws,
+// with iconsThrow), and states go in the title.
+function mockBrowser({ store = {}, groups: initialGroups = [], noIcons = false, iconsThrow = false } = {}) {
   const tabs = new Map([[1, { id: 1, windowId: 10, groupId: -1, active: true, url: "https://user.example/", status: "complete", title: "user" }]]);
   const groups = new Map(initialGroups.map((g) => [g.id, { ...g }]));
   let nextTab = 2;
   let nextGroup = 100;
+  const icons = new Map();
   const native = { sent: [], onMessage: event(), onDisconnect: event() };
   const action = { toggles: 0, popups: [] };
   const b = {
@@ -42,7 +45,12 @@ function mockBrowser({ store = {}, groups: initialGroups = [] } = {}) {
         return { id: 11 };
       },
     },
-    sidebarAction: { toggle: () => action.toggles++ },
+    sidebarAction: {
+      toggle: () => action.toggles++,
+      setIcon: async ({ path }) => {
+        action.sideIcon = path;
+      },
+    },
     tabs: {
       onActivated: event(),
       onCreated: event(),
@@ -84,8 +92,21 @@ function mockBrowser({ store = {}, groups: initialGroups = [] } = {}) {
       },
       update: async (id, props) => Object.assign(groups.get(id), props),
       query: async () => [...groups.values()],
+      onMoved: event(),
     },
-    claudePage: { setActive: async () => {}, call: async (tabId, op) => (op === "textSize" ? 10 : "done") },
+    // group id -> the state icon showing in its label
+    icons,
+    claudePage: {
+      setActive: async () => {},
+      call: async (tabId, op) => (op === "textSize" ? 10 : "done"),
+      setGroupState: async (groupId, state) => {
+        if (iconsThrow) throw new Error("not a function");
+        if (noIcons || !groups.has(groupId)) return false;
+        if (state == null) icons.delete(groupId);
+        else icons.set(groupId, state);
+        return true;
+      },
+    },
     browserAction: {
       onClicked: event(),
       setIcon: ({ path }) => (action.icon = path),
@@ -169,9 +190,11 @@ test("toolbar icon follows the state and the dark color scheme", async () => {
   await callTool("tabs_context_mcp");
   await wait(80);
   assert.equal(browser.action.icon, "icons/toolbar-acting-dark.svg");
+  assert.equal(browser.action.sideIcon, "icons/sidebar-working-dark.svg");
   assert.match(browser.action.title, /acting/);
   await wait(3100);
   assert.equal(browser.action.icon, "icons/toolbar-idle-dark.svg");
+  assert.equal(browser.action.sideIcon, "icons/sidebar-idle-dark.svg");
 });
 
 test("labels per client: Codex, ffctl, first word, numbered repeats", async () => {
@@ -188,12 +211,13 @@ test("labels per client: Codex, ffctl, first word, numbered repeats", async () =
   const r = await env.callTool("tabs_create_mcp", {}, "s3", { id: 3, name: "goose" });
   assert.match(r.result.content[0].text, /in the Goose tab group/);
   assert.deepEqual([...env.browser.groups.values()].map((g) => g.title), ["Codex", "Codex 2", "Goose"]);
+  assert.deepEqual([...env.browser.groups.values()].map((g) => g.color), ["grey", "grey", "grey"], "every agent group is grey");
   assert.equal(JSON.stringify(env.browser.store.groupLabels), JSON.stringify(["Claude", "Codex", "Goose"]));
   const wrong = await env.callTool("tabs_close_mcp", { tabId: 2 }, "s3", { id: 3, name: "goose" });
   assert.match(wrong.result.content[0].text, /not in this session's tab group \("Goose"\)/);
 });
 
-test("on restart, groups with any remembered label become '<label> (earlier)'", async () => {
+test("on restart, groups with any remembered label become '<label>' with the earlier icon'", async () => {
   const groups = [
     { id: 1, title: "Claude" },
     { id: 2, title: "Codex 2 (paused)" },
@@ -205,13 +229,14 @@ test("on restart, groups with any remembered label become '<label> (earlier)'", 
   assert.deepEqual(
     [...browser.groups.values()].map((g) => [g.title, g.color]),
     [
-      ["Claude (earlier)", "grey"],
-      ["Codex (earlier)", "grey"],
-      ["Goose (earlier)", "grey"],
+      ["Claude", "grey"],
+      ["Codex", "grey"],
+      ["Goose", "grey"],
       ["Shopping", undefined],
-      ["Claude (earlier)", undefined],
+      ["Claude", "grey"],
     ],
   );
+  assert.deepEqual([...browser.icons], [[1, "earlier"], [2, "earlier"], [3, "earlier"], [5, "earlier"]]);
   assert.equal(browser.store.allowedClients, undefined, "old consent storage is dropped");
 });
 
@@ -252,13 +277,15 @@ test("Stop command answers the in-flight call, pauses, and resume all clears it"
   release("clicked");
   await wait(700);
   assert.equal(env.replies().filter((x) => x.id === r.id).length, 1, "late result dropped");
-  assert.equal(env.browser.groups.get(100).title, "Claude (paused)");
+  assert.equal(env.browser.groups.get(100).title, "Claude", "the state is an icon, not text");
+  assert.equal(env.browser.icons.get(100), "paused");
   assert.equal(env.browser.action.icon, "icons/toolbar-paused-light.svg");
   const blocked = await env.callTool("tabs_context_mcp", {}, "s2");
   assert.match(blocked.result.content[0].text, /paused this session/);
   env.popup().send({ cmd: "resumeAll" });
-  await wait(20);
+  await wait(150);
   assert.equal(env.browser.groups.get(100).title, "Claude");
+  assert.notEqual(env.browser.icons.get(100), "paused");
   assert.equal((await env.callTool("tabs_context_mcp", {}, "s2")).result.isError, undefined);
 });
 
@@ -332,7 +359,7 @@ test("first chat.send groups the viewed tab in place and the chat's MCP calls fi
   });
   assert.equal(env.browser.tabsMap.size, 1, "no extra about:blank tab");
   assert.equal(env.browser.tabsMap.get(1).groupId, 100);
-  assert.deepEqual([env.browser.groups.get(100).title, env.browser.groups.get(100).color], ["Claude", "orange"]);
+  assert.deepEqual([env.browser.groups.get(100).title, env.browser.groups.get(100).color], ["Claude", "grey"]);
   assert.equal(env.browser.tabsMap.get(1).autoDiscardable, undefined, "the user's tab isn't marked");
 
   const ctx = JSON.parse((await env.callTool("tabs_context_mcp", { createIfEmpty: true }, a.chatId, { id: 9, name: "claude" })).result.content[0].text);
@@ -515,11 +542,14 @@ test("pausing or resuming the chat's session is pushed to its panels", async () 
   await a.send("stopAll");
   assert.deepEqual(a.of("paused"), [{ type: "paused", paused: true }]);
   assert.equal(b.of("paused").length, 1);
-  assert.equal(env.browser.groups.get(100).title, "Claude (paused)");
+  await wait(150);
+  assert.equal(env.browser.icons.get(100), "paused");
   assert.equal((await env.panel()).of("state")[0].paused, true);
   assert.match((await env.callTool("tabs_context_mcp", {}, a.chatId, { id: 9, name: "claude" })).result.content[0].text, /paused this session/);
   await a.send("resume");
   assert.deepEqual(a.of("paused").at(-1), { type: "paused", paused: false });
+  await wait(150);
+  assert.notEqual(env.browser.icons.get(100), "paused");
   assert.equal(env.browser.groups.get(100).title, "Claude");
   // The Stop shortcut and the popup pause a chat too.
   await env.browser.commands.onCommand.fire("stop-agents");
@@ -675,4 +705,196 @@ test("the host being down is flagged in the offline answers, and panels are told
   assert.equal(a.of("chat.capabilities").at(-1).hostDown, true);
   await wait(2200); // the reconnect timer
   assert.equal(a.of("hostUp").length, 1);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Tab group state icons
+
+const chatEvent = (env, chatId, event) => env.host({ type: "chat.event", chatId, event });
+const clientEvent = (env, event, client) => env.browser.native.onMessage.fire({ type: "client", event, client });
+
+test("a terminal session's group shows idle, working, paused and disconnected", async () => {
+  const env = await load();
+  const { browser } = env;
+  await clientEvent(env, "connected", { id: 1, name: "claude-code", pid: 9, cwd: "/p" });
+  await env.callTool("tabs_create_mcp", {}, "s1", { id: 1, name: "claude-code" });
+  await wait(120);
+  assert.equal(browser.icons.get(100), "working", "a call in the last few seconds");
+  assert.equal(browser.groups.get(100).title, "Claude");
+  await wait(3100);
+  assert.equal(browser.icons.get(100), "idle", "connected and nothing running");
+
+  // Stop wins over what the session was doing.
+  await env.callTool("tabs_context_mcp", {}, "s1", { id: 1, name: "claude-code" });
+  await browser.commands.onCommand.fire("stop-agents");
+  await wait(120);
+  assert.equal(browser.icons.get(100), "paused");
+  env.popup().send({ cmd: "resumeAll" });
+  await wait(120);
+  assert.equal(browser.icons.get(100), "working");
+
+  // The MCP client exiting leaves a group with nobody behind it, even mid-"working".
+  await clientEvent(env, "disconnected", { id: 1 });
+  await wait(120);
+  assert.equal(browser.icons.get(100), "disconnected");
+  await clientEvent(env, "connected", { id: 1, name: "claude-code", pid: 9, cwd: "/p" });
+  await wait(120);
+  assert.notEqual(browser.icons.get(100), "disconnected");
+});
+
+test("a client the user disconnected shows as disconnected, not working", async () => {
+  const env = await load();
+  await clientEvent(env, "connected", { id: 4, name: "Claude Code", pid: 1, cwd: "/" });
+  await env.callTool("tabs_create_mcp", {}, "s1", { id: 4, name: "Claude Code" });
+  env.popup().send({ cmd: "disconnect", clientId: 4 });
+  await wait(150);
+  assert.equal(env.browser.icons.get(100), "disconnected");
+});
+
+test("a chat's group shows needs-you, working, done and idle, and stays connected without a client", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await a.send("chat.send", { engine: "claude", text: "hi" });
+  const { icons, tabsMap } = env.browser;
+  await chatEvent(env, a.chatId, { kind: "status", status: "running" });
+  await env.callTool("tabs_context_mcp", {}, a.chatId, { id: 9, name: "claude-code (sidebar)" });
+  await wait(120);
+  assert.equal(icons.get(100), "working");
+  // The process idled out and its MCP client left; the chat is still there.
+  await clientEvent(env, "disconnected", { id: 9 });
+  await chatEvent(env, a.chatId, { kind: "permission", requestId: "r1", tool: "Bash", summary: "rm x" });
+  await wait(120);
+  assert.equal(icons.get(100), "needs");
+  await chatEvent(env, a.chatId, { kind: "tool_start", toolUseId: "t", name: "Bash", summary: "x" });
+  await chatEvent(env, a.chatId, { kind: "result", ok: true });
+  await wait(3300);
+  assert.equal(icons.get(100), "idle", "the panel was showing the chat when the turn finished");
+
+  // With the panel closed, the next turn finishes unseen.
+  a.close();
+  await wait(20);
+  await chatEvent(env, a.chatId, { kind: "status", status: "running" });
+  await chatEvent(env, a.chatId, { kind: "result", ok: true });
+  await wait(150);
+  assert.equal(icons.get(100), "done");
+  // Showing the chat in a panel is looking at it.
+  const b = await env.panel(10, a.chatId);
+  await wait(150);
+  assert.equal(icons.get(100), "idle");
+  b.close();
+  await wait(20);
+
+  // As is switching to a tab in its group, but not a tab Firefox opened for a page.
+  await chatEvent(env, a.chatId, { kind: "result", ok: true });
+  await wait(150);
+  assert.equal(icons.get(100), "done");
+  tabsMap.set(6, { id: 6, windowId: 10, groupId: 100, active: true, url: "https://x.example/", status: "complete", title: "x" });
+  await env.browser.tabs.onActivated.fire({ tabId: 6, windowId: 10 });
+  await wait(150);
+  assert.equal(icons.get(100), "idle");
+
+  // A new turn clears it, and a turn the user interrupted isn't news.
+  await chatEvent(env, a.chatId, { kind: "result", ok: true });
+  await wait(150);
+  assert.equal(icons.get(100), "done");
+  await chatEvent(env, a.chatId, { kind: "status", status: "running" });
+  await wait(150);
+  assert.equal(icons.get(100), "idle");
+  await chatEvent(env, a.chatId, { kind: "result", ok: false, error: "Interrupted" });
+  await wait(150);
+  assert.equal(icons.get(100), "idle");
+});
+
+test("an old transcript's results don't mark a chat done", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await a.send("chat.open", { chatId: "old-chat", source: "panel", engine: "claude" });
+  const ask = env.sentToHost("chat.load")[0];
+  await env.host({ type: "chat.transcript", requestId: ask.requestId, chatId: "old-chat", items: [{ kind: "user", text: "q" }, { kind: "result", ok: true }], done: true });
+  a.close();
+  await wait(150);
+  const b = await env.panel(10, a.chatId);
+  await b.send("chat.send", { engine: "claude", text: "hi" });
+  await wait(150);
+  assert.notEqual(env.browser.icons.get(100), "done");
+});
+
+test("without the icon, the state goes in the title as a glyph, and comes out again", async () => {
+  const env = await load({ noIcons: true });
+  const { browser } = env;
+  const title = () => browser.groups.get(100).title;
+  await clientEvent(env, "connected", { id: 1, name: "claude-code", pid: 9, cwd: "/p" });
+  await env.callTool("tabs_create_mcp", {}, "s1", { id: 1, name: "claude-code" });
+  await wait(120);
+  assert.equal(title(), "● Claude");
+  await browser.commands.onCommand.fire("stop-agents");
+  await wait(120);
+  assert.equal(title(), "○ Claude");
+  await clientEvent(env, "disconnected", { id: 1 });
+  await wait(120);
+  assert.equal(title(), "⊖ Claude");
+
+  // The experiment starts finding the label again: the glyph goes, the icon comes.
+  browser.claudePage.setGroupState = async (id, state) => (browser.icons.set(id, state), true);
+  env.popup().send({ cmd: "resumeAll" });
+  await wait(150);
+  assert.equal(title(), "Claude");
+  assert.equal(browser.icons.get(100), "disconnected");
+});
+
+test("chat states in the fallback: needs-you and done glyphs, idle has none", async () => {
+  const env = await load({ iconsThrow: true });
+  const a = await env.panel();
+  await a.send("chat.send", { engine: "codex", text: "hi" });
+  const title = () => env.browser.groups.get(100).title;
+  await wait(150);
+  assert.equal(title(), "Codex", "idle has no glyph");
+  await chatEvent(env, a.chatId, { kind: "permission", requestId: "r1", tool: "Bash", summary: "x" });
+  await wait(150);
+  assert.equal(title(), "◉ Codex");
+  a.close();
+  await chatEvent(env, a.chatId, { kind: "result", ok: true });
+  await wait(150);
+  assert.equal(title(), "✓ Codex");
+  assert.equal([...env.browser.groups.values()][0].color, "grey");
+});
+
+test("restart finds groups titled with glyphs or the old suffixes, and shows them as earlier", async () => {
+  const groups = () => [
+    { id: 1, title: "◌ Claude" },
+    { id: 2, title: "○ Codex 2" },
+    { id: 3, title: "✓ Goose" },
+    { id: 4, title: "Codex (paused)" },
+    { id: 5, title: "Goose 3 (earlier)" },
+    { id: 6, title: "● Shopping" },
+    { id: 7, title: "◌ Unknown" },
+    { id: 8, title: "Claude ○" },
+  ];
+  const store = () => ({ groupLabels: ["Claude", "Codex", "Goose"] });
+  const drawn = await load({ store: store(), groups: groups() });
+  assert.deepEqual(
+    [...drawn.browser.groups.values()].map((g) => [g.title, g.color]),
+    [["Claude", "grey"], ["Codex", "grey"], ["Goose", "grey"], ["Codex", "grey"], ["Goose", "grey"], ["● Shopping", undefined], ["◌ Unknown", undefined], ["Claude ○", undefined]],
+  );
+  assert.deepEqual([...drawn.browser.icons.keys()], [1, 2, 3, 4, 5]);
+
+  const fallback = await load({ store: store(), groups: groups(), noIcons: true });
+  assert.deepEqual(
+    [...fallback.browser.groups.values()].map((g) => g.title),
+    ["◌ Claude", "◌ Codex", "◌ Goose", "◌ Codex", "◌ Goose", "● Shopping", "◌ Unknown", "Claude ○"],
+  );
+});
+
+test("earlier groups keep their icon while the session's own groups change around them", async () => {
+  const env = await load({ store: { groupLabels: ["Claude"] }, groups: [{ id: 50, title: "Claude" }] });
+  await env.callTool("tabs_create_mcp");
+  await wait(150);
+  assert.equal(env.browser.icons.get(50), "earlier");
+  assert.equal(env.browser.icons.get(100), "working");
+  assert.equal(env.browser.groups.get(100).title, "Claude", "a live group isn't taken for an orphan");
+  // A group moved to another window is a new element there; its icon is drawn again.
+  env.browser.icons.delete(50);
+  await env.browser.tabGroups.onMoved.fire({ id: 50 });
+  await wait(150);
+  assert.equal(env.browser.icons.get(50), "earlier");
 });

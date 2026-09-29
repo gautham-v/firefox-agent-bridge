@@ -11,6 +11,11 @@ const RES_HOST = "firefox-agent-bridge";
 const MODULES = ["actor-child.sys.mjs", "actor-parent.sys.mjs"];
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const MAX_FRAME_HOPS = 8;
+// Tab group state icons: a stylesheet added to every browser window draws the icon from this
+// attribute on the <tab-group> element, in the group's label (see group-state.css).
+const STATE_ATTR = "fab-state";
+const GROUP_STATES = new Set(["idle", "working", "needs", "paused", "done", "disconnected", "earlier"]);
+const STATE_SHEET = "experiment/group-state.css";
 
 const MIME = {
   pdf: "application/pdf",
@@ -39,10 +44,56 @@ function unregisterActor() {
   }
 }
 
+function browserWindows() {
+  return [...Services.wm.getEnumerator("navigator:browser")];
+}
+
+// An extension tab group id is the internal id ("<13 digit ms>-<n>") without its hyphen, as in
+// Firefox's ext-browser.js. Ids it can't parse aren't found, and the caller falls back to titles.
+function internalGroupId(id) {
+  if (!Number.isSafeInteger(id) || id < 1e15) return null;
+  return `${Math.floor(id / 1000)}-${id % 1000}`;
+}
+
 this.claudePage = class extends ExtensionAPI {
   onStartup() {
     this.ready = this.registerActor();
     this.ready.catch((e) => console.error("firefox-agent-bridge: actor registration failed", e));
+    this.watchWindows();
+  }
+
+  // Every browser window, existing and future, gets the state stylesheet.
+  watchWindows() {
+    this.sheetWindows = new Set();
+    this.windowObserver = { observe: (win) => this.ensureSheet(win) };
+    Services.obs.addObserver(this.windowObserver, "browser-delayed-startup-finished");
+    for (const win of browserWindows()) this.ensureSheet(win);
+  }
+
+  ensureSheet(win) {
+    if (this.sheetWindows.has(win)) return;
+    try {
+      const utils = win.windowUtils;
+      utils.loadSheetUsingURIString(this.extension.baseURI.resolve(STATE_SHEET), utils.AUTHOR_SHEET);
+      this.sheetWindows.add(win);
+      win.addEventListener("unload", () => this.sheetWindows.delete(win), { once: true });
+    } catch (e) {
+      console.error("firefox-agent-bridge: could not add the tab group stylesheet", e);
+    }
+  }
+
+  removeSheets() {
+    Services.obs.removeObserver(this.windowObserver, "browser-delayed-startup-finished");
+    for (const win of browserWindows()) {
+      for (const group of win.gBrowser?.tabGroups ?? []) group.removeAttribute(STATE_ATTR);
+      if (!this.sheetWindows.has(win)) continue;
+      try {
+        win.windowUtils.removeSheetUsingURIString(this.extension.baseURI.resolve(STATE_SHEET), win.windowUtils.AUTHOR_SHEET);
+      } catch {
+        // window closing
+      }
+    }
+    this.sheetWindows.clear();
   }
 
   async registerActor() {
@@ -67,6 +118,7 @@ this.claudePage = class extends ExtensionAPI {
 
   onShutdown(isAppShutdown) {
     if (isAppShutdown) return;
+    this.removeSheets();
     unregisterActor();
     resHandler().setSubstitution(RES_HOST, null);
   }
@@ -128,6 +180,27 @@ this.claudePage = class extends ExtensionAPI {
           if (tab.selected) return browser.docShellIsActive;
           browser.docShellIsActive = active;
           return browser.docShellIsActive;
+        }),
+
+        // Sets (or, with a null state, clears) the state icon drawn in a tab group's label.
+        // Returns whether it is showing: false when the group or its label element isn't found or
+        // the stylesheet didn't apply, and the caller then puts a glyph in the title instead.
+        setGroupState: surfaced(async (groupId, state) => {
+          if (state != null && !GROUP_STATES.has(state)) throw new Error(`Unknown group state "${state}".`);
+          const id = internalGroupId(groupId);
+          for (const win of browserWindows()) {
+            const group = id && (win.gBrowser?.tabGroups ?? []).find((g) => g.id === id);
+            const label = group?.querySelector(".tab-group-label");
+            if (!label) continue;
+            self.ensureSheet(win);
+            if (state == null) {
+              group.removeAttribute(STATE_ATTR);
+              return true;
+            }
+            group.setAttribute(STATE_ATTR, state);
+            return win.getComputedStyle(label, "::before").content !== "none";
+          }
+          return false;
         }),
 
         upload: surfaced(async (tabId, ref, paths) => {

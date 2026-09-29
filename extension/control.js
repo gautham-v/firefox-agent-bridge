@@ -272,6 +272,20 @@ function createControl({ send, onChange = () => {}, onPauseChange = () => {}, no
     return "idle";
   }
 
+  // What a session's tab group shows, apart from the chat state background.js adds: whether it
+  // is paused, acting (a call running or made in the last few seconds) and has a live client (a
+  // client that exited, was disconnected or is blocked doesn't).
+  function sessionInfo(session, t = now()) {
+    const s = sessions.get(session);
+    const client = s?.clientId != null ? connected.get(s.clientId) : null;
+    return {
+      known: !!s,
+      paused: paused.has(session),
+      acting: [...calls.values()].some((c) => c.running && c.session === session) || t - (lastBySession.get(session) ?? -Infinity) < RECENT_MS,
+      connected: !!client && !blocked.has(client.name),
+    };
+  }
+
   function snapshot(t = now()) {
     const running = new Set([...calls.values()].filter((c) => c.running).map((c) => c.session));
     return {
@@ -306,6 +320,7 @@ function createControl({ send, onChange = () => {}, onPauseChange = () => {}, no
     hostDisconnected,
     clearLog,
     status,
+    sessionInfo,
     snapshot,
   };
 }

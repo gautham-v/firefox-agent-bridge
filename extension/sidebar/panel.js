@@ -60,7 +60,7 @@ const ICON_PATHS = {
   chevr: '<path d="M6 3.5L10.5 8 6 12.5"/>',
   chevd: '<path d="M4 6l4 4 4-4"/>',
   send: '<path d="M8 13V3M4 7l4-4 4 4"/>',
-  stop: '<rect x="4.5" y="4.5" width="7" height="7" rx="1.2"/>',
+  stop: '<rect x="3.5" y="3.5" width="9" height="9" rx="1.6"/>',
   x: '<path d="M4 4l8 8M12 4l-8 8"/>',
   check: '<path d="M3.5 8.5l3 3 6-7"/>',
   pause: '<path d="M6 4v8M10 4v8"/>',
@@ -89,25 +89,6 @@ function icon(name, cls = "") {
   }
   const svg = proto.cloneNode(true);
   if (cls) svg.classList.add(...cls.split(" "));
-  return svg;
-}
-
-// The agent cursor as the header glyph, the same as the popup's: outline when idle, solid while
-// acting, with two pause bars when paused.
-function pointerGlyph(kind) {
-  const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", "0 0 16 16");
-  svg.setAttribute("aria-hidden", "true");
-  const add = (tag, attrs) => {
-    const n = document.createElementNS(SVG_NS, tag);
-    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
-    svg.append(n);
-  };
-  add("path", { d: "M3 1.2 L3 14.9 L7.1 11.2 L13.1 10.8 Z", fill: kind === "acting" ? "currentColor" : "none", stroke: "currentColor", "stroke-width": "1.4", "stroke-linejoin": "round" });
-  if (kind === "paused") {
-    add("rect", { x: "11.9", y: "12.4", width: "1.6", height: "3.4", rx: ".6", fill: "currentColor" });
-    add("rect", { x: "14.3", y: "12.4", width: "1.6", height: "3.4", rx: ".6", fill: "currentColor" });
-  }
   return svg;
 }
 
@@ -715,15 +696,6 @@ function flush() {
 }
 
 function renderHead() {
-  const kind = S.paused ? "paused" : isRunning() && !pendingPermission() ? "acting" : "idle";
-  const eng = $("engine");
-  eng.className = `eng ${kind === "idle" ? "" : kind}${S.ui.menu?.id === "model" && S.ui.menu.from === "engine" ? " on" : ""}`;
-  const g = $("engine-glyph");
-  if (g.dataset.kind !== kind) {
-    g.dataset.kind = kind;
-    g.replaceChildren(pointerGlyph(kind));
-  }
-  $("engine-name").textContent = engine().name;
   $("history-btn").classList.toggle("on", S.ui.sheet === "history");
   $("more-btn").classList.toggle("on", S.ui.menu?.id === "more" || S.ui.sheet === "agents");
 }
@@ -735,14 +707,14 @@ function chatTitle() {
 }
 
 function renderTitle() {
-  const bar = $("title");
-  bar.hidden = !(S.turns.length || S.loading);
-  if (bar.hidden) return;
+  const chat = S.turns.length > 0 || S.loading;
+  $("title").parentElement.classList.toggle("chat", chat);
   let live = null;
   if (S.paused) live = el("span", { class: "live p" }, icon("pause"), "Paused");
   else if (pendingPermission()) live = el("span", { class: "live p" }, "Needs approval");
   else if (isRunning()) live = el("span", { class: "live" }, icon("pointer"), "Working");
-  fill(bar, el("span", { class: "t", text: chatTitle(), title: chatTitle() }), live);
+  const t = chat ? chatTitle() : "New chat";
+  fill($("title"), el("span", { class: chat ? "t" : "t new", text: t, title: t }), live);
 }
 
 // ---- Conversation
@@ -1120,7 +1092,7 @@ function renderDock() {
   ctx.replaceChildren(fav(c.tab), el("span", { text: c.label }));
   ctx.title = c.many ? "Tabs in the group" : c.tab?.title ?? "";
   const mb = $("model-btn");
-  mb.className = `model${S.ui.menu?.id === "model" && S.ui.menu.from !== "engine" ? " on" : ""}`;
+  mb.className = `model${S.ui.menu?.id === "model" ? " on" : ""}`;
   const shownEffort = effortsFor().includes(S.effort) ? S.effort : "";
   fill(mb, el("span", { class: "m", text: modelLabel() }), shownEffort ? el("span", { class: "e", text: effortLabel(shownEffort) }) : null, icon("chevd"));
   $("plus-btn").classList.toggle("on", S.ui.menu?.id === "plus" || S.ui.menu?.id === "addtab");
@@ -1526,7 +1498,7 @@ function renderMenu() {
   const ar = (m.anchor.isConnected ? m.anchor : $("composer")).getBoundingClientRect();
   const width = Math.min(m.id === "more" ? 236 : 260, pr.width - 16);
   menu.style.width = `${width}px`;
-  const above = m.id !== "more" && m.from !== "engine";
+  const above = m.id !== "more";
   if (above) {
     menu.style.bottom = `${pr.bottom - ar.top + 6}px`;
     menu.style.maxHeight = `${Math.max(120, ar.top - pr.top - 12)}px`;
@@ -1534,7 +1506,7 @@ function renderMenu() {
     menu.style.top = `${ar.bottom - pr.top + 4}px`;
     menu.style.maxHeight = `${Math.max(120, pr.bottom - ar.bottom - 12)}px`;
   }
-  const toRight = m.id === "more" || (m.id === "model" && m.from !== "engine");
+  const toRight = m.id === "more" || m.id === "model";
   const left = toRight ? ar.right - pr.left - width : ar.left - pr.left;
   menu.style.left = `${Math.min(Math.max(8, left), pr.width - width - 8)}px`;
   menu.addEventListener("keydown", (e) => {
@@ -1667,7 +1639,6 @@ function wire() {
   const layer = $("layer");
   layer.append(el("div", { id: "layer-sheet" }), el("div", { id: "layer-menu" }));
 
-  $("engine").addEventListener("click", (e) => openMenu("model", e.currentTarget, { from: "engine" }));
   $("history-btn").addEventListener("click", () => openSheet("history"));
   $("new-btn").addEventListener("click", newChat);
   $("more-btn").addEventListener("click", (e) => openMenu("more", e.currentTarget));
@@ -1761,6 +1732,46 @@ function connect() {
   post("hello", hello);
 }
 
+// ---------------------------------------------------------------------------------------------
+// Theme. The panel is the same surface as Firefox's sidebar, so it takes the theme's sidebar
+// colors (or its toolbar's) when the theme sets them, and panel.css's neutrals otherwise.
+
+function cssColor(c) {
+  if (Array.isArray(c)) return `rgb(${c.slice(0, 3).join(", ")})`;
+  return typeof c === "string" && c.trim() ? c : null;
+}
+
+function isDarkColor(c) {
+  const probe = el("span", { style: `color: ${c}` });
+  document.body.append(probe);
+  const [r, g, b] = (getComputedStyle(probe).color.match(/[\d.]+/g) ?? []).map(Number);
+  probe.remove();
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 128;
+}
+
+async function applyTheme() {
+  if (themeParam) return;
+  let colors = null;
+  try {
+    colors = (await browser.theme.getCurrent(S.windowId ?? undefined))?.colors;
+  } catch {
+    // no theme API here (a test harness): keep the neutrals
+  }
+  const root = document.documentElement;
+  const bg = cssColor(colors?.sidebar) ?? cssColor(colors?.toolbar);
+  const ink = cssColor(colors?.sidebar_text) ?? cssColor(colors?.toolbar_text);
+  if (!bg) {
+    root.style.removeProperty("--p-bg");
+    root.style.removeProperty("--p-ink");
+    delete root.dataset.theme;
+    return;
+  }
+  root.style.setProperty("--p-bg", bg);
+  if (ink) root.style.setProperty("--p-ink", ink);
+  else root.style.removeProperty("--p-ink");
+  root.dataset.theme = isDarkColor(bg) ? "dark" : "light";
+}
+
 async function main() {
   wire();
   render();
@@ -1774,6 +1785,8 @@ async function main() {
   } catch {
     // no window API here (a test harness): the background picks the window
   }
+  await applyTheme();
+  browser.theme?.onUpdated.addListener(() => applyTheme());
   connect();
   $("input").focus();
   for (const name of Object.keys(ENGINES)) requestCaps(name);

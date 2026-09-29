@@ -1,17 +1,20 @@
 /* Chat panel: monochrome and native, like the popup. 13px system type, hairline separators, a 6%
    wash on hover, and no accent except the agent purple while the agent is acting (or the tab
-   group's own color). The surface tokens match Firefox's sidebar. ?theme=light|dark forces a
-   theme, for screenshots. */
+   group's own color). The panel is the same surface as Firefox's sidebar: panel.js sets --p-bg and
+   --p-ink from the current theme, and the neutrals below are the fallback. Raised surfaces are
+   mixed from those two, so they follow any theme. ?theme=light|dark forces a theme, for
+   screenshots. */
 :root {
-  --p-bg: #ffffff;
+  --p-bg: #f3f3f3;
   --p-ink: rgba(0, 0, 0, 0.86);
-  --p-ink2: #6e6e73;
-  --p-ink3: #aeaeb2;
-  --p-sep: rgba(0, 0, 0, 0.09);
-  --p-wash: rgba(0, 0, 0, 0.06);
-  --p-fill: rgba(0, 0, 0, 0.055);
-  --p-elev: #ffffff;
-  --p-bubble: #f0f0f4;
+  --p-ink2: color-mix(in srgb, var(--p-ink) 62%, var(--p-bg));
+  --p-ink3: color-mix(in srgb, var(--p-ink) 38%, var(--p-bg));
+  --p-sep: color-mix(in srgb, var(--p-ink) 10%, transparent);
+  --p-wash: color-mix(in srgb, var(--p-ink) 6%, transparent);
+  --p-fill: color-mix(in srgb, var(--p-ink) 6%, transparent);
+  --p-field: color-mix(in srgb, var(--p-bg), #fff 75%);
+  --p-elev: color-mix(in srgb, var(--p-bg), #fff 75%);
+  --p-bubble: color-mix(in srgb, var(--p-bg), #000 5%);
   --p-shadow: 0 8px 28px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.12);
   --agent: #7542e5;
   --warn: #d70015;
@@ -20,15 +23,11 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --p-bg: #1f1e25;
-    --p-ink: rgba(255, 255, 255, 0.88);
-    --p-ink2: #98989d;
-    --p-ink3: #6c6c70;
-    --p-sep: rgba(255, 255, 255, 0.1);
-    --p-wash: rgba(255, 255, 255, 0.06);
-    --p-fill: rgba(255, 255, 255, 0.08);
-    --p-elev: #2e2d36;
-    --p-bubble: #2e2d36;
+    --p-bg: #1f1f1f;
+    --p-ink: rgba(255, 255, 255, 0.9);
+    --p-field: color-mix(in srgb, var(--p-bg), #fff 3%);
+    --p-elev: color-mix(in srgb, var(--p-bg), #fff 8%);
+    --p-bubble: color-mix(in srgb, var(--p-bg), #fff 7%);
     --p-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.14);
     --agent: #9059ff;
     --warn: #ff453a;
@@ -36,15 +35,11 @@
 }
 
 :root[data-theme="dark"] {
-  --p-bg: #1f1e25;
-  --p-ink: rgba(255, 255, 255, 0.88);
-  --p-ink2: #98989d;
-  --p-ink3: #6c6c70;
-  --p-sep: rgba(255, 255, 255, 0.1);
-  --p-wash: rgba(255, 255, 255, 0.06);
-  --p-fill: rgba(255, 255, 255, 0.08);
-  --p-elev: #2e2d36;
-  --p-bubble: #2e2d36;
+  --p-bg: #1f1f1f;
+  --p-ink: rgba(255, 255, 255, 0.9);
+  --p-field: color-mix(in srgb, var(--p-bg), #fff 3%);
+  --p-elev: color-mix(in srgb, var(--p-bg), #fff 8%);
+  --p-bubble: color-mix(in srgb, var(--p-bg), #fff 7%);
   --p-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.14);
   --agent: #9059ff;
   --warn: #ff453a;
@@ -73,25 +68,17 @@ p, ul, ol, pre, blockquote, h4 { margin: 0; }
 
 .panel { position: relative; height: 100%; width: 100%; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--p-bg); }
 
-/* header */
-.ph { height: 44px; display: flex; align-items: center; gap: 2px; padding: 0 8px 0 10px; flex: none; }
-.eng { display: flex; align-items: center; gap: 7px; min-width: 0; font-weight: 600; padding: 4px 6px; border-radius: 6px; }
-.eng:hover, .eng.on { background: var(--p-wash); }
-#engine-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pg { display: grid; place-items: center; width: 15px; height: 15px; flex: none; }
-.pg svg { width: 15px; height: 15px; overflow: visible; }
-.eng .cv { display: grid; color: var(--p-ink2); }
-.eng .cv .ico { width: 11px; height: 11px; }
-.eng.acting .pg { color: var(--agent); filter: drop-shadow(0 0 2.5px color-mix(in srgb, var(--agent) 70%, transparent)); }
-.eng.paused .pg { color: var(--p-ink2); }
+/* header: one row. Firefox's sidebar header already says "Claude", so the row holds the chat's
+   title and its live state; the engine is picked in the model menu. */
+.ph { height: 40px; display: flex; align-items: center; gap: 2px; padding: 0 8px 0 16px; flex: none; border-bottom: 1px solid transparent; }
+.ph.chat { border-bottom-color: var(--p-sep); }
 .ib { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px; color: var(--p-ink2); flex: none; }
 .ib:hover { background: var(--p-wash); color: var(--p-ink); }
 .ib.on { background: var(--p-fill); color: var(--p-ink); }
 .ib:disabled { color: var(--p-ink3); background: none; }
-
-/* chat title row */
-.ttl { display: flex; align-items: center; gap: 4px; padding: 0 16px 8px; font-size: 12.5px; color: var(--p-ink2); border-bottom: 1px solid var(--p-sep); flex: none; }
+.ttl { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--p-ink2); padding-right: 6px; }
 .ttl .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ttl .t.new { color: var(--p-ink3); }
 .ttl .live { margin-left: auto; padding-left: 8px; display: flex; align-items: center; gap: 6px; color: var(--agent); font-size: 12px; font-weight: 550; white-space: nowrap; flex: none; }
 .ttl .live.p { color: var(--p-ink2); }
 .ttl .live .ico { width: 12px; height: 12px; }
@@ -146,7 +133,7 @@ p, ul, ol, pre, blockquote, h4 { margin: 0; }
 .step .d { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .step .tm { margin-left: auto; padding-left: 4px; color: var(--p-ink3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .step.cur, .step.cur .w { color: var(--agent); }
-.step.cur .ico { color: var(--agent); filter: drop-shadow(0 0 2px color-mix(in srgb, var(--agent) 70%, transparent)); }
+.step.cur .ico { color: var(--agent); }
 .step.halt .ico { color: var(--p-ink2); }
 .step.bad .ico { color: var(--warn); }
 .used { display: flex; align-items: center; gap: 7px; width: 100%; font-size: 12px; color: var(--p-ink2); padding: 0; border-radius: 6px; }
@@ -196,7 +183,7 @@ p, ul, ol, pre, blockquote, h4 { margin: 0; }
 .fav img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--p-bg); }
 
 /* composer */
-.cmp { margin: 0 12px; border: 1px solid var(--p-sep); border-radius: 12px; padding: 10px 10px 8px 12px; display: grid; gap: 8px; background: var(--p-bg); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04); flex: none; }
+.cmp { margin: 0 12px; border: 1px solid var(--p-sep); border-radius: 12px; padding: 10px 10px 8px 12px; display: grid; gap: 8px; background: var(--p-field); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04); flex: none; }
 .cmp:focus-within { border-color: var(--p-ink3); }
 .cmp.dis { opacity: 0.55; }
 .cmp.drop { border-color: var(--agent); }
@@ -279,7 +266,7 @@ button.mi:hover, button.mi:focus-visible { background: var(--p-wash); outline: 0
 .menu .empty-note { padding: 6px 9px; color: var(--p-ink3); font-size: 12px; }
 
 /* sheets */
-.sheet { position: absolute; inset: 44px 0 0 0; background: var(--p-bg); z-index: 4; display: flex; flex-direction: column; min-height: 0; }
+.sheet { position: absolute; inset: 40px 0 0 0; background: var(--p-bg); z-index: 4; display: flex; flex-direction: column; min-height: 0; }
 .sheet .sh { display: flex; align-items: center; gap: 6px; padding: 0 12px 6px 8px; font-weight: 600; flex: none; }
 .sheet .frame { flex: 1; min-height: 0; width: 100%; border: 0; background: transparent; color-scheme: light dark; }
 .srch { margin: 4px 12px 8px; height: 30px; border-radius: 7px; background: var(--p-fill); display: flex; align-items: center; gap: 7px; padding: 0 9px; color: var(--p-ink3); font-size: 12.5px; flex: none; }
@@ -303,11 +290,7 @@ button.mi:hover, button.mi:focus-visible { background: var(--p-wash); outline: 0
 @media (max-width: 340px) {
   .model .e { display: none; }
   .ctx { max-width: 96px; }
-  .ttl { padding-inline: 12px; }
+  .ph { padding-left: 12px; }
   .pb { padding-inline: 12px; }
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .step.cur .ico, .ttl .live .ico { animation: pulse 1.4s ease-in-out infinite; }
-  @keyframes pulse { 50% { opacity: 0.45; } }
-}

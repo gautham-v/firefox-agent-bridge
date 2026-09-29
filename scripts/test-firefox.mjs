@@ -151,6 +151,8 @@ try {
     assert.match(r.text, /in the Test tab group/);
     assert.equal(contextOf(r.text).availableTabs.length, 2);
     assert.deepEqual(await mn.groupTitles(), ["Test"]);
+    // The state is drawn by the experiment, not written into the title: working right after a call.
+    await until("state icon on the group", async () => ["working", "idle"].includes((await mn.groupStates())[0]), 5000);
     // The first tab is spare; closing it checks tabs_close_mcp.
     const spare = ctx.availableTabs[0].tabId;
     assert.match((await agent.ok("tabs_close_mcp", { tabId: spare })).text, new RegExp(`Closed tab ${spare}`));
@@ -301,7 +303,8 @@ try {
     const refused = await agent.call("tabs_context_mcp", {});
     assert.ok(refused.isError);
     assert.match(refused.text, /The user paused this session/);
-    await until("(paused) group title", async () => (await mn.groupTitles()).includes("Test (paused)"), 5000);
+    await until("paused icon", async () => (await mn.groupStates()).includes("paused"), 5000);
+    assert.deepEqual(await mn.groupTitles(), ["Test"]);
     await mn.toTab(POPUP);
     const status = () => mn.cmd("WebDriver:ExecuteScript", { script: "return document.getElementById('status').textContent" }).then((r) => r.value);
     await until("popup status Paused", async () => (await status()) === "Paused", 3000);
@@ -312,7 +315,7 @@ try {
     await mn.screenshot(path.join(SHOTS, "popup-stopped.png"));
     const resume = await mn.cmd("WebDriver:FindElement", { using: "css selector", value: "#resume-all" });
     await mn.cmd("WebDriver:ElementClick", { id: Object.values(resume.value)[0] });
-    await until("group title without (paused)", async () => (await mn.groupTitles()).includes("Test"), 5000);
+    await until("group no longer paused", async () => !(await mn.groupStates()).includes("paused"), 5000);
     assert.equal((await agent.call("tabs_context_mcp", {})).isError, false);
   });
 
@@ -358,7 +361,7 @@ try {
     assert.match(refused.text, /no longer exists/);
   });
 
-  await h.step("after a restart the session's group comes back as \"Test (earlier)\"", async () => {
+  await h.step("after a restart the session's group comes back with the earlier icon", async () => {
     const kept = tabIdIn((await agent.ok("tabs_create_mcp")).text);
     await agent.ok("navigate", { tabId: kept, url: `${PAGE}/other` });
     const exited = new Promise((r) => h.firefox.once("exit", r));
@@ -370,15 +373,16 @@ try {
     await until("bridge.sock after restart", () => fs.existsSync(h.SOCKET), 60_000, 250);
     mn = await h.marionette();
     // The chrome side spells the WebExtension color "grey" as "gray".
-    const groups = () => mn.chrome("return gBrowser.tabGroups.map((g) => g.label + ' ' + g.color)");
+    const groups = () => mn.chrome("return gBrowser.tabGroups.map((g) => g.label + ' ' + g.color + ' ' + g.getAttribute('fab-state'))");
     await until("restored group renamed", async () => (await groups()).length, 15_000, 250);
-    await until("restored group renamed", async () => (await groups()).join() === "Test (earlier) gray", 10_000, 250).catch(async () => {
+    await until("restored group marked earlier", async () => (await groups()).join() === "Test gray earlier", 10_000, 250).catch(async () => {
       throw new Error(`groups after restart: ${JSON.stringify(await groups())}`);
     });
     // The MCP server reconnects on its next call, and gets a fresh group.
     const r = await agent.ok("tabs_create_mcp");
     assert.match(r.text, /in the Test tab group/);
-    assert.deepEqual((await mn.groupTitles()).sort(), ["Test", "Test (earlier)"]);
+    assert.deepEqual(await mn.groupTitles(), ["Test", "Test"]);
+    await until("earlier icon kept beside the new group's", async () => (await mn.groupStates()).includes("earlier"), 5000);
   });
 } catch (e) {
   failed = true;

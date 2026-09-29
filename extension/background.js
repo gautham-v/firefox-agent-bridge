@@ -7,13 +7,15 @@
 // group here, so the chat's own MCP calls (session = chat id) find it like any other session.
 
 const NATIVE_HOST = "firefox_agent_bridge";
-const GROUP_COLORS = ["orange", "blue", "purple", "cyan", "green", "pink", "yellow", "red"];
+// Every agent group is grey, so the strip stays monochrome and the purple pointer in a group's
+// label only shows while an agent is working.
+const GROUP_COLOR = "grey";
 const SCREENSHOT_MAX_EDGE = 1568;
 const SCREENSHOT_MAX_PIXELS = 1_150_000;
 const LOAD_TIMEOUT_MS = 30_000;
 const SETTLE_TIMEOUT_MS = 5_000;
 
-// session id -> { groupId, label, color }
+// session id -> { groupId, base, label, color }
 const sessions = new Map();
 // tab id -> CSS pixels per screenshot pixel, from the tab's last screenshot
 const frameRatio = new Map();
@@ -39,10 +41,7 @@ function connect() {
 const control = createControl({
   send: (msg) => port?.postMessage(msg),
   onChange: scheduleRefresh,
-  onPauseChange: (session, isPaused) => {
-    setGroupPausedTitle(session, isPaused).catch(() => {});
-    deliver(session, { type: "paused", paused: isPaused });
-  },
+  onPauseChange: (session, isPaused) => deliver(session, { type: "paused", paused: isPaused }),
 });
 
 function onRequest(msg) {
@@ -121,8 +120,7 @@ async function rememberLabel(label) {
 function newSessionEntry(client) {
   const base = clientLabel(client);
   const same = [...sessions.values()].filter((s) => s.base === base).length;
-  const n = sessions.size + 1;
-  return { base, label: same ? `${base} ${same + 1}` : base, color: GROUP_COLORS[(n - 1) % GROUP_COLORS.length] };
+  return { base, label: same ? `${base} ${same + 1}` : base, color: GROUP_COLOR };
 }
 
 // Puts a tab in a new group for the session, titled and colored from its entry.
@@ -132,9 +130,96 @@ async function startGroup(session, client, tabId, windowId) {
   s.groupId = groupId;
   sessions.set(session, s);
   await rememberLabel(s.base);
-  await browser.tabGroups.update(groupId, { title: control.isPaused(session) ? `${s.label} (paused)` : s.label, color: s.color });
+  await browser.tabGroups.update(groupId, { color: s.color });
+  await paintGroup(groupId, s.label, sessionState(session));
   return s;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Tab group state. The state is drawn as an icon inside the group's label by the experiment
+// (experiment/group-state.css). If it can't be (Firefox changed the label's DOM, or the
+// experiment is missing), a glyph goes in front of the title instead.
+
+const STATE_GLYPHS = { idle: "", working: "● ", needs: "◉ ", paused: "○ ", done: "✓ ", disconnected: "⊖ ", earlier: "◌ " };
+const GLYPH_PREFIX = /^[●◉○✓⊖◌] /;
+// Before icons, state was a suffix on the title.
+const LEGACY_SUFFIX = / \((?:paused|earlier)\)$/;
+
+// group id -> { state, label, title, drawn } as last written, so a group that hasn't changed costs nothing
+const painted = new Map();
+// Groups left by a previous run, group id -> the label they were titled with
+const earlierGroups = new Map();
+
+// What a session's group shows: no live client, stopped by the user, a chat waiting on a
+// permission prompt, a call in the last few seconds, a finished chat turn nobody has looked at,
+// or none of those. Chat sessions count as connected while the chat exists, even after its
+// claude process idled out and its MCP client left.
+function sessionState(session) {
+  const info = control.sessionInfo(session);
+  const chat = chats.get(session);
+  if (!chat && !info.connected) return "disconnected";
+  if (info.paused) return "paused";
+  if (chat?.awaiting) return "needs";
+  if (info.acting) return "working";
+  if (chat?.finished) return "done";
+  return "idle";
+}
+
+async function paintGroup(groupId, label, state) {
+  const last = painted.get(groupId);
+  // A group showing glyphs asks the experiment again each time, in case the label has turned up.
+  if (last?.drawn && last.state === state && last.label === label) return;
+  let drawn = false;
+  try {
+    drawn = await browser.claudePage.setGroupState(groupId, state);
+  } catch {
+    // the experiment is out of date or missing
+  }
+  const title = (drawn ? "" : STATE_GLYPHS[state]) + label;
+  if (title !== last?.title) await browser.tabGroups.update(groupId, { title });
+  painted.set(groupId, { state, label, title, drawn });
+}
+
+let syncing = false;
+let syncAgain = false;
+
+// Brings every group's icon up to date. Called from refresh(), which is already debounced.
+async function syncGroups() {
+  if (syncing) {
+    syncAgain = true;
+    return;
+  }
+  syncing = true;
+  try {
+    do {
+      syncAgain = false;
+      const seen = new Set();
+      for (const [session, s] of sessions) {
+        const groupId = await sessionGroupId(session);
+        if (groupId == null) continue;
+        seen.add(groupId);
+        await paintGroup(groupId, s.label, sessionState(session)).catch(() => {});
+      }
+      for (const [groupId, label] of earlierGroups) {
+        if (!(await browser.tabGroups.get(groupId).catch(() => null))) {
+          earlierGroups.delete(groupId);
+          continue;
+        }
+        seen.add(groupId);
+        await paintGroup(groupId, label, "earlier").catch(() => {});
+      }
+      for (const id of painted.keys()) if (!seen.has(id)) painted.delete(id);
+    } while (syncAgain);
+  } finally {
+    syncing = false;
+  }
+}
+
+// A group moved to another window is a new element there, without its icon.
+browser.tabGroups.onMoved?.addListener((group) => {
+  painted.delete(group.id);
+  scheduleRefresh();
+});
 
 async function createSessionTab(session, client, url = "about:blank", preferWindowId = null) {
   let groupId = await sessionGroupId(session);
@@ -510,11 +595,13 @@ browser.tabs.onCreated.addListener(async (tab) => {
 
 // Sessions don't survive a browser restart, so session tab groups brought back by session
 // restore belong to no one. They often hold work left for the user (a staged form), so they
-// are kept, renamed "<label> (earlier)" and greyed out; the user closes them when done.
-// A group is ours if its title is a known label, optionally numbered and "(paused)".
+// are kept, shown as "earlier" and greyed out; the user closes them when done.
+// A group is ours if its title is a known label, optionally numbered, with a state glyph in
+// front or a " (paused)" / " (earlier)" suffix (what earlier versions wrote).
 function orphanBase(title) {
   const base = String(title ?? "")
-    .replace(/ \(paused\)$/, "")
+    .replace(GLYPH_PREFIX, "")
+    .replace(LEGACY_SUFFIX, "")
     .replace(/ \d+$/, "");
   return knownLabels.has(base) ? base : null;
 }
@@ -524,7 +611,10 @@ async function closeOrphanGroups() {
   const live = await sessionGroupIds();
   for (const g of await browser.tabGroups.query({})) {
     const base = orphanBase(g.title);
-    if (base && !live.has(g.id)) await browser.tabGroups.update(g.id, { title: `${base} (earlier)`, color: "grey" });
+    if (!base || live.has(g.id)) continue;
+    earlierGroups.set(g.id, base);
+    await browser.tabGroups.update(g.id, { color: GROUP_COLOR });
+    await paintGroup(g.id, base, "earlier");
   }
 }
 
@@ -536,17 +626,11 @@ closeOrphanGroups().catch(() => {});
 // ---------------------------------------------------------------------------------------------
 // Toolbar button, Stop shortcut and popup
 
-async function setGroupPausedTitle(session, isPaused) {
-  const s = sessions.get(session);
-  const groupId = await sessionGroupId(session);
-  if (!s || groupId == null) return;
-  await browser.tabGroups.update(groupId, { title: isPaused ? `${s.label} (paused)` : s.label });
-}
-
 const popupPorts = new Set();
 let refreshQueued = false;
 let statusTimer = null;
 let shownIcon = null;
+let shownSideIcon = null;
 let shownTitle = null;
 const darkScheme = matchMedia("(prefers-color-scheme: dark)");
 darkScheme.addEventListener("change", scheduleRefresh);
@@ -570,6 +654,7 @@ function popupState() {
 
 function refresh() {
   refreshQueued = false;
+  syncGroups().catch(() => {});
   const status = control.status();
   const titles = {
     acting: "Firefox Agent Bridge: an agent is acting in Firefox",
@@ -583,6 +668,13 @@ function refresh() {
   if (icon !== shownIcon) {
     shownIcon = icon;
     browser.browserAction.setIcon({ path: icon });
+  }
+  // The sidebar's launcher icon is the same pointer as an outline, solid purple only while an
+  // agent is acting. sidebar_action has no theme_icons, so it too is picked by color scheme.
+  const sideIcon = `icons/sidebar-${status === "acting" ? "working" : "idle"}-${darkScheme.matches ? "dark" : "light"}.svg`;
+  if (sideIcon !== shownSideIcon) {
+    shownSideIcon = sideIcon;
+    browser.sidebarAction.setIcon({ path: sideIcon }).catch(() => {});
   }
   // A permission request nobody can see (the sidebar is closed, or shows another chat) would
   // otherwise stall the task silently, so the button says so.
@@ -632,7 +724,7 @@ const EVENT_CAP = 1000;
 const ENGINE_NAMES = { claude: "Claude", codex: "Codex" };
 const HOST_DOWN = "The native host is not connected.";
 
-// chat id -> { id, windowId, events, engine, model, effort, status, awaiting, resume, queue, tabIds, groupTimer }
+// chat id -> { id, windowId, events, engine, model, effort, status, awaiting, finished, resume, queue, tabIds, groupTimer }
 const chats = new Map();
 const validChatId = (id) => typeof id === "string" && /^[\w-]{1,64}$/.test(id) && !["__proto__", "constructor", "prototype"].includes(id);
 const windowChat = new Map(); // window id -> the chat its panel last showed
@@ -643,7 +735,7 @@ let requestCount = 0;
 function chatFor(id, windowId = null) {
   let chat = chats.get(id);
   if (!chat) {
-    chat = { id, windowId, events: [], engine: null, model: null, effort: null, status: "idle", awaiting: false, resume: false, queue: Promise.resolve(), tabIds: new Set(), groupTimer: null };
+    chat = { id, windowId, events: [], engine: null, model: null, effort: null, status: "idle", awaiting: false, finished: false, resume: false, queue: Promise.resolve(), tabIds: new Set(), groupTimer: null };
     chats.set(id, chat);
   }
   return chat;
@@ -689,10 +781,29 @@ function trackApproval(chat, ev) {
   if (chat.awaiting !== was) scheduleRefresh();
 }
 
+const chatShown = (chat) => [...panels].some((p) => p.chatId === chat.id);
+
 // A chat waiting for approval that no open panel is showing.
 function unseenApproval() {
-  for (const chat of chats.values()) if (chat.awaiting && ![...panels].some((p) => p.chatId === chat.id)) return true;
+  for (const chat of chats.values()) if (chat.awaiting && !chatShown(chat)) return true;
   return false;
+}
+
+// Whether a turn finished that the user hasn't looked at: no panel showed the chat when it
+// ended, and since then they haven't shown it or activated a tab in its group (both clear
+// it), nor started another turn. A turn the user interrupted isn't news. Live events only:
+// transcripts loaded from history replay old results.
+function trackFinished(chat, ev) {
+  const was = chat.finished;
+  if (ev.kind === "result") chat.finished = !chatShown(chat) && !(ev.ok === false && ev.error === "Interrupted");
+  else if (ev.kind === "status" && (ev.status === "starting" || ev.status === "running")) chat.finished = false;
+  if (chat.finished !== was) scheduleRefresh();
+}
+
+function markSeen(chat) {
+  if (!chat.finished) return;
+  chat.finished = false;
+  scheduleRefresh();
 }
 
 // Stop all agents also ends the turns the panel is running: pausing Firefox alone would leave
@@ -748,6 +859,7 @@ function chatFromHost(msg) {
   if (msg.type === "chat.event") {
     const chat = chatFor(msg.chatId);
     record(chat, msg.event);
+    trackFinished(chat, msg.event);
     deliver(chat.id, msg);
   } else if (msg.requestId != null) {
     answer(msg.requestId, msg);
@@ -830,6 +942,15 @@ browser.tabs.onAttached.addListener((tabId) => tabTouched(tabId, -1));
 browser.tabs.onDetached.addListener((tabId) => tabTouched(tabId, -1));
 browser.tabs.onActivated.addListener(({ windowId }) => pushActiveTab(windowId));
 
+// The user switching to a tab in a chat's group counts as looking at what it did. Tabs Firefox
+// activated for a page's new tab don't.
+browser.tabs.onActivated.addListener(async ({ tabId }) => {
+  if (justOpened.has(tabId)) return;
+  const tab = await browser.tabs.get(tabId).catch(() => null);
+  if (!(tab?.groupId >= 0)) return;
+  for (const chat of chats.values()) if (sessions.get(chat.id)?.groupId === tab.groupId) markSeen(chat);
+});
+
 // ---- Panels
 
 async function sendState(panel) {
@@ -856,6 +977,7 @@ async function sendState(panel) {
 function showChat(panel, chat) {
   panel.chatId = chat.id;
   windowChat.set(panel.windowId, chat.id);
+  markSeen(chat);
   scheduleRefresh();
   return sendState(panel);
 }

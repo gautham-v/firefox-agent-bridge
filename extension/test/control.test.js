@@ -150,6 +150,40 @@ test("while paused, calls fail fast; new sessions start paused; resume per sessi
   assert.deepEqual(pauses.filter(([, p]) => p).map(([s]) => s).sort(), ["a", "b", "c"]);
 });
 
+test("sessionInfo: acting lapses, Stop pauses, and a client that left or was blocked isn't connected", async () => {
+  const { control, clock } = setup();
+  assert.deepEqual(control.sessionInfo("s1"), { known: false, paused: false, acting: false, connected: false });
+  let release;
+  const running = control.handleCall(call(1), () => new Promise((r) => (release = r)));
+  await tick();
+  assert.deepEqual(control.sessionInfo("s1"), { known: true, paused: false, acting: true, connected: true });
+  release([]);
+  await running;
+  clock.advance(2900);
+  assert.equal(control.sessionInfo("s1").acting, true);
+  clock.advance(200);
+  assert.equal(control.sessionInfo("s1").acting, false);
+
+  control.stopAll();
+  assert.equal(control.sessionInfo("s1").paused, true);
+  control.resumeAll();
+
+  control.clientEvent({ event: "disconnected", client: { id: 1 } });
+  assert.equal(control.sessionInfo("s1").connected, false, "the client exited");
+  control.clientEvent({ event: "connected", client: { id: 1, name: "Claude Code" } });
+  assert.equal(control.sessionInfo("s1").connected, true);
+  control.disconnect(1);
+  assert.equal(control.sessionInfo("s1").connected, false, "disconnected by the user");
+  control.clientEvent({ event: "connected", client: { id: 2, name: "Claude Code" } });
+  await control.handleCall(call(2, "s1", { id: 2, name: "Claude Code" }), ok);
+  assert.equal(control.sessionInfo("s1").connected, false, "the name is blocked");
+  control.unblock("Claude Code");
+  await control.handleCall(call(3, "s1", { id: 2, name: "Claude Code" }), ok);
+  assert.equal(control.sessionInfo("s1").connected, true);
+  control.hostDisconnected();
+  assert.equal(control.sessionInfo("s1").connected, false, "the host took every connection with it");
+});
+
 test("log never keeps typed text, form values, script source or URLs", async () => {
   const secret = "hunter2-secret";
   const { control } = setup();

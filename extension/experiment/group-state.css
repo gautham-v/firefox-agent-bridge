@@ -1,0 +1,72 @@
+/* State icons drawn inside the label of a session's tab group. api.js adds this sheet to every
+ * browser window and sets fab-state on the <tab-group>. Marks are masks filled with the label's
+ * own text color, so they follow the group color, collapsing and the theme; only "working" is
+ * purple, the agent cursor's color. Everything is static. */
+
+tab-group {
+  --fab-size: 13px;
+}
+
+tab-group[fab-state="idle"] {
+  --fab-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M3 1.2 L3 14.9 L7.1 11.2 L13.1 10.8 Z'/></svg>");
+}
+
+tab-group[fab-state="needs"] {
+  --fab-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle fill='none' stroke='black' stroke-width='1.5' cx='8' cy='8' r='5.5'/><circle fill='black' stroke='black' stroke-width='1.5' cx='8' cy='8' r='1.6'/></svg>");
+}
+
+tab-group[fab-state="paused"] {
+  --fab-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='none' stroke='black' stroke-width='2' stroke-linecap='round' d='M6 4.5v7M10 4.5v7'/></svg>");
+}
+
+tab-group[fab-state="done"] {
+  --fab-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M3.8 8.4 L6.7 11.2 L12.2 5'/></svg>");
+}
+
+tab-group[fab-state="disconnected"] {
+  --fab-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle fill='none' stroke='black' stroke-opacity='.55' stroke-width='1.5' cx='8' cy='8' r='5.5'/><path fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' d='M4.3 11.7 L11.7 4.3'/></svg>");
+}
+
+tab-group[fab-state="earlier"] {
+  --fab-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle fill='none' stroke='black' stroke-opacity='.55' stroke-width='1.5' stroke-linecap='round' stroke-dasharray='.1 2.9' cx='8' cy='8' r='5.5'/></svg>");
+}
+
+/* Working is the solid pointer in the agent purple. The mask is the pointer grown by a thin
+ * margin; what shows through it is the label's own background (inherited) with the purple
+ * pointer on top, so the margin reads as a knockout on any label color. */
+tab-group[fab-state="working"] {
+  --fab-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='black' stroke='black' stroke-width='3.2' stroke-linejoin='round' d='M3 1.2 L3 14.9 L7.1 11.2 L13.1 10.8 Z'/></svg>");
+  --fab-pointer-light: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='%237542e5' stroke='%237542e5' stroke-width='1.2' stroke-linejoin='round' d='M3 1.2 L3 14.9 L7.1 11.2 L13.1 10.8 Z'/></svg>");
+  --fab-pointer-dark: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='%239059ff' stroke='%239059ff' stroke-width='1.2' stroke-linejoin='round' d='M3 1.2 L3 14.9 L7.1 11.2 L13.1 10.8 Z'/></svg>");
+}
+
+tab-group[fab-state] > .tab-group-label-container .tab-group-label {
+  padding-inline-start: 6px;
+
+  &::before {
+    content: "";
+    display: inline-block;
+    width: var(--fab-size);
+    height: var(--fab-size);
+    vertical-align: -2px;
+    margin-inline-end: 5px;
+    background-color: currentColor;
+    mask: var(--fab-mask) center / 100% 100% no-repeat;
+  }
+}
+
+tab-group[fab-state="working"] > .tab-group-label-container .tab-group-label::before {
+  background: var(--fab-pointer-light) center / 100% 100% no-repeat;
+  background-color: inherit;
+}
+
+@media (prefers-color-scheme: dark) {
+  tab-group[fab-state="working"] > .tab-group-label-container .tab-group-label::before {
+    background-image: var(--fab-pointer-dark);
+  }
+}
+
+/* The collapsed sidebar shows only the label's first letter in a square, which an icon would push out. */
+#tabbrowser-tabs[orient="vertical"]:not([expanded]) tab-group[fab-state] .tab-group-label::before {
+  display: none;
+}

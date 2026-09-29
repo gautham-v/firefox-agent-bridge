@@ -47,6 +47,23 @@
         ]
       },
       {
+        "name": "setGroupState",
+        "type": "function",
+        "async": true,
+        "description": "Draw a state icon (idle, working, needs, paused, done, disconnected or earlier) in a tab group's label, or clear it with null. Resolves to whether the icon is showing.",
+        "parameters": [
+          {
+            "name": "groupId",
+            "type": "integer"
+          },
+          {
+            "name": "state",
+            "type": "string",
+            "optional": true
+          }
+        ]
+      },
+      {
         "name": "setActive",
         "type": "function",
         "async": true,

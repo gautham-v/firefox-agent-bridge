@@ -288,6 +288,8 @@ async function marionette(port) {
     chrome,
     close: () => sock.destroy(),
     groupTitles: () => chrome("return gBrowser.tabGroups.map((g) => g.label)"),
+    // The state icon each group shows: the fab-state attribute the experiment sets on <tab-group>.
+    groupStates: () => chrome("return gBrowser.tabGroups.map((g) => g.getAttribute('fab-state'))"),
     // Switches to the tab showing url (without selecting it) and returns its handle.
     toTab: async (url) => {
       for (const handle of await cmd("WebDriver:GetWindowHandles")) {

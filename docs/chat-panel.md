@@ -17,7 +17,7 @@ Out of scope for now: turning connectors on and off per chat, and voice input.
 | File | Role |
 | --- | --- |
 | `extension/sidebar/panel.{html,css,js}` | The chat UI. Also opened in a popup window by "Pop out". |
-| `extension/background.js` | Toggles the sidebar, relays chat messages between panels and the host, binds chats to tab groups, watches group membership, buffers chat events for panels that reconnect. |
+| `extension/background.js` | Toggles the sidebar, relays chat messages between panels and the host, binds chats to tab groups, watches group membership, buffers chat events for panels that reconnect, and works out each chat group's state icon. |
 | `host/chat.mjs` (used by `host/host.mjs`) | Spawns and drives engine processes, normalizes their output, answers permission prompts, lists history and capabilities. |
 | `mcp/server.mjs` | Uses `FIREFOX_AGENT_BRIDGE_SESSION` from its environment as the session id when set. |
 
@@ -183,11 +183,27 @@ The tab adopted at binding is the user's own, so it is only grouped: it isn't pi
 discarding and no blank tab is opened. If it can't be taken (pinned, or already in another
 session's group), the chat starts with a blank tab in a new group instead, opened in the chat's own
 window. `group.add` on a chat
-with no group starts one from that tab. The extension has one sidebar icon (the purple pointer),
-since `sidebar_action` has no themed icons.
+with no group starts one from that tab. `sidebar_action` has no themed icons, so background.js
+sets the sidebar icon by color scheme like the toolbar's: an outline pointer, solid purple while an
+agent is acting.
+
+The panel paints itself with the current theme's sidebar colors (`theme.getCurrent()`, falling
+back to the toolbar's, then to neutral greys), so it is the same surface as Firefox's sidebar
+header. Its header is one row, the chat's title and live state, since Firefox's own sidebar header
+already names it; the engine is picked in the model menu.
 
 While a chat is waiting on a permission request and no open panel shows it, the toolbar button
 gets a `!` badge and a title saying so; opening the panel, answering, or the turn ending clears it.
+
+The chat's tab group (grey, like every agent group) shows a state icon in its label (README, "Tab
+group icons"). Two states come from the chat's bookkeeping here: *needs you* while a permission
+request is pending (the same flag as the badge, whether or not a panel shows it), and *done* when
+a turn's `result` arrived while no open panel showed the chat and the user hasn't looked since.
+Looking is a panel showing the chat (`hello`, `chat.new`, `chat.open` on it), or activating a tab
+in its group; a new turn also clears it, and an interrupted turn never sets it. Only live events
+count, not results replayed from a loaded transcript. A chat counts as connected for the
+*disconnected* state while it exists, even after its `claude` process idled out and its MCP client
+left.
 
 The extension reports the chat's agent to the bridge as `<client> (sidebar)` (from the MCP server,
 when `FIREFOX_AGENT_BRIDGE_SESSION` is set), so Disconnect on a terminal session of the same
