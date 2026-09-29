@@ -215,6 +215,11 @@ test("labels per client: Codex, ffctl, first word, numbered repeats", async () =
   assert.equal(JSON.stringify(env.browser.store.groupLabels), JSON.stringify(["Claude", "Codex", "Goose"]));
   const wrong = await env.callTool("tabs_close_mcp", { tabId: 2 }, "s3", { id: 3, name: "goose" });
   assert.match(wrong.result.content[0].text, /not in this session's tab group \("Goose"\)/);
+  // Numbers count only groups that still exist: with the first Codex group gone, the next is "Codex".
+  const first = [...env.browser.groups.values()].find((g) => g.title === "Codex");
+  env.browser.groups.delete(first.id);
+  await env.callTool("tabs_create_mcp", {}, "s4", { id: 4, name: "codex-mcp-client" });
+  assert.deepEqual([...env.browser.groups.values()].map((g) => g.title), ["Codex 2", "Goose", "Codex"]);
 });
 
 test("on restart, groups with any remembered label become '<label>' with the earlier icon'", async () => {

@@ -34,7 +34,9 @@ const SYSTEM_PROMPT =
   "You are running in the Firefox sidebar chat of the Firefox Agent Bridge, on the user's own computer. " +
   "The user's tabs for this chat are in your Firefox tab group: call tabs_context_mcp to see them, and work in those tabs " +
   "rather than opening new ones unless the task needs one. A message may begin with a <panel-context> block listing the " +
-  "current tabs and attached files; the user did not type it. Keep answers short.";
+  "current tabs and attached files; the user did not type it. Prefer find and get_page_text over reading a whole page, " +
+  "and if a large result is saved to a file, open it with the Read tool, not shell commands, which need the user's approval. " +
+  "Keep answers short.";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i; // Claude Code's session ids
 const MODEL_ID = /^[A-Za-z0-9][\w.:\-[\]]{0,80}$/; // never a flag

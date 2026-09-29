@@ -1,13 +1,15 @@
 # Firefox Agent Bridge
 
 Browser tools that let MCP clients (Claude Code, the Codex CLI and app, the Claude desktop app)
-drive Firefox Developer Edition the way Claude in Chrome drives Chrome, running on your existing
-agent subscription.
+drive Firefox Developer Edition the way Claude in Chrome drives Chrome, plus a sidebar chat that
+runs Claude Code or Codex right in Firefox, all on your existing agent subscription.
 
 Unofficial. Not affiliated with Anthropic, OpenAI or Mozilla.
 
-![Claude Code searching Wikipedia and drawing a diagram in a background Firefox tab](docs/demo.gif)
+![Asking Claude in the Firefox sidebar for Pavement's studio albums, then dragging a second tab into its group and asking about it](docs/demo.gif)
 
+- A [chat panel](#chat-panel) in Firefox's sidebar: click the toolbar button, ask, and the agent
+  works in the tab you're on. Drag more tabs into its group and it sees those too.
 - Tabs live in a per-session tab group named after the client (**Claude**, **Codex**, ...; a
   second session from the same client gets "Codex 2") and stay in the background. Every agent
   group is grey, with a [state icon](#tab-group-icons) in its label. Nothing takes
@@ -24,6 +26,8 @@ Unofficial. Not affiliated with Anthropic, OpenAI or Mozilla.
 ## How it works
 
 ```
+sidebar chat ──native messaging──▶ host/host.mjs ──spawns──▶ claude -p / codex exec (an MCP client, below)
+
 MCP client ──stdio MCP──▶ mcp/server.mjs ──unix socket──▶ host/host.mjs ──native messaging──▶ extension
                                                                                                  │
                                           background.js (tools, tab groups, screenshots) ◀───────┘

@@ -117,16 +117,21 @@ async function rememberLabel(label) {
   await browser.storage.local.set({ [LABELS_KEY]: [...knownLabels] }).catch(() => {});
 }
 
-function newSessionEntry(client) {
+// Numbered only against groups that still exist, so a new chat after the last one's group was
+// closed is "Claude" again, not "Claude 3".
+async function newSessionEntry(client) {
   const base = clientLabel(client);
-  const same = [...sessions.values()].filter((s) => s.base === base).length;
-  return { base, label: same ? `${base} ${same + 1}` : base, color: GROUP_COLOR };
+  const live = await sessionGroupIds();
+  const taken = new Set([...sessions.values()].filter((s) => s.base === base && live.has(s.groupId)).map((s) => s.label));
+  let label = base;
+  for (let n = 2; taken.has(label); n++) label = `${base} ${n}`;
+  return { base, label, color: GROUP_COLOR };
 }
 
 // Puts a tab in a new group for the session, titled and colored from its entry.
 async function startGroup(session, client, tabId, windowId) {
   const groupId = await browser.tabs.group({ tabIds: [tabId], createProperties: { windowId } });
-  const s = sessions.get(session) ?? newSessionEntry(client);
+  const s = sessions.get(session) ?? (await newSessionEntry(client));
   s.groupId = groupId;
   sessions.set(session, s);
   await rememberLabel(s.base);
