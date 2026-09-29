@@ -89,7 +89,9 @@ profile_in_use() {
     target="$(readlink "$1/lock" 2>/dev/null)" || return 1
     kill -0 "${target##*+}" 2>/dev/null
   else
-    pgrep -f "Firefox Developer Edition.app/Contents/MacOS/firefox" >/dev/null
+    # Firefox holds .parentlock open while the profile is in use, so another profile's
+    # instance doesn't count.
+    [ -n "$(lsof -t "$1/.parentlock" 2>/dev/null)" ]
   fi
 }
 
