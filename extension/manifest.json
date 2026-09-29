@@ -13,8 +13,13 @@
     "default_icon": "icons/toolbar-idle-light.svg",
     "theme_icons": [{ "light": "icons/toolbar-idle-dark.svg", "dark": "icons/toolbar-idle-light.svg", "size": 16 }],
     "default_title": "Firefox Agent Bridge",
-    "default_popup": "popup/popup.html",
     "default_area": "navbar"
+  },
+  "sidebar_action": {
+    "default_panel": "sidebar/panel.html",
+    "default_title": "Claude",
+    "default_icon": "icons/toolbar-acting-light.svg",
+    "open_at_install": false
   },
   "commands": {
     "stop-agents": {

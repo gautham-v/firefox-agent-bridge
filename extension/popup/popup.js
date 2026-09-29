@@ -3,6 +3,11 @@
 // Shows what control.js knows and sends the user's choices back. Client names and folders come
 // from the connecting program, so they are only ever set as text, never as markup.
 
+// The chat panel embeds this page in its "Agents and activity" sheet as popup.html?embedded.
+const query = new URLSearchParams(location.search);
+if (query.has("embedded")) document.documentElement.classList.add("embedded");
+if (["light", "dark"].includes(query.get("theme"))) document.documentElement.dataset.theme = query.get("theme");
+
 const port = browser.runtime.connect({ name: "popup" });
 const $ = (id) => document.getElementById(id);
 const send = (cmd, extra = {}) => port.postMessage({ cmd, ...extra });

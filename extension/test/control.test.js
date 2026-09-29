@@ -135,7 +135,7 @@ test("while paused, calls fail fast; new sessions start paused; resume per sessi
   await control.handleCall(call(4, "c"), run);
   assert.equal(ran, 0);
   const texts = replies().slice(-2).map((r) => r.result.content[0].text);
-  for (const t of texts) assert.match(t, /paused this session.*toolbar button/);
+  for (const t of texts) assert.match(t, /paused this session.*Agent Bridge panel/);
   assert.equal(control.snapshot().sessions.find((s) => s.id === "a").paused, true);
   control.resume("a");
   await control.handleCall(call(5, "a"), run);

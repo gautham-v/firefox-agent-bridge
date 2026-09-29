@@ -13,6 +13,7 @@
 #   --clients-only     only register clients; leave Firefox alone (alias: --no-firefox)
 #   --no-clients       only install into Firefox; register no MCP client
 # With no client flags, registers with Claude Code only. Safe to re-run.
+# The host launcher also records where claude and codex are (CLAUDE_BIN / CODEX_BIN override).
 # Quit Firefox Developer Edition first; prefs are read at startup.
 set -e
 
@@ -95,6 +96,18 @@ profile_in_use() {
   fi
 }
 
+# Prints where engine binary $1 is: $2 from the environment, else on PATH, else the path an
+# earlier run wrote into the launcher, as long as it still exists. Prints nothing if none.
+engine_path() {
+  eval "p=\"\${$2:-}\""
+  [ -n "$p" ] || p="$(command -v "$1" 2>/dev/null || true)"
+  if [ -z "$p" ] && [ -f "$REPO/host/firefox-agent-bridge-host" ]; then
+    p="$(sed -n "s/^export $2=\"\(.*\)\"\$/\1/p" "$REPO/host/firefox-agent-bridge-host" | head -n 1)"
+  fi
+  if [ -n "$p" ] && [ -x "$p" ]; then printf '%s' "$p"; fi
+  return 0
+}
+
 add_pref() {
   grep -q "\"$1\"" "$PROFILE/user.js" || printf 'user_pref("%s", %s);\n' "$1" "$2" >> "$PROFILE/user.js"
 }
@@ -112,11 +125,17 @@ Pass the profile dir (about:profiles shows it)."
   [ -d "$PROFILE" ] || die "Profile dir not found: $PROFILE"
   ! profile_in_use "$PROFILE" || die "Quit Firefox Developer Edition first."
 
+  # The chat panel starts claude and codex from the host, and Firefox gives the host a minimal
+  # PATH, so the launcher exports where they are (the host also searches the usual places).
   LAUNCHER="$REPO/host/firefox-agent-bridge-host"
-  cat > "$LAUNCHER" <<EOF
-#!/bin/sh
-exec "$NODE" "$REPO/host/host.mjs" "\$@"
-EOF
+  CLAUDE_PATH="$(engine_path claude CLAUDE_BIN)"
+  CODEX_PATH="$(engine_path codex CODEX_BIN)"
+  {
+    echo '#!/bin/sh'
+    [ -z "$CLAUDE_PATH" ] || printf 'export CLAUDE_BIN="%s"\n' "$CLAUDE_PATH"
+    [ -z "$CODEX_PATH" ] || printf 'export CODEX_BIN="%s"\n' "$CODEX_PATH"
+    printf 'exec "%s" "%s/host/host.mjs" "$@"\n' "$NODE" "$REPO"
+  } > "$LAUNCHER"
   chmod +x "$LAUNCHER"
 
   mkdir -p "$NMH_DIR"

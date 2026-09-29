@@ -13,7 +13,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: rgb(40, 40, 42);
     --ink: rgba(255, 255, 255, 0.85);
     --ink2: #98989d;
@@ -25,6 +25,21 @@
     --agent: #9059ff;
   }
 }
+
+/* The chat panel embeds this page with ?theme=, for screenshots. */
+:root[data-theme="dark"] {
+  --bg: rgb(40, 40, 42);
+  --ink: rgba(255, 255, 255, 0.85);
+  --ink2: #98989d;
+  --ink3: #6c6c70;
+  --sep: rgba(255, 255, 255, 0.12);
+  --wash: rgba(255, 255, 255, 0.1);
+  --fill: rgba(255, 255, 255, 0.08);
+  --warn: #ff453a;
+  --agent: #9059ff;
+  color-scheme: dark;
+}
+:root[data-theme="light"] { color-scheme: light; }
 
 * { box-sizing: border-box; }
 
@@ -38,6 +53,10 @@ body {
   font: 13px/17px -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+/* Inside the chat panel's "Agents and activity" sheet: the frame sets the width, and the sheet
+   supplies the background. */
+:root.embedded body { width: auto; max-height: none; background: transparent; }
 
 p { margin: 0; }
 ul, ol { list-style: none; margin: 0; padding: 0; }

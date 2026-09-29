@@ -14,7 +14,8 @@ const DIR = path.join(os.homedir(), ".firefox-agent-bridge");
 const SOCKET = path.join(DIR, "bridge.sock");
 const SCREENSHOT_DIR = path.join(DIR, "screenshots");
 const CALL_TIMEOUT_MS = 90_000;
-const SESSION = randomUUID();
+// The chat panel pins its agent to the chat id so the agent's calls land in the chat's tab group.
+const SESSION = process.env.FIREFOX_AGENT_BRIDGE_SESSION || randomUUID();
 const VERSION = "0.1.0";
 
 const tabId = (what = "Tab ID to act on") => ({
@@ -263,7 +264,10 @@ async function handle(msg) {
     case "initialize": {
       const info = params?.clientInfo;
       if (info && typeof info.name === "string" && info.name) {
-        clientInfo = { name: info.name, version: typeof info.version === "string" ? info.version : null };
+        // The chat panel's agent is told apart from the same program run in a terminal, so
+        // disconnecting one in Firefox doesn't block the other.
+        const name = process.env.FIREFOX_AGENT_BRIDGE_SESSION ? `${info.name} (sidebar)` : info.name;
+        clientInfo = { name, version: typeof info.version === "string" ? info.version : null };
       }
       return {
         protocolVersion: params?.protocolVersion ?? "2025-06-18",

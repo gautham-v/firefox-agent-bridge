@@ -8,6 +8,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { webcrypto } = require("node:crypto");
 
 const event = () => {
   const listeners = [];
@@ -20,7 +21,7 @@ function mockBrowser({ store = {}, groups: initialGroups = [] } = {}) {
   let nextTab = 2;
   let nextGroup = 100;
   const native = { sent: [], onMessage: event(), onDisconnect: event() };
-  const action = {};
+  const action = { toggles: 0, popups: [] };
   const b = {
     native,
     action,
@@ -30,14 +31,29 @@ function mockBrowser({ store = {}, groups: initialGroups = [] } = {}) {
     runtime: {
       connectNative: () => ({ onMessage: native.onMessage, onDisconnect: native.onDisconnect, postMessage: (m) => native.sent.push(m) }),
       getManifest: () => ({ version: "0.1.0" }),
+      getURL: (p) => `moz-extension://x/${p}`,
       onConnect: event(),
     },
     storage: { local: { get: async (k) => ({ [k]: store[k] }), set: async (o) => Object.assign(store, o), remove: async (k) => delete store[k] } },
-    windows: { getLastFocused: async () => ({ id: 10, incognito: false }), create: async () => ({ id: 11 }) },
+    windows: {
+      getLastFocused: async () => ({ id: 10, incognito: false }),
+      create: async (o) => {
+        action.popups.push(o);
+        return { id: 11 };
+      },
+    },
+    sidebarAction: { toggle: () => action.toggles++ },
     tabs: {
       onActivated: event(),
       onCreated: event(),
-      query: async () => [...tabs.values()].map((t) => ({ ...t })),
+      onUpdated: event(),
+      onRemoved: event(),
+      onAttached: event(),
+      onDetached: event(),
+      query: async (q = {}) =>
+        [...tabs.values()]
+          .filter((t) => (q.active == null || t.active === q.active) && (q.windowId == null || t.windowId === q.windowId))
+          .map((t) => ({ ...t, index: t.id })),
       get: async (id) => {
         if (!tabs.has(id)) throw new Error("no tab");
         return { ...tabs.get(id) };
@@ -55,6 +71,11 @@ function mockBrowser({ store = {}, groups: initialGroups = [] } = {}) {
         return gid;
       },
       remove: async (id) => tabs.delete(id),
+      ungroup: async (id) => {
+        const gid = tabs.get(id).groupId;
+        tabs.get(id).groupId = -1;
+        if (![...tabs.values()].some((t) => t.groupId === gid)) groups.delete(gid);
+      },
     },
     tabGroups: {
       get: async (id) => {
@@ -66,20 +87,25 @@ function mockBrowser({ store = {}, groups: initialGroups = [] } = {}) {
     },
     claudePage: { setActive: async () => {}, call: async (tabId, op) => (op === "textSize" ? 10 : "done") },
     browserAction: {
+      onClicked: event(),
       setIcon: ({ path }) => (action.icon = path),
       setTitle: ({ title }) => (action.title = title),
+      setBadgeText: ({ text }) => (action.badge = text),
+      setBadgeBackgroundColor: () => {},
     },
     commands: { onCommand: event() },
   };
   return b;
 }
 
+// Objects made inside the vm context have another Object prototype, which deepEqual notices.
+const plain = (x) => JSON.parse(JSON.stringify(x));
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function load(opts) {
   const browser = mockBrowser(opts);
   const matchMedia = () => ({ matches: !!opts?.dark, addEventListener: () => {} });
-  const ctx = vm.createContext({ browser, console, setTimeout, clearTimeout, URL, Date, Promise, matchMedia });
+  const ctx = vm.createContext({ browser, console, setTimeout, clearTimeout, URL, Date, Promise, matchMedia, crypto: webcrypto });
   for (const f of ["control.js", "background.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "..", f), "utf8"), ctx, { filename: f });
   await wait(20);
   const replies = () => browser.native.sent.filter((m) => m.result);
@@ -98,7 +124,24 @@ async function load(opts) {
     p.last = () => msgs.at(-1).state;
     return p;
   };
-  return { browser, callTool, replies, popup, ctx };
+  // A chat panel on the "sidebar" port. Messages it received are in msgs; of(type) picks them.
+  const panel = async (windowId = 10, chatId) => {
+    const msgs = [];
+    const p = { name: "sidebar", onMessage: event(), onDisconnect: event(), postMessage: (m) => msgs.push(structuredClone(m)), msgs };
+    browser.runtime.onConnect.fire(p);
+    p.send = async (cmd, extra = {}) => {
+      await p.onMessage.fire({ cmd, ...extra });
+      await wait(20);
+    };
+    p.of = (type) => msgs.filter((m) => m.type === type);
+    p.close = () => p.onDisconnect.fire();
+    await p.send("hello", { windowId, ...(chatId ? { chatId } : {}) });
+    p.chatId = p.of("state")[0].chatId;
+    return p;
+  };
+  const host = (msg) => browser.native.onMessage.fire(msg);
+  const sentToHost = (type) => plain(browser.native.sent.filter((m) => m.type === type));
+  return { browser, callTool, replies, popup, panel, host, sentToHost, ctx };
 }
 
 test("calls run without any prompt; group is named after the client", async () => {
@@ -233,4 +276,403 @@ test("Disconnect sends disconnect_client, blocks the name, Unblock lets it back"
   assert.equal(JSON.stringify(ui.last().blocked), JSON.stringify(["Claude Code"]));
   ui.send({ cmd: "unblock", name: "Claude Code" });
   assert.equal((await env.callTool("tabs_context_mcp", {}, "s1", { id: 5, name: "Claude Code" })).result.isError, undefined);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Chat panel
+
+test("toolbar click toggles the sidebar synchronously; the manifest has a sidebar and no popup", async () => {
+  const { browser } = await load();
+  const done = browser.browserAction.onClicked.fire({});
+  assert.equal(browser.action.toggles, 1, "toggle runs in the click's own call stack");
+  await done;
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
+  assert.equal(manifest.browser_action.default_popup, undefined);
+  assert.equal(manifest.sidebar_action.default_panel, "sidebar/panel.html");
+  assert.equal(manifest.sidebar_action.open_at_install, false);
+  assert.equal(browser.action.icon, "icons/toolbar-idle-light.svg", "toolbar icons unchanged");
+});
+
+test("hello gives a new chat, and the same chat on the next hello from that window", async () => {
+  const env = await load();
+  const a = await env.panel();
+  const state = a.of("state")[0];
+  assert.match(state.chatId, /^[0-9a-f-]{36}$/);
+  assert.equal(state.windowId, 10);
+  assert.deepEqual(state.events, []);
+  assert.deepEqual(state.group, { chatId: state.chatId, label: null, color: null, tabs: [] });
+  assert.equal(state.activeTab.tabId, 1);
+  assert.equal(state.paused, false);
+  const b = await env.panel();
+  assert.equal(b.of("state")[0].chatId, state.chatId);
+  await b.send("chat.new");
+  assert.equal(b.of("state")[1].chatId, state.chatId, "an untouched chat is reused");
+  await env.host({ type: "chat.event", chatId: state.chatId, event: { kind: "user", text: "hi", attachments: [] } });
+  await b.send("chat.new");
+  assert.notEqual(b.of("state")[2].chatId, state.chatId);
+  assert.equal((await env.panel()).chatId, b.of("state")[2].chatId, "the window's current chat moved");
+});
+
+test("first chat.send groups the viewed tab in place and the chat's MCP calls find it", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await a.send("chat.send", { chatId: a.chatId, engine: "claude", model: "haiku", effort: "low", text: "hi", attachments: [] });
+  const sent = env.sentToHost("chat.send");
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0], {
+    type: "chat.send",
+    chatId: a.chatId,
+    engine: "claude",
+    model: "haiku",
+    effort: "low",
+    text: "hi",
+    attachments: [],
+    context: { tabs: [{ tabId: 1, title: "user", url: "https://user.example/", current: true }] },
+    resume: false,
+  });
+  assert.equal(env.browser.tabsMap.size, 1, "no extra about:blank tab");
+  assert.equal(env.browser.tabsMap.get(1).groupId, 100);
+  assert.deepEqual([env.browser.groups.get(100).title, env.browser.groups.get(100).color], ["Claude", "orange"]);
+  assert.equal(env.browser.tabsMap.get(1).autoDiscardable, undefined, "the user's tab isn't marked");
+
+  const ctx = JSON.parse((await env.callTool("tabs_context_mcp", { createIfEmpty: true }, a.chatId, { id: 9, name: "claude" })).result.content[0].text);
+  assert.equal(ctx.tabGroup, "Claude");
+  assert.deepEqual(ctx.availableTabs, [{ tabId: 1, title: "user", url: "https://user.example/", userIsViewing: true }]);
+  assert.equal(env.browser.tabsMap.size, 1);
+  assert.equal((await env.callTool("get_page_text", { tabId: 1 }, a.chatId, { id: 9, name: "claude" })).result.isError, undefined);
+
+  // A second message reuses the group; a second chat and Codex get their own labels.
+  await a.send("chat.send", { engine: "claude", text: "again" });
+  assert.equal(env.browser.groups.size, 1);
+  assert.equal(env.sentToHost("chat.send")[1].context.tabs.length, 1);
+  assert.equal(env.sentToHost("chat.send")[1].resume, false);
+  const b = await env.panel(12);
+  env.browser.tabsMap.set(7, { id: 7, windowId: 12, groupId: -1, active: true, url: "https://b.example/", status: "complete", title: "b" });
+  await b.send("chat.send", { engine: "codex", text: "hello" });
+  assert.equal(env.browser.tabsMap.get(7).groupId, 101);
+  assert.equal(env.browser.groups.get(101).title, "Codex");
+});
+
+test("a viewed tab that is already in another session's group isn't taken; the chat gets a blank tab", async () => {
+  const env = await load();
+  await env.callTool("tabs_create_mcp", {}, "mcp1", { id: 1, name: "claude-code" });
+  env.browser.tabsMap.get(1).active = false;
+  env.browser.tabsMap.get(2).active = true;
+  const a = await env.panel();
+  await a.send("chat.send", { engine: "claude", text: "hi" });
+  assert.equal(env.browser.tabsMap.get(2).groupId, 100, "still the MCP session's");
+  assert.equal(env.browser.groups.size, 2);
+  assert.equal(env.browser.groups.get(101).title, "Claude 2");
+
+  // The blank tab opens in the panel's window, not wherever the last focused window is.
+  const b = await env.panel(12);
+  env.browser.tabsMap.set(8, { id: 8, windowId: 12, groupId: 100, active: true, url: "https://c.example/", status: "complete", title: "c" });
+  await b.send("chat.send", { engine: "claude", text: "hi" });
+  const blank = [...env.browser.tabsMap.values()].find((t) => t.groupId === 102);
+  assert.equal(blank?.windowId, 12);
+});
+
+test("chat messages relay both ways; replies go to the panel that asked", async () => {
+  const env = await load();
+  const a = await env.panel();
+  const b = await env.panel();
+  const other = await env.panel(12);
+  await a.send("chat.interrupt");
+  await a.send("chat.permission", { requestId: "p1", decision: "allow_always" });
+  assert.deepEqual(env.sentToHost("chat.interrupt"), [{ type: "chat.interrupt", chatId: a.chatId }]);
+  assert.deepEqual(env.sentToHost("chat.permission"), [{ type: "chat.permission", chatId: a.chatId, requestId: "p1", decision: "allow_always" }]);
+
+  await a.send("chat.history", { requestId: "h" });
+  await b.send("chat.capabilities", { requestId: "h", engine: "codex" });
+  const [hist, caps] = [env.sentToHost("chat.history")[0], env.sentToHost("chat.capabilities")[0]];
+  assert.notEqual(hist.requestId, caps.requestId, "host request ids are the background's own");
+  assert.equal(caps.engine, "codex");
+  await env.host({ type: "chat.history", requestId: hist.requestId, chats: [{ id: "c1", title: "t" }] });
+  await env.host({ type: "chat.capabilities", requestId: caps.requestId, engine: "codex", available: true, models: [] });
+  assert.deepEqual(a.of("chat.history"), [{ type: "chat.history", requestId: "h", chats: [{ id: "c1", title: "t" }] }]);
+  assert.equal(b.of("chat.history").length, 0);
+  assert.equal(a.of("chat.capabilities").length, 0);
+  assert.equal(b.of("chat.capabilities")[0].requestId, "h");
+  assert.equal(other.of("chat.history").length + other.of("chat.capabilities").length, 0);
+
+  // Events go to every panel showing the chat.
+  const ev = { kind: "status", status: "running" };
+  await env.host({ type: "chat.event", chatId: a.chatId, event: ev });
+  assert.deepEqual(a.of("chat.event"), [{ type: "chat.event", chatId: a.chatId, event: ev }]);
+  assert.equal(b.of("chat.event").length, 1);
+  assert.equal(other.of("chat.event").length, 0);
+});
+
+test("opening a chat from history loads its transcript in chunks, then resumes it on send", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await a.send("chat.open", { chatId: "old-chat", source: "terminal", path: "/p/old.jsonl" });
+  assert.equal(a.of("state")[1].chatId, "old-chat");
+  const load_ = env.sentToHost("chat.load")[0];
+  assert.deepEqual({ ...load_, requestId: 0 }, { type: "chat.load", requestId: 0, chatId: "old-chat", source: "terminal", path: "/p/old.jsonl" });
+  await env.host({ type: "chat.transcript", requestId: load_.requestId, chatId: "old-chat", items: [{ kind: "user", text: "q" }], done: false });
+  await env.host({ type: "chat.transcript", requestId: load_.requestId, chatId: "old-chat", items: [{ kind: "text", messageId: "m", text: "a" }], done: true });
+  assert.equal(a.of("chat.transcript").length, 2);
+  await env.host({ type: "chat.transcript", requestId: load_.requestId, chatId: "old-chat", items: [], done: true });
+  assert.equal(a.of("chat.transcript").length, 2, "late chunks after done are dropped");
+  assert.equal((await env.panel()).of("state")[0].events.length, 2, "transcript is replayed to a reopened panel");
+  await a.send("chat.send", { chatId: "old-chat", engine: "claude", text: "more" });
+  assert.equal(env.sentToHost("chat.send")[0].resume, true);
+  await a.send("chat.send", { chatId: "old-chat", engine: "claude", text: "more" });
+  assert.equal(env.sentToHost("chat.send")[1].resume, false);
+});
+
+test("a reopened panel gets the chat back, with streamed text folded together", async () => {
+  const env = await load();
+  const a = await env.panel();
+  const send = (event) => env.host({ type: "chat.event", chatId: a.chatId, event });
+  await send({ kind: "user", text: "hi", attachments: [] });
+  await send({ kind: "text_delta", messageId: "m1", text: "Hel" });
+  await send({ kind: "text_delta", messageId: "m1", text: "lo" });
+  await send({ kind: "text_delta", messageId: "m2", text: "par" });
+  await a.send("chat.send", { engine: "claude", model: "m", effort: "high", text: "x" });
+  await a.close();
+  const b = await env.panel();
+  let state = b.of("state")[0];
+  assert.equal(state.chatId, a.chatId);
+  assert.deepEqual(state.events.map((e) => [e.kind, e.text]), [["user", "hi"], ["text_delta", "Hello"], ["text_delta", "par"]]);
+  assert.deepEqual([state.engine, state.model, state.effort], ["claude", "m", "high"]);
+  // The finished text block replaces its deltas.
+  await send({ kind: "text", messageId: "m2", text: "partial done" });
+  await b.send("hello", { windowId: 10 });
+  state = b.of("state")[1];
+  assert.deepEqual(state.events.map((e) => [e.kind, e.text]), [["user", "hi"], ["text_delta", "Hello"], ["text", "partial done"]]);
+  assert.equal(a.of("chat.event").length, 4, "closed panel got nothing after it left");
+  assert.equal(state.group.tabs.length, 1);
+});
+
+test("group changes are pushed: titles, drag in and out, closes, the active tab", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await a.send("chat.send", { engine: "claude", text: "hi" });
+  await wait(150);
+  const groups = () => a.of("group");
+  const before = groups().length;
+  assert.equal(groups().at(-1).label, "Claude");
+  assert.deepEqual(groups().at(-1).tabs.map((t) => [t.tabId, t.active]), [[1, true]]);
+
+  env.browser.tabsMap.get(1).title = "renamed";
+  await env.browser.tabs.onUpdated.fire(1, { title: "renamed" }, { ...env.browser.tabsMap.get(1) });
+  await wait(150);
+  assert.equal(groups().length, before + 1);
+  assert.equal(groups().at(-1).tabs[0].title, "renamed");
+  assert.equal(groups().at(-1).chatId, a.chatId);
+  assert.equal(a.of("activeTab").at(-1).tab.title, "renamed", "the viewed tab changed too");
+
+  // Unrelated tab changes and status-only updates push nothing.
+  env.browser.tabsMap.set(5, { id: 5, windowId: 10, groupId: -1, active: false, url: "https://other.example/", status: "complete", title: "other" });
+  await env.browser.tabs.onUpdated.fire(5, { title: "x" }, { ...env.browser.tabsMap.get(5) });
+  await env.browser.tabs.onUpdated.fire(1, { status: "loading" }, { ...env.browser.tabsMap.get(1) });
+  await wait(150);
+  assert.equal(groups().length, before + 1);
+
+  await a.send("group.add", { tabId: 5 });
+  await wait(150);
+  assert.deepEqual(groups().at(-1).tabs.map((t) => t.tabId), [1, 5]);
+  assert.equal(env.browser.tabsMap.get(5).groupId, 100);
+  assert.deepEqual(groups().at(-1).tabs.map((t) => t.active), [true, false]);
+
+  // The user drags it out themselves.
+  env.browser.tabsMap.get(5).groupId = -1;
+  await env.browser.tabs.onUpdated.fire(5, { groupId: -1 }, { ...env.browser.tabsMap.get(5) });
+  await wait(150);
+  assert.deepEqual(groups().at(-1).tabs.map((t) => t.tabId), [1]);
+  await a.send("group.add", { tabId: 5 });
+  await a.send("group.remove", { tabId: 5 });
+  await wait(150);
+  assert.equal(env.browser.tabsMap.get(5).groupId, -1);
+  assert.deepEqual(groups().at(-1).tabs.map((t) => t.tabId), [1]);
+  await a.send("group.remove", { tabId: 1 });
+  await wait(150);
+  assert.deepEqual(groups().at(-1).tabs, [], "removing the last tab ends the group");
+
+  // Closing a group tab, and switching tabs.
+  const b = await env.panel(12);
+  env.browser.tabsMap.set(8, { id: 8, windowId: 12, groupId: -1, active: true, url: "https://b.example/", status: "complete", title: "b" });
+  await b.send("chat.send", { engine: "claude", text: "hi" });
+  await b.send("group.add", { tabId: 8 });
+  env.browser.tabsMap.delete(8);
+  await env.browser.tabs.onRemoved.fire(8, { windowId: 12 });
+  await wait(150);
+  assert.deepEqual(b.of("group").at(-1).tabs, []);
+  env.browser.tabsMap.set(9, { id: 9, windowId: 12, groupId: -1, active: true, url: "https://nine.example/", status: "complete", title: "nine" });
+  await env.browser.tabs.onActivated.fire({ tabId: 9, windowId: 12 });
+  assert.equal(b.of("activeTab").at(-1).tab.tabId, 9);
+  assert.equal(a.of("activeTab").filter((m) => m.tab?.tabId === 9).length, 0, "other windows' panels aren't told");
+});
+
+test("pausing or resuming the chat's session is pushed to its panels", async () => {
+  const env = await load();
+  const a = await env.panel();
+  const b = await env.panel();
+  await a.send("chat.send", { engine: "claude", text: "hi" });
+  await env.callTool("tabs_context_mcp", {}, a.chatId, { id: 9, name: "claude" });
+  await a.send("stopAll");
+  assert.deepEqual(a.of("paused"), [{ type: "paused", paused: true }]);
+  assert.equal(b.of("paused").length, 1);
+  assert.equal(env.browser.groups.get(100).title, "Claude (paused)");
+  assert.equal((await env.panel()).of("state")[0].paused, true);
+  assert.match((await env.callTool("tabs_context_mcp", {}, a.chatId, { id: 9, name: "claude" })).result.content[0].text, /paused this session/);
+  await a.send("resume");
+  assert.deepEqual(a.of("paused").at(-1), { type: "paused", paused: false });
+  assert.equal(env.browser.groups.get(100).title, "Claude");
+  // The Stop shortcut and the popup pause a chat too.
+  await env.browser.commands.onCommand.fire("stop-agents");
+  assert.equal(a.of("paused").at(-1).paused, true);
+  env.popup().send({ cmd: "resumeAll" });
+  await wait(20);
+  assert.equal(a.of("paused").at(-1).paused, false);
+});
+
+test("pop out opens the panel in a popup window for this chat", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await a.send("popout");
+  assert.deepEqual(plain(env.browser.action.popups), [
+    { url: `moz-extension://x/sidebar/panel.html?window=10&chat=${a.chatId}`, type: "popup", width: 400, height: 680 },
+  ]);
+  const popped = await env.panel(10, a.chatId);
+  assert.equal(popped.chatId, a.chatId);
+  await env.host({ type: "chat.event", chatId: a.chatId, event: { kind: "status", status: "idle" } });
+  assert.equal(popped.of("chat.event").length + a.of("chat.event").length, 2, "both panels show the chat");
+});
+
+test("without the native host: sends fail visibly, requests get empty answers, a crash ends the run", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await env.host({ type: "chat.event", chatId: a.chatId, event: { kind: "status", status: "running" } });
+  const port = env.browser.native;
+  await port.onDisconnect.fire();
+  assert.deepEqual(a.of("chat.event").slice(-2).map((m) => [m.event.kind, m.event.code ?? m.event.status]), [["error", "crashed"], ["status", "exited"]]);
+  await a.send("chat.capabilities", { requestId: "c", engine: "claude" });
+  assert.equal(a.of("chat.capabilities")[0].available, false);
+  assert.equal(a.of("chat.capabilities")[0].requestId, "c");
+  await a.send("chat.history", { requestId: "h" });
+  assert.deepEqual(a.of("chat.history")[0].chats, []);
+  await a.send("chat.send", { engine: "claude", text: "hi" });
+  assert.equal(a.of("chat.event").at(-1).event.code, "spawn");
+  assert.equal(env.browser.groups.size, 0, "nothing bound while the host is down");
+});
+
+test("the user's own tab that a chat adopted is where focus returns when a page opens a tab", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await a.send("chat.send", { engine: "claude", text: "hi" });
+  // The user looks at another tab, then back at the chat's tab.
+  env.browser.tabsMap.set(5, { id: 5, windowId: 10, groupId: -1, active: false, url: "https://other.example/", status: "complete", title: "o" });
+  await env.browser.tabs.onActivated.fire({ tabId: 5, previousTabId: 1, windowId: 10 });
+  env.browser.tabsMap.get(5).active = false;
+  env.browser.tabsMap.get(1).active = true;
+  await env.browser.tabs.onActivated.fire({ tabId: 1, previousTabId: 5, windowId: 10 });
+  const t3 = { id: 3, windowId: 10, groupId: -1, active: true, openerTabId: 1, url: "https://x.example/", status: "complete", title: "x" };
+  env.browser.tabsMap.set(3, t3);
+  env.browser.tabsMap.get(1).active = false;
+  await env.browser.tabs.onCreated.fire({ ...t3 });
+  await wait(20);
+  assert.equal(env.browser.tabsMap.get(3).groupId, 100);
+  assert.equal(env.browser.tabsMap.get(1).active, true, "back to the chat's tab, not the older tab 5");
+});
+
+test("Stop all agents (panel, shortcut, popup) also interrupts the turns the panel is running", async () => {
+  const env = await load();
+  const a = await env.panel();
+  const idle = await env.panel(12);
+  await a.send("chat.send", { engine: "claude", text: "hi" });
+  await env.host({ type: "chat.event", chatId: a.chatId, event: { kind: "status", status: "running" } });
+  await env.host({ type: "chat.event", chatId: idle.chatId, event: { kind: "status", status: "idle" } });
+  await a.send("stopAll");
+  assert.deepEqual(env.sentToHost("chat.interrupt"), [{ type: "chat.interrupt", chatId: a.chatId }], "only the running chat");
+  await env.browser.commands.onCommand.fire("stop-agents");
+  env.popup().send({ cmd: "stop" });
+  await wait(20);
+  assert.equal(env.sentToHost("chat.interrupt").length, 3);
+  // Once the turn is over there is nothing left to interrupt.
+  await env.host({ type: "chat.event", chatId: a.chatId, event: { kind: "status", status: "idle" } });
+  await a.send("stopAll");
+  assert.equal(env.sentToHost("chat.interrupt").length, 3);
+});
+
+test("the panel's Resume undoes Stop all agents completely: the toolbar and the next chat aren't left paused", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await a.send("chat.send", { engine: "claude", text: "hi" });
+  await env.callTool("tabs_context_mcp", {}, a.chatId, { id: 9, name: "claude" });
+  await a.send("stopAll");
+  await wait(120);
+  assert.equal(env.browser.action.icon, "icons/toolbar-paused-light.svg");
+  await a.send("resume");
+  await wait(120);
+  assert.notEqual(env.browser.action.icon, "icons/toolbar-paused-light.svg", "no lingering pause-new flag");
+  await a.send("chat.new");
+  const fresh = a.of("state").at(-1).chatId;
+  assert.notEqual(fresh, a.chatId);
+  await a.send("chat.send", { chatId: fresh, engine: "claude", text: "again" });
+  const reply = await env.callTool("tabs_context_mcp", {}, fresh, { id: 9, name: "claude" });
+  assert.doesNotMatch(reply.result.content[0].text, /paused this session/);
+});
+
+test("a permission request nobody can see puts a badge on the toolbar button", async () => {
+  const env = await load();
+  const a = await env.panel();
+  const perm = { kind: "permission", requestId: "p1", tool: "Bash", summary: "touch x", always: true };
+  await env.host({ type: "chat.event", chatId: a.chatId, event: perm });
+  await wait(120);
+  assert.equal(env.browser.action.badge ?? "", "", "the open panel shows it");
+  a.close();
+  await wait(120);
+  assert.equal(env.browser.action.badge, "!");
+  assert.match(env.browser.action.title, /waiting for your approval/);
+  // Reopening the panel shows the card, so the badge goes.
+  const b = await env.panel(10, a.chatId);
+  await wait(120);
+  assert.equal(env.browser.action.badge, "");
+  b.close();
+  await wait(120);
+  assert.equal(env.browser.action.badge, "!");
+  // Answering it (from a panel) or the turn ending clears it too.
+  const c = await env.panel(10, a.chatId);
+  await c.send("chat.permission", { requestId: "p1", decision: "deny" });
+  c.close();
+  await wait(120);
+  assert.equal(env.browser.action.badge, "");
+  await env.host({ type: "chat.event", chatId: a.chatId, event: { ...perm, requestId: "p2" } });
+  await wait(120);
+  assert.equal(env.browser.action.badge, "!");
+  await env.host({ type: "chat.event", chatId: a.chatId, event: { kind: "status", status: "idle" } });
+  await wait(120);
+  assert.equal(env.browser.action.badge, "");
+});
+
+test("opening a chat from history continues on its own engine and model; terminal sessions are Claude's", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await a.send("chat.open", { chatId: "codex-chat", source: "panel", path: null, engine: "codex", model: "gpt-5.5" });
+  const state = a.of("state").at(-1);
+  assert.deepEqual([state.chatId, state.engine, state.model], ["codex-chat", "codex", "gpt-5.5"]);
+  await a.send("chat.send", { chatId: "codex-chat", text: "more", engine: "codex", model: "gpt-5.5", effort: "" });
+  assert.equal(env.sentToHost("chat.send")[0].engine, "codex");
+  await a.send("chat.open", { chatId: "term-1", source: "terminal", path: "/p/t.jsonl", engine: "codex", model: "gpt-5.5" });
+  assert.deepEqual([a.of("state").at(-1).engine, a.of("state").at(-1).model], ["claude", null]);
+  // A chat id that isn't a plain id goes nowhere.
+  const before = env.sentToHost("chat.load").length;
+  await a.send("chat.open", { chatId: "../../etc/x", source: "panel" });
+  await a.send("chat.open", { chatId: "__proto__", source: "panel" });
+  assert.equal(env.sentToHost("chat.load").length, before);
+  const b = await env.panel(10, "../../etc/x");
+  assert.equal(b.chatId, "term-1", "a hello with a bad chat id gets the window's current chat instead");
+});
+
+test("the host being down is flagged in the offline answers, and panels are told when it comes back", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await env.browser.native.onDisconnect.fire();
+  await a.send("chat.capabilities", { requestId: "c", engine: "claude" });
+  assert.equal(a.of("chat.capabilities").at(-1).hostDown, true);
+  await wait(2200); // the reconnect timer
+  assert.equal(a.of("hostUp").length, 1);
 });

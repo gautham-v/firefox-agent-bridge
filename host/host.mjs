@@ -6,6 +6,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { createChat } from "./chat.mjs";
 
 const DIR = path.join(os.homedir(), ".firefox-agent-bridge");
 const SOCKET = path.join(DIR, "bridge.sock");
@@ -16,11 +17,23 @@ const log = (...a) => fs.appendFileSync(LOG, `${new Date().toISOString()} ${a.jo
 
 // ---- extension side -----------------------------------------------------------------------
 
+// The sidebar chat: `chat.*` messages are handled by chat.mjs, which runs Claude Code and Codex.
+const chat = createChat({ send: (msg) => send(msg), log });
+
+// Firefox closes the connection to the host (and this process ends with it) when one message
+// is over 1 MiB, so an oversize one is refused here instead. Returns whether it was sent.
+const MAX_MESSAGE_BYTES = 1_000_000;
+
 function send(msg) {
   const body = Buffer.from(JSON.stringify(msg));
+  if (body.length > MAX_MESSAGE_BYTES) {
+    log(`not sending a ${msg?.type} message of ${body.length} bytes to Firefox: over the native message limit`);
+    return false;
+  }
   const header = Buffer.alloc(4);
   header.writeUInt32LE(body.length);
   process.stdout.write(Buffer.concat([header, body]));
+  return true;
 }
 
 let pending = Buffer.alloc(0);
@@ -49,6 +62,7 @@ const clients = new Map(); // client id -> { socket, info: {name, version, pid, 
 let nextClient = 1;
 
 function onExtensionMessage(msg) {
+  if (chat.handle(msg)) return;
   if (msg.type === "hello") {
     log("extension connected, version", msg.version);
     return;
@@ -113,7 +127,7 @@ const server = net.createServer((socket) => {
         continue;
       }
       if (!client.info) announce(clientId, client, {});
-      send({
+      const sent = send({
         type: "call",
         id: `${clientId}:${req.id}`,
         session: req.session,
@@ -121,6 +135,10 @@ const server = net.createServer((socket) => {
         args: req.args,
         client: { id: clientId, name: client.info.name },
       });
+      if (!sent) {
+        const content = [{ type: "text", text: "This request is too large to pass to Firefox (the limit is 1 MB). Send less at once." }];
+        socket.write(JSON.stringify({ id: req.id, result: { content, isError: true } }) + "\n");
+      }
     }
   });
   socket.on("close", () => {
@@ -138,6 +156,7 @@ server.listen(SOCKET, () => {
 
 function shutdown() {
   log("extension disconnected; exiting");
+  chat.shutdown();
   server.close();
   try {
     fs.unlinkSync(SOCKET);

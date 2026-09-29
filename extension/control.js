@@ -8,7 +8,7 @@ const RECENT_MS = 3_000;
 const LOG_SIZE = 500;
 const ERROR_CHARS = 160;
 
-const RESUME_HINT = "Ask the user to resume it from the Firefox Agent Bridge toolbar button, then retry.";
+const RESUME_HINT = "Ask the user to resume it from the Firefox Agent Bridge panel (the toolbar button opens it), then retry.";
 
 function pageOrigin(url) {
   if (!url) return null;
@@ -111,7 +111,7 @@ function createControl({ send, onChange = () => {}, onPauseChange = () => {}, no
   }
 
   function blockedMessage(name) {
-    return `The user disconnected this client ("${name}") in Firefox, so nothing was done. Calls from it are refused until the user clicks Unblock in the Firefox Agent Bridge toolbar popup or restarts Firefox. Don't retry on your own; ask the user.`;
+    return `The user disconnected this client ("${name}") in Firefox, so nothing was done. Calls from it are refused until the user clicks Unblock (in the Firefox Agent Bridge panel: the ⋯ menu, then Agents and activity) or restarts Firefox. Don't retry on your own; ask the user.`;
   }
 
   function reply(id, outcome, payload) {

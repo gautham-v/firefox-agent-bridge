@@ -63,32 +63,71 @@ Differences from Chrome:
   into any frame; a scroll over a frame that can't scroll scrolls the page around it.
 - There is no `gif_creator`, console reading, network reading or shortcuts.
 
+## Chat panel
+
+The toolbar button opens a chat in Firefox's sidebar, like Claude in Chrome's side panel. Press
+the button again to close it. It runs an agent on your own plan, either **Claude Code** (`claude -p`)
+or **Codex** (`codex exec`), and gives it the same Firefox tools as a terminal session.
+Nothing is billed beyond your existing subscription, and nothing runs until you send a message.
+
+- **Tabs.** The first message puts the tab you're viewing into a new tab group ("Claude", "Codex",
+  ...) and the agent works in that group. Add tabs with the composer's + menu or by dragging them
+  into the group; each message tells the agent which tabs are in it. If the viewed tab is pinned or
+  already belongs to another chat, the chat starts with a blank tab instead.
+- **Composer.** The + menu attaches files or photos (paste and drop work too), adds a tab, and
+  lists your Claude Code skills, connectors and plugins (read-only). The model menu picks the
+  engine, model and effort. Enter sends; while a task runs, Stop interrupts it, and a message you
+  send instead is added to the task.
+- **Permissions.** Firefox tools run without asking. Anything else, such as a shell command, a file
+  edit, a read outside the chat folder or a web fetch, shows an Allow once / Always allow in this
+  chat / Deny card with what it would do, and waits. Always allow covers the exact command (or the
+  prefix Claude Code suggests, never a chained command), the exact file, or a connector tool, not
+  more. If the sidebar is closed while a card waits, the toolbar button shows a `!`. Codex chats
+  run in a read-only sandbox, since `codex exec` can't ask; it can still read files, so it is the
+  less contained engine.
+- **History.** The clock button lists recent tasks: chats from the panel, and Claude Code sessions
+  from your terminal that used the Firefox tools in the last 14 days. Opening one loads its
+  transcript and the next message resumes it. Claude Code chats are ordinary sessions in
+  `~/.claude/projects/` (their working folder is `~/.firefox-agent-bridge/chat/`), and the panel
+  keeps only its own index in `~/.firefox-agent-bridge/chat/chats.json`; Codex chats are kept in
+  Codex's own history. Attachments go to `~/.firefox-agent-bridge/chat/uploads/`.
+- **Errors.** A usage limit, a missing sign-in and a missing `claude` or `codex` binary each show
+  a banner. The host finds the binaries from `CLAUDE_BIN` / `CODEX_BIN` (baked into its launcher
+  by `scripts/install.sh`), then common install paths and your login shell.
+
+The panel's protocol and the host's process handling are described in
+[docs/chat-panel.md](docs/chat-panel.md). Connector toggles and voice input aren't built.
+
 ## Safety controls
 
-The toolbar button shows what agents are doing, and its popup is where you control them. Calls
+The toolbar button opens the chat panel, and the panel's **⋯** menu holds the controls. Calls
 run without a consent prompt, and switching to a session's tab doesn't pause it; you see every
 client and call, and Stop or Disconnect cuts them off.
 
 - **Toolbar icon.** A pointer shaped like the agent cursor. It's an outline when idle, turns the
   cursor's purple while an agent is acting or acted in the last few seconds, and gets two pause
-  bars when sessions are paused. The popup's header shows the same state and the latest call.
-- **Stop.** The Stop button in the popup, or **Alt+Shift+X** from anywhere in Firefox (rebind it
-  in about:addons), pauses every session. Running calls are answered at once, and
-  sessions that haven't started yet start paused. Resume each session from the popup, or all of
-  them at once. Stop doesn't undo work already under way: a click or page load that has started
-  still finishes, but its result is dropped. Paused groups get " (paused)" added to their title.
+  bars when sessions are paused. The panel's header shows the same state, and its title row says
+  Working, Paused or Needs approval.
+- **Stop.** **Stop all agents** in the panel's ⋯ menu, or **Alt+Shift+X** from anywhere in Firefox
+  (rebind it in about:addons), pauses every session and interrupts the chat turn that is running. Running calls are answered at
+  once, and sessions that haven't started yet start paused. The panel then offers Resume (which
+  resumes all sessions, and typing a message resumes too) and End task; **Agents and activity** in
+  the ⋯ menu can also resume one session at a time. Stop doesn't undo
+  work already under way: a click or page load that has started still finishes, but its result is
+  dropped. Paused groups get " (paused)" added to their title. The Stop button in the composer is
+  different: it interrupts only the running chat turn.
 - **Clients.** Each client connecting to the socket announces a name, version, pid and working
-  directory, and its calls run right away. The popup lists each session with its client; open a
-  row to see the version, pid, folder, when it connected and how many calls it made. The name is
-  self-reported, so check the pid and folder. **Disconnect** (in the opened row) closes that connection, stops its calls in progress and blocks the name:
-  calls from any client using it, reconnects included, fail at once until you click **Unblock**
-  or restart Firefox.
-- **Activity log.** Under Activity, the popup lists the last 100 of up to 500 calls: time, session, client,
-  tool, action, tab, page origin, outcome and duration. It can be filtered by session, copied as
-  JSON, or cleared, and it is lost when Firefox restarts. It never records typed text, key
-  sequences, form values, script source, find queries, file paths or full URLs, only their
-  length or count. Error messages have those values cut out, and script errors keep only the
-  error type.
+  directory, and its calls run right away. **Agents and activity** lists each session with its
+  client; open a row to see the version, pid, folder, when it connected and how many calls it
+  made. The name is self-reported, so check the pid and folder. **Disconnect** (in the opened row)
+  closes that connection, stops its calls in progress and blocks the name: calls from any client
+  using it, reconnects included, fail at once until you click **Unblock** or restart Firefox. The panel's own agent shows up as `claude-code (sidebar)` or `codex (sidebar)`, so blocking a terminal session of the same program leaves it alone.
+- **Activity log.** Under Activity, the same view lists the last 100 of up to 500 calls: time,
+  session, client, tool, action, tab, page origin, outcome and duration. It can be filtered by
+  session, copied as JSON, or cleared, and it is lost when Firefox restarts. It never records
+  typed text, key sequences, form values, script source, find queries, file paths or full URLs,
+  only their length or count. Error messages have those values cut out, and script errors keep only
+  the error type.
 
 Paused and blocked calls fail with a message telling the agent to ask you, not to retry.
 
@@ -96,8 +135,8 @@ Paused and blocked calls fail with a message telling the agent to ask you, not t
 
 - Signature checks are off for the whole profile, so use a separate Developer Edition profile.
 - `~/.firefox-agent-bridge/bridge.sock` is mode 0600 in a 0700 directory, so only processes
-  running as your user can connect. Any of them can drive the browser; the popup shows who is
-  connected and what they did, and Stop and Disconnect cut them off.
+  running as your user can connect. Any of them can drive the browser; Agents and activity in the
+  panel shows who is connected and what they did, and Stop and Disconnect cut them off.
 - There is no shared-secret token on the socket. Any process that can reach the socket runs as
   your user and could read a token file just as easily, so a token would add nothing. Names are
   self-reported, so a blocked name can be dodged by another program running as you.
@@ -162,6 +201,8 @@ Codex can run on either of these instead:
 - Tests:
   - `node --test extension/test/*.test.js` runs the extension's policy and wiring tests against
     a mocked `browser`.
+  - `node --test host/test/*.test.mjs` runs the chat host against fake `claude` and `codex`
+    executables, the summary and error formatting, and the host's native-messaging wiring.
   - `node scripts/test-bridge.mjs` starts the native host and plays the extension's side
     against the MCP server, `ffctl` and raw socket clients.
   - `FIREFOX_BIN=/path/to/firefox node scripts/test-firefox.mjs` runs the whole stack in a real
@@ -189,6 +230,7 @@ Codex can run on either of these instead:
 
 ## Further reading
 
+- [The chat panel's protocol and engine handling](docs/chat-panel.md)
 - [What WebDriver BiDi would need to cover this bridge](docs/bidi-gap-map.md)
 
 ## License

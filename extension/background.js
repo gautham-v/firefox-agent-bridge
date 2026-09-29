@@ -2,7 +2,9 @@
 
 // Receives tool calls from MCP clients (via the native host) and runs them against tabs in
 // the calling session's tab group, named after its client ("Claude", "Codex", ...). Page work
-// goes through browser.claudePage, the privileged experiment API in experiment/.
+// goes through browser.claudePage, the privileged experiment API in experiment/. The sidebar
+// chat panel (docs/chat-panel.md) is served from the last section: it binds each chat to a tab
+// group here, so the chat's own MCP calls (session = chat id) find it like any other session.
 
 const NATIVE_HOST = "firefox_agent_bridge";
 const GROUP_COLORS = ["orange", "blue", "purple", "cyan", "green", "pink", "yellow", "red"];
@@ -24,9 +26,12 @@ function connect() {
   port.onDisconnect.addListener(() => {
     port = null;
     control.hostDisconnected();
+    chatHostDisconnected();
     setTimeout(connect, 2000);
   });
   port.postMessage({ type: "hello", version: browser.runtime.getManifest().version });
+  // Panels that asked for capabilities while the host was down have a stale "not connected".
+  for (const panel of panels) post(panel, { type: "hostUp" });
 }
 
 // Pause state, blocked clients and the activity log live in control.js; every call passes
@@ -34,10 +39,14 @@ function connect() {
 const control = createControl({
   send: (msg) => port?.postMessage(msg),
   onChange: scheduleRefresh,
-  onPauseChange: (session, isPaused) => setGroupPausedTitle(session, isPaused).catch(() => {}),
+  onPauseChange: (session, isPaused) => {
+    setGroupPausedTitle(session, isPaused).catch(() => {});
+    deliver(session, { type: "paused", paused: isPaused });
+  },
 });
 
 function onRequest(msg) {
+  if (msg.type?.startsWith("chat.")) return chatFromHost(msg);
   if (msg.type === "client") return control.clientEvent(msg);
   if (msg.type !== "call") return;
   control.handleCall(msg, runTool, async (tabId) => (await browser.tabs.get(tabId)).url);
@@ -116,26 +125,30 @@ function newSessionEntry(client) {
   return { base, label: same ? `${base} ${same + 1}` : base, color: GROUP_COLORS[(n - 1) % GROUP_COLORS.length] };
 }
 
-async function createSessionTab(session, client, url = "about:blank") {
+// Puts a tab in a new group for the session, titled and colored from its entry.
+async function startGroup(session, client, tabId, windowId) {
+  const groupId = await browser.tabs.group({ tabIds: [tabId], createProperties: { windowId } });
+  const s = sessions.get(session) ?? newSessionEntry(client);
+  s.groupId = groupId;
+  sessions.set(session, s);
+  await rememberLabel(s.base);
+  await browser.tabGroups.update(groupId, { title: control.isPaused(session) ? `${s.label} (paused)` : s.label, color: s.color });
+  return s;
+}
+
+async function createSessionTab(session, client, url = "about:blank", preferWindowId = null) {
   let groupId = await sessionGroupId(session);
-  const windowId = groupId != null ? (await browser.tabGroups.get(groupId)).windowId : await targetWindowId();
+  const windowId = groupId != null ? (await browser.tabGroups.get(groupId)).windowId : preferWindowId ?? (await targetWindowId());
   const tab = await browser.tabs.create({ url, active: false, windowId });
-  if (groupId != null) {
-    await browser.tabs.group({ tabIds: [tab.id], groupId });
-  } else {
-    groupId = await browser.tabs.group({ tabIds: [tab.id], createProperties: { windowId } });
-    const s = sessions.get(session) ?? newSessionEntry(client);
-    s.groupId = groupId;
-    sessions.set(session, s);
-    await rememberLabel(s.base);
-    await browser.tabGroups.update(groupId, { title: s.label, color: s.color });
-  }
+  if (groupId != null) await browser.tabs.group({ tabIds: [tab.id], groupId });
+  else await startGroup(session, client, tab.id, windowId);
   try {
     await browser.tabs.update(tab.id, { autoDiscardable: false });
   } catch {
     // not supported on this version
   }
   await keepActive(tab.id);
+  scheduleGroupPush(session);
   return tab;
 }
 
@@ -465,12 +478,10 @@ browser.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
   if (justOpened.has(tabId)) return restoreUserTab(windowId, tabId);
   const tab = await browser.tabs.get(tabId).catch(() => null);
   if (!tab) return;
-  if (await isSessionTab(tab, await sessionGroupIds())) {
-    // Activated before onCreated ran for it: same case as above.
-    // Ungrouped tabs have groupId -1.
-    if (!(tab.groupId >= 0) && recentlyOpened(tab)) return restoreUserTab(windowId, tabId);
-    return;
-  }
+  // Activated before onCreated ran for it: same case as above. Ungrouped tabs have groupId -1.
+  if (!(tab.groupId >= 0) && recentlyOpened(tab) && (await isSessionTab(tab, await sessionGroupIds()))) return restoreUserTab(windowId, tabId);
+  // Any other activation is the user's, including a chat's own tab: they are looking at it, so
+  // it is the tab to go back to.
   userTabByWindow.set(windowId, tabId);
 });
 
@@ -536,6 +547,7 @@ const popupPorts = new Set();
 let refreshQueued = false;
 let statusTimer = null;
 let shownIcon = null;
+let shownTitle = null;
 const darkScheme = matchMedia("(prefers-color-scheme: dark)");
 darkScheme.addEventListener("change", scheduleRefresh);
 
@@ -571,7 +583,16 @@ function refresh() {
   if (icon !== shownIcon) {
     shownIcon = icon;
     browser.browserAction.setIcon({ path: icon });
-    browser.browserAction.setTitle({ title: titles[status] });
+  }
+  // A permission request nobody can see (the sidebar is closed, or shows another chat) would
+  // otherwise stall the task silently, so the button says so.
+  const approval = unseenApproval();
+  const title = approval ? "Firefox Agent Bridge: the agent is waiting for your approval" : titles[status];
+  if (title !== shownTitle) {
+    shownTitle = title;
+    browser.browserAction.setTitle({ title });
+    browser.browserAction.setBadgeText({ text: approval ? "!" : "" });
+    if (approval) browser.browserAction.setBadgeBackgroundColor?.({ color: "#e5484d" });
   }
   // "Acting" lasts a few seconds past the last call; look again once it would lapse.
   clearTimeout(statusTimer);
@@ -583,7 +604,7 @@ function refresh() {
 }
 
 const popupCommands = {
-  stop: () => control.stopAll(),
+  stop: () => stopAllAgents(),
   resumeAll: () => control.resumeAll(),
   resume: (m) => control.resume(m.session),
   disconnect: (m) => control.disconnect(m.clientId),
@@ -600,7 +621,385 @@ browser.runtime.onConnect.addListener((p) => {
 });
 
 browser.commands.onCommand.addListener((name) => {
-  if (name === "stop-agents") control.stopAll();
+  if (name === "stop-agents") stopAllAgents();
+});
+
+// ---------------------------------------------------------------------------------------------
+// Chat panel. Panels connect on the "sidebar" port; see docs/chat-panel.md for the protocol.
+// Panel messages carry `cmd`, messages to the panel carry `type`.
+
+const EVENT_CAP = 1000;
+const ENGINE_NAMES = { claude: "Claude", codex: "Codex" };
+const HOST_DOWN = "The native host is not connected.";
+
+// chat id -> { id, windowId, events, engine, model, effort, status, awaiting, resume, queue, tabIds, groupTimer }
+const chats = new Map();
+const validChatId = (id) => typeof id === "string" && /^[\w-]{1,64}$/.test(id) && !["__proto__", "constructor", "prototype"].includes(id);
+const windowChat = new Map(); // window id -> the chat its panel last showed
+const panels = new Set(); // { port, windowId, chatId, ready }
+const asked = new Map(); // request id we sent the host -> { panel, requestId, type, engine, chatId }
+let requestCount = 0;
+
+function chatFor(id, windowId = null) {
+  let chat = chats.get(id);
+  if (!chat) {
+    chat = { id, windowId, events: [], engine: null, model: null, effort: null, status: "idle", awaiting: false, resume: false, queue: Promise.resolve(), tabIds: new Set(), groupTimer: null };
+    chats.set(id, chat);
+  }
+  return chat;
+}
+
+const post = (panel, msg) => {
+  try {
+    panel.port.postMessage(msg);
+  } catch {
+    // panel went away; its disconnect handler cleans up
+  }
+};
+
+// Sends to every panel showing the chat. Chat events wait for a panel's state message so they
+// aren't shown twice (once in its replay, once live).
+function deliver(chatId, msg) {
+  const live = msg.type === "chat.event" || msg.type === "chat.transcript";
+  for (const panel of panels) if (panel.chatId === chatId && (panel.ready || !live)) post(panel, msg);
+}
+
+// Keeps what a reopened panel needs to redraw the chat. Streamed text is stored as one delta per
+// message, and dropped once the finished text block arrives.
+function record(chat, ev) {
+  const evs = chat.events;
+  const last = evs.at(-1);
+  if (ev.kind === "text_delta" && last?.kind === "text_delta" && last.messageId === ev.messageId) {
+    last.text += ev.text;
+    return;
+  }
+  if (ev.kind === "text") while (evs.at(-1)?.kind === "text_delta" && evs.at(-1).messageId === ev.messageId) evs.pop();
+  if (ev.kind === "status") chat.status = ev.status;
+  trackApproval(chat, ev);
+  evs.push({ ...ev });
+  if (evs.length > EVENT_CAP) evs.splice(0, evs.length - EVENT_CAP);
+}
+
+// Whether the chat is stopped on a permission request. Anything the agent does after one means
+// it was answered (or the turn is over), as the panel also assumes.
+function trackApproval(chat, ev) {
+  const was = chat.awaiting;
+  if (ev.kind === "permission") chat.awaiting = true;
+  else if (["tool_start", "tool_end", "text", "result", "error"].includes(ev.kind) || (ev.kind === "status" && (ev.status === "idle" || ev.status === "exited"))) chat.awaiting = false;
+  if (chat.awaiting !== was) scheduleRefresh();
+}
+
+// A chat waiting for approval that no open panel is showing.
+function unseenApproval() {
+  for (const chat of chats.values()) if (chat.awaiting && ![...panels].some((p) => p.chatId === chat.id)) return true;
+  return false;
+}
+
+// Stop all agents also ends the turns the panel is running: pausing Firefox alone would leave
+// the agent free to run shell commands or fetch pages until it finished.
+function stopAllAgents() {
+  control.stopAll();
+  for (const chat of chats.values()) if (chat.status === "starting" || chat.status === "running") port?.postMessage({ type: "chat.interrupt", chatId: chat.id });
+}
+
+function emit(chat, event) {
+  record(chat, event);
+  deliver(chat.id, { type: "chat.event", chatId: chat.id, event });
+}
+
+// The host is gone: what it was running died with it, and pending requests get empty answers.
+function chatHostDisconnected() {
+  for (const chat of chats.values()) {
+    if (chat.status !== "starting" && chat.status !== "running") continue;
+    emit(chat, { kind: "error", code: "crashed", message: "The native host disconnected." });
+    emit(chat, { kind: "status", status: "exited" });
+  }
+  for (const [rid, a] of asked) answer(rid, offlineReply({ ...a, requestId: rid }));
+}
+
+function offlineReply({ type, requestId, engine, chatId }) {
+  if (type === "chat.history") return { type, requestId, chats: [] };
+  if (type === "chat.load") return { type: "chat.transcript", requestId, chatId, items: [], done: true };
+  return { type, requestId, engine, available: false, hostDown: true, version: null, error: HOST_DOWN, skills: [], plugins: [], connectors: [], models: [], efforts: [] };
+}
+
+// Sends the host a request whose reply goes back to one panel, under the panel's own request id.
+function ask(panel, msg) {
+  const rid = `b${++requestCount}`;
+  const a = { panel, requestId: msg.requestId, type: msg.type, engine: msg.engine, chatId: msg.chatId };
+  asked.set(rid, a);
+  if (port) port.postMessage({ ...msg, requestId: rid });
+  else answer(rid, offlineReply({ ...a, requestId: rid }));
+}
+
+function answer(rid, msg) {
+  const a = asked.get(rid);
+  if (!a) return;
+  const { chatId } = msg;
+  if (msg.type !== "chat.transcript" || msg.done) asked.delete(rid);
+  if (msg.type === "chat.transcript") {
+    const chat = chats.get(chatId ?? a.chatId);
+    for (const item of msg.items ?? []) if (chat) record(chat, item);
+  }
+  if (panels.has(a.panel)) post(a.panel, { ...msg, requestId: a.requestId ?? msg.requestId });
+}
+
+function chatFromHost(msg) {
+  if (msg.type === "chat.event") {
+    const chat = chatFor(msg.chatId);
+    record(chat, msg.event);
+    deliver(chat.id, msg);
+  } else if (msg.requestId != null) {
+    answer(msg.requestId, msg);
+  }
+}
+
+// ---- Binding a chat to a tab group
+
+const byIndex = (a, b) => a.index - b.index;
+const tabInfo = (t) => ({ tabId: t.id, title: t.title, url: t.url, favIconUrl: t.favIconUrl, active: !!t.active });
+
+async function groupTabs(chat) {
+  const tabs = (await sessionTabs(chat.id)).sort(byIndex);
+  chat.tabIds = new Set(tabs.map((t) => t.id));
+  return tabs;
+}
+
+// Not-yet-bound chats have an empty group, so panels can treat every state the same way.
+async function groupInfo(chat) {
+  const tabs = await groupTabs(chat);
+  const s = sessions.get(chat.id);
+  return { chatId: chat.id, label: s?.label ?? null, color: s?.color ?? null, tabs: tabs.map(tabInfo) };
+}
+
+async function activeTabInfo(windowId) {
+  const [tab] = await browser.tabs.query({ active: true, windowId }).catch(() => []);
+  return tab ? tabInfo(tab) : null;
+}
+
+// The tab the user is viewing joins a new group for the chat, in place: it is the user's own
+// tab, so it is not touched beyond joining (no extra blank tab, no discard pinning). If that tab
+// can't be taken (pinned, or in another session's group), the chat starts with a blank tab like
+// an MCP client would.
+async function bindChat(chat) {
+  if ((await sessionGroupId(chat.id)) != null) return;
+  const client = ENGINE_NAMES[chat.engine] ?? "Claude";
+  const [tab] = chat.windowId != null ? await browser.tabs.query({ active: true, windowId: chat.windowId }) : [];
+  if (tab && !(await sessionGroupIds()).has(tab.groupId)) {
+    try {
+      await startGroup(chat.id, client, tab.id, tab.windowId);
+      return;
+    } catch {
+      // fall back below
+    }
+  }
+  await createSessionTab(chat.id, client, "about:blank", chat.windowId);
+}
+
+function scheduleGroupPush(chatId) {
+  const chat = chats.get(chatId);
+  if (!chat || chat.groupTimer) return;
+  chat.groupTimer = setTimeout(async () => {
+    chat.groupTimer = null;
+    if (![...panels].some((p) => p.chatId === chat.id)) return;
+    deliver(chat.id, { type: "group", ...(await groupInfo(chat).catch(() => null)) });
+  }, 100);
+}
+
+// A tab changed: refresh the chats whose group holds it, or now does.
+function tabTouched(tabId, groupId) {
+  for (const chat of chats.values()) {
+    if (chat.tabIds.has(tabId) || (groupId >= 0 && groupId === sessions.get(chat.id)?.groupId)) scheduleGroupPush(chat.id);
+  }
+}
+
+async function pushActiveTab(windowId) {
+  const targets = [...panels].filter((p) => p.windowId === windowId);
+  if (!targets.length) return;
+  const tab = await activeTabInfo(windowId);
+  for (const panel of targets) post(panel, { type: "activeTab", tab });
+}
+
+browser.tabs.onUpdated.addListener((tabId, change, tab) => {
+  if (!("groupId" in change || "title" in change || "url" in change || "favIconUrl" in change)) return;
+  tabTouched(tabId, tab.groupId);
+  if (tab.active && !("groupId" in change)) pushActiveTab(tab.windowId);
+});
+browser.tabs.onRemoved.addListener((tabId) => tabTouched(tabId, -1));
+browser.tabs.onAttached.addListener((tabId) => tabTouched(tabId, -1));
+browser.tabs.onDetached.addListener((tabId) => tabTouched(tabId, -1));
+browser.tabs.onActivated.addListener(({ windowId }) => pushActiveTab(windowId));
+
+// ---- Panels
+
+async function sendState(panel) {
+  panel.ready = false;
+  const chat = chats.get(panel.chatId);
+  const [group, activeTab] = await Promise.all([groupInfo(chat), activeTabInfo(panel.windowId)]);
+  // A switch while we looked things up sends its own state.
+  if (!panels.has(panel) || panel.chatId !== chat.id) return;
+  post(panel, {
+    type: "state",
+    windowId: panel.windowId,
+    chatId: chat.id,
+    events: chat.events.slice(),
+    group,
+    activeTab,
+    paused: control.isPaused(chat.id),
+    engine: chat.engine,
+    model: chat.model,
+    effort: chat.effort,
+  });
+  panel.ready = true;
+}
+
+function showChat(panel, chat) {
+  panel.chatId = chat.id;
+  windowChat.set(panel.windowId, chat.id);
+  scheduleRefresh();
+  return sendState(panel);
+}
+
+// A new chat starts from the previous chat's engine, model and effort.
+function newChat(windowId, from) {
+  const chat = chatFor(crypto.randomUUID(), windowId);
+  if (from) Object.assign(chat, { engine: from.engine, model: from.model, effort: from.effort });
+  return chat;
+}
+
+async function lastNormalWindowId() {
+  try {
+    return (await browser.windows.getLastFocused({ windowTypes: ["normal"] })).id;
+  } catch {
+    return null;
+  }
+}
+
+// Runs one chat.send at a time per chat so two quick messages don't bind twice.
+async function sendToHost(chat, m) {
+  if (!port) return emit(chat, { kind: "error", code: "spawn", message: HOST_DOWN });
+  await bindChat(chat).catch(() => {});
+  const tabs = (await groupTabs(chat).catch(() => [])).map((t) => ({ tabId: t.id, title: t.title, url: t.url, current: !!t.active }));
+  const resume = chat.resume;
+  chat.resume = false;
+  port?.postMessage({
+    type: "chat.send",
+    chatId: chat.id,
+    engine: chat.engine,
+    model: chat.model,
+    effort: chat.effort,
+    text: m.text,
+    attachments: m.attachments ?? [],
+    context: { tabs },
+    resume,
+  });
+  scheduleGroupPush(chat.id);
+}
+
+const panelCommands = {
+  async hello(panel, m) {
+    panel.windowId = m.windowId ?? (await lastNormalWindowId());
+    const id = validChatId(m.chatId) ? m.chatId : windowChat.get(panel.windowId);
+    return showChat(panel, id ? chatFor(id, panel.windowId) : newChat(panel.windowId));
+  },
+
+  "chat.new"(panel) {
+    const old = chats.get(panel.chatId);
+    // Already looking at an untouched chat.
+    if (old && !old.events.length && !sessions.has(old.id)) return sendState(panel);
+    return showChat(panel, newChat(panel.windowId, old));
+  },
+
+  // From history. A chat this session doesn't know yet has its transcript loaded and, when next
+  // sent to, resumed by the host.
+  async "chat.open"(panel, m) {
+    if (!validChatId(m.chatId)) return;
+    const known = chats.has(m.chatId);
+    const chat = chatFor(m.chatId, panel.windowId);
+    if (known) return showChat(panel, chat);
+    chat.resume = true;
+    // It continues on the engine and model it was started with, not whatever the panel last used.
+    // Terminal sessions are Claude Code's, and their own model may no longer exist.
+    if (m.source === "terminal") chat.engine = "claude";
+    else if (ENGINE_NAMES[m.engine]) Object.assign(chat, { engine: m.engine, model: typeof m.model === "string" ? m.model : null });
+    await showChat(panel, chat);
+    if (!port) return emit(chat, { kind: "error", code: "spawn", message: HOST_DOWN });
+    ask(panel, { type: "chat.load", chatId: chat.id, source: m.source ?? "panel", path: m.path });
+  },
+
+  "chat.send"(panel, m) {
+    const chat = chatFor(m.chatId ?? panel.chatId, panel.windowId);
+    if (sessions.get(chat.id)?.groupId == null) chat.windowId = panel.windowId;
+    for (const k of ["engine", "model", "effort"]) if (m[k] != null) chat[k] = m[k];
+    chat.queue = chat.queue.then(() => sendToHost(chat, m)).catch(() => {});
+  },
+
+  "chat.interrupt": (panel, m) => port?.postMessage({ type: "chat.interrupt", chatId: m.chatId ?? panel.chatId }),
+  "chat.permission"(panel, m) {
+    const chat = chats.get(m.chatId ?? panel.chatId);
+    if (chat?.awaiting) {
+      chat.awaiting = false;
+      scheduleRefresh();
+    }
+    port?.postMessage({ type: "chat.permission", chatId: chat?.id ?? panel.chatId, requestId: m.requestId, decision: m.decision });
+  },
+  "chat.history": (panel, m) => ask(panel, { type: "chat.history", requestId: m.requestId }),
+  "chat.capabilities": (panel, m) => ask(panel, { type: "chat.capabilities", requestId: m.requestId, engine: m.engine }),
+
+  // A tab dragged in the panel or picked from it. With no group yet, it starts one.
+  async "group.add"(panel, m) {
+    const chat = chats.get(panel.chatId);
+    if (typeof m.tabId !== "number") return;
+    const groupId = await sessionGroupId(chat.id);
+    if (groupId != null) await browser.tabs.group({ tabIds: [m.tabId], groupId });
+    else await startGroup(chat.id, ENGINE_NAMES[chat.engine] ?? "Claude", m.tabId, (await browser.tabs.get(m.tabId)).windowId);
+    scheduleGroupPush(chat.id);
+  },
+
+  async "group.remove"(panel, m) {
+    const chat = chats.get(panel.chatId);
+    const groupId = await sessionGroupId(chat.id);
+    const tab = await browser.tabs.get(m.tabId).catch(() => null);
+    if (groupId == null || tab?.groupId !== groupId) return;
+    await browser.tabs.ungroup(tab.id);
+    scheduleGroupPush(chat.id);
+  },
+
+  // Stop all agents paused every session and any new one, so resuming from the panel undoes all
+  // of it; resuming only this chat would leave the toolbar paused and pause the next chat.
+  resume: () => control.resumeAll(),
+  stopAll: () => stopAllAgents(),
+
+  popout: (panel) =>
+    browser.windows.create({
+      url: browser.runtime.getURL(`sidebar/panel.html?window=${panel.windowId}&chat=${panel.chatId}`),
+      type: "popup",
+      width: 400,
+      height: 680,
+    }),
+};
+
+browser.runtime.onConnect.addListener((p) => {
+  if (p.name !== "sidebar") return;
+  const panel = { port: p, windowId: null, chatId: null, ready: false };
+  panels.add(panel);
+  p.onDisconnect.addListener(() => {
+    panels.delete(panel);
+    for (const [rid, a] of asked) if (a.panel === panel) asked.delete(rid);
+    scheduleRefresh();
+  });
+  p.onMessage.addListener((m) => {
+    const name = m?.cmd ?? m?.type;
+    // Everything but hello needs a chat, which hello sets up.
+    if (name !== "hello" && panel.chatId == null) return;
+    Promise.resolve(panelCommands[name]?.(panel, m)).catch(() => {});
+  });
+});
+
+// The toolbar button opens and closes the sidebar. toggle() must run in the click's own call
+// stack (Firefox only lets user actions open a sidebar), so nothing may be awaited before it.
+browser.browserAction.onClicked.addListener(() => {
+  browser.sidebarAction.toggle();
 });
 
 browser.tabs.query({ active: true }).then((tabs) => {

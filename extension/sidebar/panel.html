@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light dark">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <div id="app" class="panel">
+    <header class="ph">
+      <button id="engine" class="eng" aria-haspopup="menu" title="Engine and model">
+        <span id="engine-glyph" class="pg"></span><span id="engine-name">Claude Code</span><span class="cv" data-i="chevd"></span>
+      </button>
+      <span class="grow"></span>
+      <button id="history-btn" class="ib" aria-label="Recent tasks" title="Recent tasks"><span data-i="history"></span></button>
+      <button id="new-btn" class="ib" aria-label="New chat" title="New chat"><span data-i="compose"></span></button>
+      <button id="more-btn" class="ib" aria-label="More" aria-haspopup="menu" title="More"><span data-i="more"></span></button>
+    </header>
+
+    <div id="title" class="ttl" hidden></div>
+
+    <main id="main" class="main">
+      <div id="scroll" class="pb" hidden><div id="msgs" class="msgs"></div></div>
+      <div id="empty" class="empty" hidden></div>
+    </main>
+
+    <div id="notices"></div>
+    <div id="tray" class="tray" hidden></div>
+
+    <div id="composer" class="cmp">
+      <div id="atts" class="atts" hidden></div>
+      <textarea id="input" rows="1" spellcheck="true" aria-label="Message"></textarea>
+      <div class="bar">
+        <button id="plus-btn" class="ib" aria-label="Add" aria-haspopup="menu" title="Add files, tabs, skills"><span data-i="plus"></span></button>
+        <button id="ctx" class="ctx" title="Tabs Claude can see"></button>
+        <span class="grow"></span>
+        <button id="model-btn" class="model" aria-haspopup="menu" title="Model and effort"></button>
+        <button id="send" class="send off" aria-label="Send" title="Send"></button>
+      </div>
+    </div>
+    <div id="foot" class="foot"></div>
+
+    <div id="layer"></div>
+    <input id="file" type="file" multiple hidden>
+  </div>
+  <script src="panel.js"></script>
+</body>
+</html>
