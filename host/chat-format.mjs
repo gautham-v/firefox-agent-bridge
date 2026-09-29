@@ -67,6 +67,13 @@ function summarizeFirefox(tool, a) {
   }
 }
 
+// The tab a Firefox tool call acts in, as a field to spread into tool_start, so the panel can say
+// where the agent is working. Only the number is passed on.
+export function toolTab(name, input) {
+  const id = input?.tabId;
+  return String(name).startsWith("mcp__firefox__") && Number.isSafeInteger(id) && id >= 0 ? { tabId: id } : {};
+}
+
 export function summarizeToolUse(name, input) {
   const a = input && typeof input === "object" ? input : {};
   const fx = /^mcp__firefox__(.+)$/.exec(name);

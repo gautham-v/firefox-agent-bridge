@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { HIDDEN_TOOLS, clip, mimeFromName, stripContext, summarizeToolResult, summarizeToolUse } from "./chat-format.mjs";
+import { HIDDEN_TOOLS, clip, mimeFromName, stripContext, summarizeToolResult, summarizeToolUse, toolTab } from "./chat-format.mjs";
 
 const HEAD_BYTES = 128 * 1024;
 const NEEDLE = '"name":"mcp__firefox__';
@@ -209,7 +209,7 @@ export async function claudeTranscript(file, maxItems = 1500) {
         if (b.type === "text" && b.text?.trim()) items.push({ kind: "text", messageId: e.uuid, text: cap(b.text) });
         else if (b.type === "tool_use" && !HIDDEN_TOOLS.has(b.name)) {
           names.set(b.id, b.name);
-          items.push({ kind: "tool_start", toolUseId: b.id, name: b.name, summary: summarizeToolUse(b.name, b.input) });
+          items.push({ kind: "tool_start", toolUseId: b.id, name: b.name, summary: summarizeToolUse(b.name, b.input), ...toolTab(b.name, b.input) });
         }
       }
     }
@@ -239,7 +239,7 @@ export async function codexTranscript(file, maxItems = 1500) {
     } else if (it.type === "McpToolCall") {
       const name = `mcp__${it.server}__${it.tool}`;
       const ok = it.status === "completed" && !it.error;
-      items.push({ kind: "tool_start", toolUseId: it.id, name, summary: summarizeToolUse(name, it.arguments) });
+      items.push({ kind: "tool_start", toolUseId: it.id, name, summary: summarizeToolUse(name, it.arguments), ...toolTab(name, it.arguments) });
       items.push({ kind: "tool_end", toolUseId: it.id, ok, summary: ok ? "" : clip(it.error?.message ?? it.error ?? "Failed", 120) });
     }
   }

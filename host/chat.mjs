@@ -11,7 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { HIDDEN_TOOLS, classifyError, clip, contextBlock, parseResetTime, summarizePermission, summarizeToolResult, summarizeToolUse } from "./chat-format.mjs";
+import { HIDDEN_TOOLS, classifyError, clip, contextBlock, parseResetTime, summarizePermission, summarizeToolResult, summarizeToolUse, toolTab } from "./chat-format.mjs";
 import { chunkItems, claudeSessionMeta, claudeTitle, claudeTranscript, codexTranscript, encodeCwd, findCodexRollout, scanTerminalSessions } from "./chat-history.mjs";
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -475,7 +475,7 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
         emitText(c, `${j.message.id}:${n}`, "text", b.text);
       } else if (b.type === "tool_use" && !p.tools.has(b.id) && !HIDDEN_TOOLS.has(b.name)) {
         p.tools.set(b.id, b.name);
-        emit(c.id, { kind: "tool_start", toolUseId: b.id, name: b.name, summary: summarizeToolUse(b.name, b.input) });
+        emit(c.id, { kind: "tool_start", toolUseId: b.id, name: b.name, summary: summarizeToolUse(b.name, b.input), ...toolTab(b.name, b.input) });
       }
     }
   }
@@ -759,7 +759,7 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     } else return;
     if (!p.tools.has(it.id)) {
       p.tools.add(it.id);
-      emit(c.id, { kind: "tool_start", toolUseId: it.id, name, summary: summarizeToolUse(name, input) });
+      emit(c.id, { kind: "tool_start", toolUseId: it.id, name, summary: summarizeToolUse(name, input), ...toolTab(name, input) });
     }
     if (!completed) return;
     const ok = it.status !== "failed" && !it.error && (it.exit_code == null || it.exit_code === 0);

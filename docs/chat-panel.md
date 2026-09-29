@@ -133,7 +133,7 @@ Events (`chat.event`'s `event`):
 | `user` | `text`, `attachments: [{name, mime}]` (echo, so every panel shows it) |
 | `text_delta` | `messageId` (`<api message id>:<n>` for the nth text block), `text` |
 | `text` | `messageId` (same scheme), `text` (full text of a finished assistant text block) |
-| `tool_start` | `toolUseId`, `name` (e.g. `mcp__firefox__navigate`), `summary` (short, no typed text, form values, script source, key sequences or URL queries; `ToolSearch` is not reported) |
+| `tool_start` | `toolUseId`, `name` (e.g. `mcp__firefox__navigate`), `summary` (short, no typed text, form values, script source, key sequences or URL queries; `ToolSearch` is not reported), `tabId` (Firefox tools that name a tab; the steps card says "Using Firefox in <site>" from the latest one) |
 | `tool_end` | `toolUseId`, `ok`, `summary` (text only for failures, plus the first line of navigate and shell results; screenshots and page content never leave the host) |
 | `permission` | `requestId`, `tool`, `summary` (what would run, see Permissions), `always` (whether Always allow is offered; absent means yes) |
 | `result` | `ok`, `durationMs`, `numTurns`, `error` (a short message when `ok` is false; every turn ends with one, including failed starts) |

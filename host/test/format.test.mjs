@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyError, contextBlock, parseResetTime, stripContext, summarizePermission, summarizeToolResult, summarizeToolUse } from "../chat-format.mjs";
+import { classifyError, contextBlock, parseResetTime, stripContext, summarizePermission, summarizeToolResult, summarizeToolUse, toolTab } from "../chat-format.mjs";
 
 test("firefox tool summaries never include typed text, form values, script source, key sequences or queries in URLs", () => {
   const cases = [
@@ -92,4 +92,11 @@ test("reset times are read from the CLIs' wording", () => {
   const codex = parseResetTime("You've hit your usage limit. Upgrade to Plus, or try again at Oct 3rd, 2026 1:16 PM.");
   assert.equal(codex, new Date(2026, 9, 3, 13, 16).getTime());
   assert.equal(parseResetTime("You've hit your limit · resets 3pm"), null);
+});
+
+test("tool_start names the tab only for Firefox tools with a numeric tabId", () => {
+  assert.deepEqual(toolTab("mcp__firefox__computer", { action: "left_click", tabId: 42 }), { tabId: 42 });
+  assert.deepEqual(toolTab("mcp__firefox__tabs_create_mcp", {}), {});
+  assert.deepEqual(toolTab("mcp__firefox__navigate", { tabId: "42" }), {});
+  assert.deepEqual(toolTab("Read", { tabId: 42 }), {});
 });

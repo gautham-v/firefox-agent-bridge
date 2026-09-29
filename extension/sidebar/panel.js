@@ -494,7 +494,7 @@ function applyEvent(ev, replay = false) {
     }
     case "tool_start": {
       const t = openTurn(now);
-      t.steps.push({ id: ev.toolUseId, name: ev.name ?? "", summary: ev.summary ?? "", done: false, ok: true, start: now, end: null, result: "" });
+      t.steps.push({ id: ev.toolUseId, name: ev.name ?? "", summary: ev.summary ?? "", tabId: Number.isInteger(ev.tabId) ? ev.tabId : null, done: false, ok: true, start: now, end: null, result: "" });
       if (!t.blocks.some((b) => b.type === "steps")) t.blocks.push({ type: "steps" });
       resolvePerms(t);
       t.dirty = true;
@@ -725,6 +725,14 @@ function activeSite() {
   return { tab, name: tab ? siteName(tab.url) : "" };
 }
 
+// Where a turn's agent is working: the tab of its latest step that names one, if that tab is in
+// the group, otherwise the tab the user is viewing.
+function workSite(t) {
+  const id = [...t.steps].reverse().find((s) => s.tabId != null)?.tabId;
+  const tab = id != null ? S.group?.tabs?.find((x) => x.tabId === id) : null;
+  return tab ? { tab, name: siteName(tab.url) } : activeSite();
+}
+
 function fav(tab, cls = "") {
   const letter = (siteName(tab?.url) || tab?.title || "?")[0].toUpperCase();
   const n = el("span", { class: `fav ${cls}`, text: letter });
@@ -799,11 +807,12 @@ function stepsBlock(t) {
     );
     if (!t.open) return kids;
   }
-  const { name } = activeSite();
+  const site = workSite(t);
+  const { name } = site;
   const head = el(
     "div",
     { class: "sh" },
-    fav(activeSite().tab),
+    fav(site.tab),
     el("span", { class: "st", text: usedFirefox ? `${running ? "Using" : "Used"} Firefox${name ? ` in ${name}` : ""}` : running ? "Working" : "Steps" }),
     el("span", { class: "n", text: S.paused && running ? "Paused" : plural(t.steps.length, "step") }),
   );
