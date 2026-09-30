@@ -348,7 +348,9 @@ ${stateRules("Leave that tab open on the canvas when you're done.", '{"shapes": 
         rows_aligned: all && spread(top.map((s) => s.y)) <= 2 && spread(bottom.map((s) => s.y)) <= 2,
         columns_aligned: all && [0, 1, 2].every((i) => Math.abs(top[i].x - bottom[i].x) <= 2),
         even_gaps: all && [top, bottom].every((row) => Math.abs(row[1].x - (row[0].x + row[0].w) - (row[2].x - (row[1].x + row[1].w))) <= 2),
-        row_colors: all && top.every((s) => s.color === "blue") && bottom.every((s) => s.color === "green"),
+        // tldraw's style panel has both blue and light-blue (and green and light-green); either
+        // counts, as in round 1.
+        row_colors: all && top.every((s) => /^(light-)?blue$/.test(s.color)) && bottom.every((s) => /^(light-)?green$/.test(s.color)),
         arrows_bound: cycle.every(([f, t]) => arrow(r[f], r[t])),
         arrow_labels: norm(arrow(r.test, r.learn)?.text) === "deploy" && norm(arrow(r.ship, r.plan)?.text) === "next cycle",
         frame_loop: !!frame && norm(frame.name) === "loop" && [...geo, ...arrows].length > 0 && [...geo, ...arrows].every((s) => s.parent === frame.id),
