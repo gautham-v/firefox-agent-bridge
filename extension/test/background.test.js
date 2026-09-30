@@ -1291,6 +1291,63 @@ test("an element link outlines the element in its tab, only in the chat's group;
   assert.equal(calls.filter(([tabId]) => tabId === 6).length, 0);
 });
 
+test("the agent cam's frame comes with where masked fields are, in every frame, without drawing on the page", async () => {
+  const env = await load();
+  const rules = { always: ["password"], sites: {} };
+  await env.host({ type: "redact", rules });
+  const captures = [];
+  env.browser.tabs.captureTab = async (tabId, opts) => {
+    captures.push([tabId, plain(opts)]);
+    return "data:image/jpeg;base64,AAAA";
+  };
+  // The top frame is 1000x500 at (100, 50) on screen; a card iframe's viewport sits at (400, 250)
+  // in it. The password field scrolls 10px up between the two looks.
+  const looks = [];
+  let scrolled = 0;
+  env.browser.claudePage.broadcast = async (tabId, op, args) => {
+    looks.push([tabId, op, plain(args)]);
+    const y = 100 - scrolled;
+    scrolled += 10;
+    return [
+      { rects: [{ x: 100, y, width: 200, height: 20, label: "password · filled" }], screenX: 100, screenY: 50, width: 1000, height: 500, top: true },
+      { rects: [{ x: 0, y: 0, width: 100, height: 25, label: "card number · empty" }], screenX: 500, screenY: 300, width: 300, height: 100, top: false },
+      null,
+    ];
+  };
+  const a = await env.panel();
+  await a.send("chat.send", { engine: "claude", text: "hi" });
+  await a.send("cam.frame", { tabId: 1, scale: 0.25, requestId: "cam1" });
+  assert.deepEqual(captures, [[1, { format: "jpeg", quality: 60, scale: 0.25 }]]);
+  assert.deepEqual(looks.map(([tabId, op, args]) => [tabId, op, args.redact]), [
+    [1, "maskRects", rules],
+    [1, "maskRects", rules],
+  ], "fields are found before and after the capture; nothing is drawn on the page");
+  const [got] = a.of("cam.frame");
+  assert.equal(got.requestId, "cam1");
+  assert.equal(got.shot, "data:image/jpeg;base64,AAAA");
+  const round = (m) => ({ ...m, x: +m.x.toFixed(6), y: +m.y.toFixed(6), width: +m.width.toFixed(6), height: +m.height.toFixed(6) });
+  assert.deepEqual(got.masks.map(round), [
+    { x: 0.1, y: 0.18, width: 0.2, height: 0.06, label: "password · filled" },
+    { x: 0.4, y: 0.5, width: 0.1, height: 0.05, label: "card number · empty" },
+  ], "a field that moved is covered over both places; a child frame's boxes land where it is");
+
+  // A frame that couldn't look: the frame still comes, marked as not safe to keep.
+  env.browser.claudePage.broadcast = async () => [{ rects: [], screenX: 0, screenY: 0, width: 1000, height: 500, top: true }, { error: "Actor destroyed" }];
+  await a.send("cam.frame", { tabId: 1, requestId: "cam2" });
+  assert.equal(a.of("cam.frame")[1].shot, "data:image/jpeg;base64,AAAA");
+  assert.equal(a.of("cam.frame")[1].masks, null);
+  // Nothing masked is an empty list, not null.
+  env.browser.claudePage.broadcast = async () => [{ rects: [], screenX: 0, screenY: 0, width: 1000, height: 500, top: true }];
+  await a.send("cam.frame", { tabId: 1, requestId: "cam3" });
+  assert.deepEqual(a.of("cam.frame")[2].masks, []);
+
+  // Only tabs in the chat's group.
+  env.browser.tabsMap.set(6, { id: 6, windowId: 10, groupId: -1, active: false, url: "https://six.example/", status: "complete", title: "six" });
+  await a.send("cam.frame", { tabId: 6, requestId: "cam4" });
+  assert.deepEqual(plain(a.of("cam.frame")[3]), { type: "cam.frame", requestId: "cam4", error: "That tab isn't in this chat's group." });
+  assert.equal(captures.length, 3);
+});
+
 // ---- Teach
 
 test("Teach records the viewed tab: numbered steps with a shot, one step per field, no secrets", async () => {

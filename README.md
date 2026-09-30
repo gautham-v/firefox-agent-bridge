@@ -201,7 +201,10 @@ scrolls the element into view. Both directions work inside frames.
 While a task runs, the steps card shows a live thumbnail of the tab the agent last acted on, with
 its cursor, refreshed about twice a second; the button in its corner switches to that tab. It
 pauses while the panel is hidden or the card is scrolled out of view, and goes away when the task
-ends. The thumbnail stays in the sidebar and never reaches the agent, so it isn't redacted.
+ends. The thumbnail stays in the sidebar and never reaches the agent, so the live view isn't
+redacted. The download button beside it (and under the reply once the task ends) saves what the
+cam saw during the turn as an animated GIF, with [masked fields](#redaction) covered as in
+screenshots. It keeps up to 300 distinct frames; a longer turn is thinned evenly into a time-lapse.
 
 ### Teach
 

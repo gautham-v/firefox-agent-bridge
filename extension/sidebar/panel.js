@@ -78,6 +78,7 @@ const ICON_PATHS = {
   lock: '<rect x="4" y="7" width="8" height="6.5" rx="1.2"/><path d="M5.8 7V5.3a2.2 2.2 0 0 1 4.4 0V7"/>',
   file: '<path d="M4 2.5h5l3 3v8H4z"/><path d="M9 2.5v3h3"/>',
   record: '<circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2" fill="currentColor" stroke="none"/>',
+  save: '<path d="M8 2.5v7.5M4.8 7L8 10.2 11.2 7"/><path d="M2.5 11v1.5a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V11"/>',
 };
 const SVG_NS = "http://www.w3.org/2000/svg";
 const iconCache = new Map();
@@ -653,6 +654,9 @@ function onMessage(m) {
     }
     case "teach.saved":
       return onTeachSaved(m);
+    case "cam.frame":
+      camWaits.get(m.requestId)?.(m);
+      return;
   }
 }
 
@@ -848,7 +852,21 @@ function stepRow(t, s, current, extra = "") {
 const CAM_MS = 400;
 const CAM_SCALE = 0.25;
 const CAM_MAX_FAILS = 3;
+const CAM_WAIT_MS = 5000;
 const cam = { tabId: null, busy: false, fails: 0, img: null, el: null };
+const camWaits = new Map(); // request id -> the handler for background's answer
+
+// Save as GIF keeps the cam's frames for the latest turn that had any: each capture's JPEG as
+// captured (a few KB at this scale) and where the masked fields in it were; gif.js draws the bars
+// in when the GIF is made. A frame the same as the last isn't kept again, so a still page costs
+// nothing. At the cap, every other frame goes and from then on only every other new one is kept,
+// so a long turn plays as an even time-lapse instead of losing its start. A frame whose fields
+// couldn't be found shows in the cam but isn't kept.
+const GIF_MAX_FRAMES = 300;
+const GIF_MAX_BYTES = 16 * 1024 * 1024;
+const GIF_HOLD_MS = 1500; // the longest a frame shows, so a pause or a time-lapse keeps moving
+const GIF_END_MS = 2000; // the last frame, before it loops
+const gif = { key: null, frames: [], bytes: 0, stride: 1, seen: 0, busy: false };
 
 function camEl() {
   if (!cam.el) {
@@ -857,10 +875,97 @@ function camEl() {
       "div",
       { class: "cam" },
       cam.img,
+      el("button", { class: "exp gif", title: "Save as GIF", "aria-label": "Save as GIF", disabled: gif.busy, onclick: () => saveGif(activeTurn()) }, icon("save")),
       el("button", { class: "exp", title: "Switch to this tab", "aria-label": "Switch to this tab", onclick: () => cam.tabId != null && browser.tabs.update(cam.tabId, { active: true }).catch(() => {}) }, icon("popout")),
     );
   }
   return cam.el;
+}
+
+// A frame and its masked fields, from background (camFrame there).
+function camFrame(tabId) {
+  const requestId = `cam${++requestCount}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => camWaits.get(requestId)?.({ error: "No frame came back." }), CAM_WAIT_MS);
+    camWaits.set(requestId, (m) => {
+      clearTimeout(timer);
+      camWaits.delete(requestId);
+      if (m.error) reject(new Error(m.error));
+      else resolve(m);
+    });
+    post("cam.frame", { tabId, scale: CAM_SCALE, requestId });
+  });
+}
+
+// Frames belong to a turn by its place in its chat, which survives the chat being drawn again.
+const gifKey = (t) => (t ? `${S.chatId}:${S.turns.indexOf(t)}` : null);
+const gifFrames = (t) => (t && gif.key === gifKey(t) ? gif.frames : []);
+
+function gifKeep(t, url, masks) {
+  if (!t || !masks) return;
+  const key = gifKey(t);
+  if (gif.key !== key) {
+    // the turn that had them loses its button
+    for (const x of S.turns) if (x.done) x.dirty = true;
+    Object.assign(gif, { key, frames: [], bytes: 0, stride: 1, seen: 0 });
+  }
+  const last = gif.frames.at(-1);
+  const boxes = JSON.stringify(masks);
+  if (last && last.url === url && last.boxes === boxes) return;
+  if (gif.seen++ % gif.stride) return;
+  gif.frames.push({ url, masks, boxes, at: Date.now() });
+  gif.bytes += url.length;
+  if (gif.frames.length > GIF_MAX_FRAMES || gif.bytes > GIF_MAX_BYTES) {
+    gif.frames = gif.frames.filter((_, i) => i % 2 === 0);
+    gif.bytes = gif.frames.reduce((n, f) => n + f.url.length, 0);
+    gif.stride *= 2;
+  }
+}
+
+// "firefox-agent-2026-09-29-214405.gif", from when the first frame was taken.
+function gifName(ms) {
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, "0");
+  return `firefox-agent-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.gif`;
+}
+
+// Encodes the kept frames in a worker (gif.js), so the panel stays responsive, and downloads it.
+async function saveGif(t) {
+  const frames = gifFrames(t).slice();
+  if (gif.busy) return;
+  if (!frames.length) return toast("No frames to save yet.", "warn");
+  const busy = (on) => {
+    gif.busy = on;
+    for (const b of document.querySelectorAll("button.gif")) b.disabled = on;
+  };
+  busy(true);
+  try {
+    const list = frames.map((f, i) => ({ url: f.url, masks: f.masks, delay: i + 1 < frames.length ? Math.min(frames[i + 1].at - f.at, GIF_HOLD_MS) : GIF_END_MS }));
+    const blob = await new Promise((resolve, reject) => {
+      const worker = new Worker("gif.js");
+      const done = (fn, v) => {
+        worker.terminate();
+        fn(v);
+      };
+      worker.onmessage = ({ data }) => (data?.blob ? done(resolve, data.blob) : done(reject, new Error(data?.error ?? "The encoder failed.")));
+      worker.onerror = (e) => done(reject, new Error(e.message || "The encoder failed."));
+      worker.postMessage({ frames: list });
+    });
+    const href = URL.createObjectURL(blob);
+    const a = el("a", { href, download: gifName(frames[0].at), hidden: true });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 60_000);
+  } catch (e) {
+    toast(`Couldn't save the GIF: ${e.message}`, "warn");
+  } finally {
+    busy(false);
+  }
+}
+
+function gifButton(t) {
+  return el("button", { class: "ib gif", "aria-label": "Save as GIF", title: "Save as GIF", disabled: gif.busy, onclick: () => saveGif(t) }, icon("save"));
 }
 
 // The tab to watch: the running turn's latest step that names a tab still in the group.
@@ -901,8 +1006,9 @@ async function camTick() {
   if (cam.busy || document.hidden || !camInView()) return;
   cam.busy = true;
   try {
-    const url = await browser.tabs.captureTab(id, { format: "jpeg", quality: 60, scale: CAM_SCALE });
+    const { shot: url, masks } = await camFrame(id);
     if (camTarget() !== id) return;
+    gifKeep(activeTurn(), url, masks);
     const first = !cam.img?.src;
     camEl();
     cam.img.src = url;
@@ -1098,7 +1204,8 @@ function renderTurn(t) {
     node.append(el("div", { class: "note" }, icon(stopped ? "pause" : "warn"), stopped ? "You stopped this task." : t.error));
   }
   const answer = t.blocks.filter((b) => b.type === "text").map((b) => splitDraft(b.text).prose.trim()).filter(Boolean).join("\n\n");
-  if (t.done && answer) node.append(el("div", { class: "acts" }, copyButton(answer)));
+  const saveable = t.done && gifFrames(t).length > 0;
+  if (t.done && (answer || saveable)) node.append(el("div", { class: "acts" }, answer ? copyButton(answer) : null, saveable ? gifButton(t) : null));
   return node;
 }
 

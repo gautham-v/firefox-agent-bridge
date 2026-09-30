@@ -439,6 +439,46 @@ async function captureNow(tabId, capture) {
   }
 }
 
+// The agent cam's frame (the sidebar's live thumbnail, which keeps the agent cursor) and where
+// the masked fields in it are, as fractions of the viewport ({ x, y, width, height, label }), for
+// the frames the panel keeps for Save as GIF. Nothing is drawn on the page, so the cam doesn't
+// wait on screenshots or flash bars at the user; the panel draws them into the GIF. Fields are
+// found before and after the capture, and one that moved in between is covered all the way.
+// masks is null when a frame of the tab couldn't say where its fields are.
+async function camFrame(tabId, scale) {
+  const boxes = () => camMasks(tabId).catch(() => null);
+  const before = await boxes();
+  const shot = await browser.tabs.captureTab(tabId, { format: "jpeg", quality: 60, scale });
+  const after = before && (await boxes());
+  return { shot, masks: before && after && spanBoxes(before, after) };
+}
+
+async function camMasks(tabId) {
+  const frames = await browser.claudePage.broadcast(tabId, "maskRects", { redact: redactRules });
+  if (frames.some((f) => f?.error)) return null;
+  const withRects = frames.filter((f) => f?.rects?.length);
+  if (!withRects.length) return [];
+  const top = frames[0];
+  if (!top?.top || !(top.width > 0 && top.height > 0)) return null;
+  return withRects.flatMap((f) => {
+    const dx = f === top ? 0 : f.screenX - top.screenX;
+    const dy = f === top ? 0 : f.screenY - top.screenY;
+    return f.rects.map((r) => ({ x: (r.x + dx) / top.width, y: (r.y + dy) / top.height, width: r.width / top.width, height: r.height / top.height, label: r.label }));
+  });
+}
+
+// The same fields found twice, in the same order, are one box spanning both places; otherwise
+// both sets are kept.
+function spanBoxes(a, b) {
+  if (a.length !== b.length) return [...a, ...b];
+  return a.map((r, i) => {
+    const s = b[i];
+    const x = Math.min(r.x, s.x);
+    const y = Math.min(r.y, s.y);
+    return { x, y, width: Math.max(r.x + r.width, s.x + s.width) - x, height: Math.max(r.y + r.height, s.y + s.height) - y, label: r.label };
+  });
+}
+
 // Pixel size of a captured image (a PNG or JPEG data URL), read from its header; null if it
 // can't be read.
 function imageSize(dataUrl) {
@@ -1748,6 +1788,20 @@ const panelCommands = {
 
   // Alt was released in the panel, so the page never heard it; arming again takes the outline down.
   "point.clear": () => schedulePointTabs(),
+
+  // A frame for the agent cam, from a tab in the chat's group (camFrame).
+  async "cam.frame"(panel, m) {
+    const reply = (x) => post(panel, { type: "cam.frame", requestId: m.requestId, ...x });
+    try {
+      const groupId = await sessionGroupId(panel.chatId);
+      const tab = typeof m.tabId === "number" ? await browser.tabs.get(m.tabId).catch(() => null) : null;
+      if (groupId == null || tab?.groupId !== groupId) throw new Error("That tab isn't in this chat's group.");
+      const scale = Math.min(1, Math.max(0.05, Number(m.scale) || 0.25));
+      reply(await camFrame(tab.id, scale));
+    } catch (e) {
+      reply({ error: e?.message ?? String(e) });
+    }
+  },
 
   popout: (panel) =>
     browser.windows.create({

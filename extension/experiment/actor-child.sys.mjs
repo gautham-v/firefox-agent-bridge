@@ -453,8 +453,9 @@ function clearMask(doc) {
   }
 }
 
-function drawMask(doc, red) {
-  // With the viewport's size unknown, every field is covered rather than none.
+// The masked elements in the viewport, each with its box. With the viewport's size unknown, every
+// one counts rather than none.
+function maskedBoxes(doc, red) {
   const size = viewSize(doc.defaultView);
   const view = { width: size.width || Infinity, height: size.height || Infinity };
   const els = red.elements().filter((el) => isRendered(el));
@@ -466,6 +467,11 @@ function drawMask(doc, red) {
     if (!r.width || !r.height || r.bottom <= 0 || r.right <= 0 || r.top >= view.height || r.left >= view.width) continue;
     bars.push({ el, r });
   }
+  return bars;
+}
+
+function drawMask(doc, red) {
+  const bars = maskedBoxes(doc, red);
   if (!bars.length) return 0;
   let content;
   try {
@@ -506,6 +512,19 @@ function capture(doc, { on, redact }) {
   if (!on) return { masked: 0, top };
   const red = redactor(doc, redact);
   return { masked: drawMask(doc, red), site: red.site(), top };
+}
+
+// Where the masked fields are, for the agent cam's frames that Save as GIF keeps (panel.js). The
+// sidebar draws their bars itself, so nothing shows on the page: each box is in this frame's
+// viewport, with where the viewport sits on screen to place a child frame's boxes in the tab.
+function maskRects(doc, { redact }) {
+  const win = doc.defaultView;
+  const red = redactor(doc, redact);
+  const rects = maskedBoxes(doc, red).map(({ el, r }) => {
+    const m = red.mask(el);
+    return { x: r.left, y: r.top, width: r.width, height: r.height, label: barLabel(m.kind, m.filled) };
+  });
+  return { rects, screenX: win.mozInnerScreenX, screenY: win.mozInnerScreenY, ...viewSize(win), top: !win.browsingContext.parent };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2195,6 +2214,7 @@ const OPS = {
   textSize,
   cursorVisible,
   capture,
+  maskRects,
   readPage,
   find: findElements,
   text: pageText,
