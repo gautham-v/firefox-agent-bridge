@@ -70,7 +70,13 @@ const maskedPart = ({ count, site }) => text(`${count} field${count === 1 ? "" :
 // Page ops answer text, or { text, masked } when redaction hid something.
 function pageContent(result, extra = "") {
   if (typeof result !== "object" || result === null) return [text(result + extra)];
-  return [text(result.text + extra), maskedPart(result.masked)];
+  return result.masked ? [text(result.text + extra), maskedPart(result.masked)] : [text(result.text + extra)];
+}
+
+// Masked counts from several frames, as one; the site is the first frame's that has one.
+function addMasked(a, b) {
+  if (!b?.count) return a;
+  return a ? { count: a.count + b.count, site: a.site } : { count: b.count, site: b.site };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -561,13 +567,39 @@ async function toCss(tabId, coordinate) {
 const frameScale = async (tabId) => 1 / (await ratioFor(tabId));
 
 // ---------------------------------------------------------------------------------------------
-// Tabs opened by a session tab (target=_blank, window.open), reported back after clicks
+// Tabs opened by a session tab (target=_blank, window.open), reported back after clicks. A tab a
+// click opens is created at once but reaches onCreated a moment later, so a click waits up to
+// OPEN_GRACE_MS for one, or OPEN_WAIT_MS when it was on a link or form that targets a new tab,
+// and goes on as soon as one arrives.
 
+const OPEN_GRACE_MS = 100;
+const OPEN_WAIT_MS = 500;
 const openedBy = new Map(); // opener tab id -> [{ tabId, at }]
+const openWaiters = new Map(); // opener tab id -> Set of callbacks waiting for a tab it opens
 
-async function openedTabsNote(tabId, since) {
-  await sleep(500);
-  const fresh = (openedBy.get(tabId) ?? []).filter((o) => o.at >= since);
+function tabOpened(openerId) {
+  for (const done of openWaiters.get(openerId) ?? []) done();
+}
+
+function untilTabOpened(tabId, ms) {
+  return new Promise((resolve) => {
+    const waiters = openWaiters.get(tabId) ?? new Set();
+    const done = () => {
+      clearTimeout(timer);
+      waiters.delete(done);
+      if (!waiters.size && openWaiters.get(tabId) === waiters) openWaiters.delete(tabId);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    waiters.add(done);
+    openWaiters.set(tabId, waiters);
+  });
+}
+
+async function openedTabsNote(tabId, since, wait = OPEN_GRACE_MS) {
+  const opened = () => (openedBy.get(tabId) ?? []).filter((o) => o.at >= since);
+  if (!opened().length) await untilTabOpened(tabId, wait);
+  const fresh = opened();
   if (!fresh.length) return "";
   const notes = [];
   for (const { tabId: id } of fresh) {
@@ -588,9 +620,87 @@ async function openedTabsNote(tabId, since) {
 
 const page = (tabId, op, args) => browser.claudePage.call(tabId, op, { ...args, redact: redactRules });
 
+// read_page with child frames: each frame's tree goes under its iframe's line (the one ending in
+// frame=f<id>), cross-origin frames and frames inside shadow roots included, so their elements
+// get refs (ref_3@f12) that click and form_input act on in place. Frames at one level are read
+// at once; all of them share the one max_chars.
+const FRAME_LINE = / frame=f(\d+)$/;
+
+async function readPageAll(tabId, args) {
+  const maxChars = args.maxChars ?? 50000;
+  const top = await page(tabId, "readPage", args);
+  if (typeof top !== "object" || top === null || !top.frames?.length) return top;
+  let budget = maxChars - top.text.length;
+  let masked = addMasked(null, top.masked);
+  let truncated = top.truncated;
+  const expand = async (out, frames) => {
+    const want = new Set(frames);
+    const lines = out.split("\n");
+    const at = lines.map((line) => Number(line.match(FRAME_LINE)?.[1])).map((id) => (want.has(id) ? id : null));
+    const inner = await Promise.all(
+      at.map((id) =>
+        id == null || budget <= 0
+          ? null
+          : page(tabId, "readPage", { filter: args.filter, depth: args.depth, maxChars: budget, frameId: id, inner: true }).catch((e) => ({ text: `(couldn't read this frame: ${e.message})`, frames: [] })),
+      ),
+    );
+    const done = [];
+    for (let i = 0; i < lines.length; i++) {
+      done.push(lines[i]);
+      const got = inner[i];
+      if (!got) {
+        if (at[i] != null) truncated = true;
+        continue;
+      }
+      if (budget <= 0) {
+        truncated = true;
+        continue;
+      }
+      const pad = lines[i].match(/^ */)[0] + "  ";
+      let body = got.frames?.length ? await expand(got.text, got.frames) : got.text;
+      if (!body) continue;
+      body = body.split("\n").map((l) => pad + l).join("\n");
+      if (body.length > budget) {
+        body = body.slice(0, Math.max(0, budget)).replace(/\n[^\n]*$/, "");
+        truncated = true;
+      }
+      budget -= body.length + 1;
+      masked = addMasked(masked, got.masked);
+      truncated ||= got.truncated;
+      if (body) done.push(body);
+    }
+    return done.join("\n");
+  };
+  let out = await expand(top.text, top.frames);
+  if (truncated && !top.truncated) out += `\n\n[Truncated at ${maxChars} characters. Use filter "interactive", a smaller depth, or ref_id to focus on part of the page.]`;
+  return masked ? { text: out, masked } : out;
+}
+
+// find in every frame of the tab at once, merged by score. A frame's matches have refs naming
+// it and coordinates in the top frame's viewport, so they are clicked like any other.
+async function findAll(tabId, query) {
+  const scale = await frameScale(tabId);
+  const vp = await page(tabId, "viewport", {});
+  const origin = { x: vp.screenX, y: vp.screenY, width: vp.width, height: vp.height };
+  const frames = await browser.claudePage.broadcast(tabId, "find", { query, frameScale: scale, origin, redact: redactRules });
+  if (frames[0]?.error) throw new Error(frames[0].error);
+  const answered = frames.filter((f) => Array.isArray(f?.matches));
+  const scored = answered.flatMap((f) => f.matches).sort((a, b) => b.score - a.score);
+  const best = scored.length ? scored[0].score : 0;
+  const matches = scored.filter((m) => m.score >= Math.max(1, best * 0.4)).slice(0, 20);
+  if (!matches.length) return `No elements matched "${query}". Try read_page with filter "interactive".`;
+  const total = answered.reduce((n, f) => n + (f.total ?? 0), 0);
+  const more = matches.length === 20 && total > 20 ? `\n[More than 20 matches; showing the best 20. Use a more specific query.]` : "";
+  const out = `Found ${matches.length} element(s) for "${query}" (coordinates match the screenshot frame; clicking by ref is more reliable):\n${matches.map((m) => m.line).join("\n")}${more}`;
+  const masked = answered.reduce((m, f) => addMasked(m, f.masked), null);
+  return masked ? { text: out, masked } : out;
+}
+
 async function computer(session, args) {
   const { action, tabId } = args;
-  await requireTab(session, tabId);
+  const tab = await requireTab(session, tabId);
+  // The cursor eases to each point only in the tab the user is looking at.
+  const animate = !!tab.active;
   const needsTarget = () => {
     if (!args.coordinate && !args.ref) throw new Error(`${action} needs a coordinate or ref.`);
   };
@@ -607,24 +717,24 @@ async function computer(session, args) {
       const clickCount = { double_click: 2, triple_click: 3 }[action] ?? 1;
       const button = action === "right_click" ? 2 : 0;
       const since = Date.now();
-      const result = await page(tabId, "click", { ...(await toCss(tabId, args.coordinate)), ref: args.ref, button, clickCount, modifiers: args.modifiers });
-      return pageContent(result, await openedTabsNote(tabId, since));
+      const result = await page(tabId, "click", { ...(await toCss(tabId, args.coordinate)), ref: args.ref, button, clickCount, modifiers: args.modifiers, animate });
+      return pageContent(result, await openedTabsNote(tabId, since, result?.opens ? OPEN_WAIT_MS : OPEN_GRACE_MS));
     }
     case "hover":
       needsTarget();
-      return [text(await page(tabId, "hover", { ...(await toCss(tabId, args.coordinate)), ref: args.ref }))];
+      return [text(await page(tabId, "hover", { ...(await toCss(tabId, args.coordinate)), ref: args.ref, animate }))];
     case "left_click_drag": {
       if (!args.start_coordinate || !args.coordinate) throw new Error("left_click_drag needs start_coordinate and coordinate.");
       const start = await toCss(tabId, args.start_coordinate);
       const end = await toCss(tabId, args.coordinate);
-      return [text(await page(tabId, "drag", { x0: start.x, y0: start.y, x: end.x, y: end.y }))];
+      return [text(await page(tabId, "drag", { x0: start.x, y0: start.y, x: end.x, y: end.y, animate }))];
     }
     case "type":
       if (typeof args.text !== "string") throw new Error("type needs text.");
-      return [text(await page(tabId, "type", { text: args.text }))];
+      return pageContent(await page(tabId, "type", { text: args.text }));
     case "key":
       if (!args.text) throw new Error("key needs text, e.g. \"Enter\" or \"cmd+a\".");
-      return [text(await page(tabId, "key", { keys: args.text, repeat: args.repeat ?? 1 }))];
+      return pageContent(await page(tabId, "key", { keys: args.text, repeat: args.repeat ?? 1 }));
     case "scroll":
       return [text(await page(tabId, "scroll", { ...(await toCss(tabId, args.coordinate)), direction: args.scroll_direction ?? "down", amount: args.scroll_amount ?? 3 }))];
     case "scroll_to":
@@ -683,11 +793,11 @@ async function runTool(session, tool, args, client) {
 
     case "read_page":
       await requireTab(session, args.tabId);
-      return pageContent(await page(args.tabId, "readPage", { filter: args.filter, depth: args.depth, maxChars: args.max_chars, refId: args.ref_id, frameScale: await frameScale(args.tabId) }));
+      return pageContent(await readPageAll(args.tabId, { filter: args.filter, depth: args.depth, maxChars: args.max_chars, refId: args.ref_id, frameScale: await frameScale(args.tabId) }));
 
     case "find":
       await requireTab(session, args.tabId);
-      return pageContent(await page(args.tabId, "find", { query: args.query, frameScale: await frameScale(args.tabId) }));
+      return pageContent(await findAll(args.tabId, args.query));
 
     case "get_page_text":
       await requireTab(session, args.tabId);
@@ -787,7 +897,8 @@ async function expectMet(tabId, expect) {
 async function replayStopped(tabId, steps, i, expected, found) {
   const step = steps[i];
   const tab = await browser.tabs.get(tabId).catch(() => null);
-  const snapshot = await page(tabId, "readPage", { filter: "interactive", maxChars: 6000, frameScale: await frameScale(tabId) }).catch((e) => `(Couldn't read the page: ${e.message})`);
+  const read = await readPageAll(tabId, { filter: "interactive", maxChars: 6000, frameScale: await frameScale(tabId) }).catch((e) => `(Couldn't read the page: ${e.message})`);
+  const snapshot = typeof read === "object" ? read.text : read;
   const lines = [
     `Replay stopped at step ${i + 1} of ${steps.length}: ${stepLabel(step)}.`,
     `Expected: ${expected}`,
@@ -914,6 +1025,7 @@ browser.tabs.onCreated.addListener(async (tab) => {
   const list = openedBy.get(tab.openerTabId) ?? [];
   list.push({ tabId: tab.id, at: Date.now() });
   openedBy.set(tab.openerTabId, list.slice(-10));
+  tabOpened(tab.openerTabId);
   justOpened.add(tab.id);
   setTimeout(() => justOpened.delete(tab.id), 3000);
   await browser.tabs.group({ tabIds: [tab.id], groupId: opener.groupId }).catch(() => {});

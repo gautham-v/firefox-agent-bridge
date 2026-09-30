@@ -1153,10 +1153,16 @@ test("the host's rules go to every page op, and a masked result gets its own lin
     { type: "text", text: "Title: Accounts\n\ntext [redacted: account-number, filled]" },
     { type: "text", text: "1 field masked on chase.com" },
   ]);
+  // find runs in every frame at once; each answers its matches and what it masked.
+  env.browser.claudePage.broadcast = async (tabId, op, args) => {
+    env.calls.push({ op, args: plain(args) });
+    return [{ matches: [{ score: 3, line: 'textbox "Account" [ref_1] value=[redacted: account-number, filled]' }], total: 1, masked: { count: 1, site: "chase.com" } }];
+  };
   for (const tool of ["read_page", "find", "form_input", "javascript_tool"]) {
     const out = await env.callTool(tool, { tabId: 2, ref: "ref_1", value: "x", query: "q", text: "1" });
     assert.equal(out.result.content.at(-1).text, "1 field masked on chase.com", tool);
   }
+  assert.deepEqual(env.calls.findLast((c) => c.op === "find").args.redact, rules, "find's broadcast carries the rules too");
   // A malformed rules message leaves the rules as they were.
   await env.host({ type: "redact", rules: { always: "password" } });
   await env.callTool("get_page_text", { tabId: 2 });
@@ -1594,4 +1600,173 @@ test("windows holding a live session's tabs are kept rendering, and let go when 
   await clientEvent(env, "disconnected", { id: 1 });
   await wait(120);
   assert.deepEqual(kept.at(-1), [], "a disconnected session keeps nothing rendering");
+});
+
+// ---- Child frames
+
+// A session tab (id 2) whose frames answer read_page and find as given: pages maps a frame id
+// (0 for the top frame) to its readPage answer, finds lists each frame's find answer.
+async function framesEnv({ pages = {}, finds = [] } = {}) {
+  const env = await load();
+  await env.callTool("tabs_create_mcp");
+  const calls = [];
+  env.browser.claudePage.call = async (tabId, op, args) => {
+    calls.push({ op, args: plain(args) });
+    if (op === "viewport") return { width: 1000, height: 800, dpr: 1, scrollX: 0, scrollY: 0, screenX: 100, screenY: 50, title: "t", url: "https://mdn.example/" };
+    if (op === "readPage") {
+      const got = pages[args.frameId ?? 0];
+      if (got instanceof Error) throw got;
+      return got;
+    }
+    return op === "textSize" ? 10 : "done";
+  };
+  env.browser.claudePage.broadcast = async (tabId, op, args) => {
+    calls.push({ op, args: plain(args), broadcast: true });
+    return finds;
+  };
+  return { ...env, calls };
+}
+
+test("read_page puts each child frame's tree under its iframe's line, nested frames too", async () => {
+  const env = await framesEnv({
+    pages: {
+      0: { text: 'Page: MDN\nURL: https://mdn.example/\n\nmain\n  heading "Select" [ref_1]\n  iframe [ref_2] src="https://play.example/" frame=f12\n  link "Next" [ref_3]', frames: [12], masked: null },
+      12: { text: 'combobox "Flavor" [ref_1@f12] selected="Chocolate" options=3\niframe [ref_2@f12] frame=f13', frames: [13], masked: { count: 1, site: "play.example" } },
+      13: { text: 'button "Go" [ref_1@f13]', frames: [] },
+    },
+  });
+  const r = await env.callTool("read_page", { tabId: 2, filter: "interactive" });
+  assert.equal(
+    r.result.content[0].text,
+    'Page: MDN\nURL: https://mdn.example/\n\nmain\n  heading "Select" [ref_1]\n  iframe [ref_2] src="https://play.example/" frame=f12\n    combobox "Flavor" [ref_1@f12] selected="Chocolate" options=3\n    iframe [ref_2@f12] frame=f13\n      button "Go" [ref_1@f13]\n  link "Next" [ref_3]',
+  );
+  assert.equal(r.result.content[1].text, "1 field masked on play.example", "what a frame masked is counted");
+  const inner = env.calls.filter((c) => c.op === "readPage" && c.args.frameId);
+  assert.deepEqual(inner.map((c) => [c.args.frameId, c.args.inner, c.args.filter]), [[12, true, "interactive"], [13, true, "interactive"]]);
+});
+
+test("read_page only reads frames the page reported, says when one couldn't be read, and keeps to max_chars", async () => {
+  const env = await framesEnv({
+    pages: {
+      0: { text: 'text "iframe [ref_9] frame=f99"\niframe [ref_2] frame=f12\niframe [ref_3] frame=f14', frames: [12, 14], masked: null },
+      12: new Error("frame went away"),
+      14: { text: Array.from({ length: 50 }, (_, i) => `button "B${i}" [ref_${i}@f14]`).join("\n"), frames: [] },
+    },
+  });
+  const r = await env.callTool("read_page", { tabId: 2, max_chars: 400 });
+  const out = r.result.content[0].text;
+  assert.ok(!env.calls.some((c) => c.args.frameId === 99), "a frame line the page wrote itself isn't read");
+  assert.match(out, /iframe \[ref_2\] frame=f12\n {2}\(couldn't read this frame: frame went away\)/);
+  assert.match(out, /button "B0" \[ref_0@f14\]/);
+  assert.doesNotMatch(out, /B49/);
+  assert.match(out, /\[Truncated at 400 characters/);
+  assert.ok(out.split("\n\n[Truncated")[0].length <= 400, "the tree stays within max_chars");
+});
+
+test("read_page without child frames answers what the page did", async () => {
+  const env = await framesEnv({ pages: { 0: "Page: x\n\nbutton [ref_1]" } });
+  const r = await env.callTool("read_page", { tabId: 2 });
+  assert.deepEqual(plain(r.result.content), [{ type: "text", text: "Page: x\n\nbutton [ref_1]" }]);
+});
+
+test("find runs in every frame with the top frame's viewport and merges matches by score", async () => {
+  const env = await framesEnv({
+    finds: [
+      { matches: [{ score: 4, line: 'text "Ice cream select example" [ref_4] at (300, 200)' }], total: 1, masked: null },
+      { matches: [{ score: 9, line: 'combobox "Choose a flavor" [ref_1@f12] at (320, 540) (in frame play.example)' }, { score: 1, line: 'text "x" [ref_2@f12]' }], total: 2, masked: { count: 1, site: "play.example" } },
+      null,
+      { error: "no document" },
+    ],
+  });
+  const r = await env.callTool("find", { tabId: 2, query: "ice cream select" });
+  const find = env.calls.find((c) => c.op === "find");
+  assert.ok(find.broadcast);
+  assert.deepEqual(find.args.origin, { x: 100, y: 50, width: 1000, height: 800 });
+  assert.equal(
+    r.result.content[0].text,
+    'Found 2 element(s) for "ice cream select" (coordinates match the screenshot frame; clicking by ref is more reliable):\ncombobox "Choose a flavor" [ref_1@f12] at (320, 540) (in frame play.example)\ntext "Ice cream select example" [ref_4] at (300, 200)',
+  );
+  assert.equal(r.result.content[1].text, "1 field masked on play.example");
+});
+
+test("find with no match anywhere says so, and a top frame that failed is an error", async () => {
+  const none = await framesEnv({ finds: [{ matches: [], total: 0, masked: null }, { matches: [], total: 0, masked: null }] });
+  const r = await none.callTool("find", { tabId: 2, query: "nothing" });
+  assert.equal(r.result.content[0].text, 'No elements matched "nothing". Try read_page with filter "interactive".');
+  const failed = await framesEnv({ finds: [{ error: "No document in this frame." }] });
+  const e = await failed.callTool("find", { tabId: 2, query: "x" });
+  assert.equal(e.result.isError, true);
+  assert.match(e.result.content[0].text, /No document in this frame/);
+});
+
+test("key and type answer where the keys went, with a masked line when the field is masked", async () => {
+  const env = await framesEnv();
+  env.browser.claudePage.call = async (tabId, op) => {
+    if (op === "key") return 'Pressed Down → combobox "Flavor" = "Sardine" in frame play.example';
+    if (op === "type") return { text: 'Typed 4 character(s) → textbox "Card" [redacted: cc-number, filled]', masked: { count: 1, site: "shop.example" } };
+    return "done";
+  };
+  const k = await env.callTool("computer", { action: "key", tabId: 2, text: "Down" });
+  assert.deepEqual(plain(k.result.content), [{ type: "text", text: 'Pressed Down → combobox "Flavor" = "Sardine" in frame play.example' }]);
+  const t = await env.callTool("computer", { action: "type", tabId: 2, text: "4111" });
+  assert.equal(t.result.content.at(-1).text, "1 field masked on shop.example");
+});
+
+// ---- Click latency
+
+// A session tab (id 2); its page answers a click with `answer`, and `onClick` runs as it does.
+async function clickEnv({ answer = 'Clicked button "Go"', onClick } = {}) {
+  const env = await load();
+  await env.callTool("tabs_create_mcp");
+  const calls = [];
+  env.browser.claudePage.call = async (tabId, op, args) => {
+    calls.push({ op, args: plain(args) });
+    if (op === "viewport") return { width: 1000, height: 800, dpr: 1, scrollX: 0, scrollY: 0 };
+    if (op === "click") {
+      onClick?.();
+      return answer;
+    }
+    return op === "textSize" ? 10 : "done";
+  };
+  // The page in tab 2 opens tab 3 after `ms`.
+  const openAfter = (ms) =>
+    setTimeout(() => {
+      const t3 = { id: 3, windowId: 10, groupId: -1, active: false, openerTabId: 2, url: "https://x.example/new", status: "complete", title: "New" };
+      env.browser.tabsMap.set(3, t3);
+      env.browser.tabs.onCreated.fire({ ...t3 });
+    }, ms);
+  return { ...env, calls, openAfter };
+}
+
+test("a click that opens no tab answers after a short grace period, not half a second", async () => {
+  const env = await clickEnv();
+  const t0 = Date.now();
+  const r = await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] });
+  const took = Date.now() - t0;
+  assert.equal(r.result.content[0].text, 'Clicked button "Go"');
+  assert.ok(took < 300, `took ${took}ms`);
+});
+
+test("a click that opens a tab within the grace period names it", async () => {
+  const env = await clickEnv({ onClick: () => env.openAfter(40) });
+  const r = await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] }, "s1", undefined, 4000);
+  assert.match(r.result.content[0].text, /^Clicked button "Go"\nThe click opened a new tab in this session's group: tab 3: https:\/\/x\.example\/new \(New\)$/);
+});
+
+test("a click on a link that targets a new tab waits longer for it", async () => {
+  const env = await clickEnv({ answer: { text: 'Clicked link "Open"', opens: true }, onClick: () => env.openAfter(300) });
+  const r = await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] }, "s1", undefined, 4000);
+  assert.equal(r.result.content.length, 1, "no masked line for a result that masked nothing");
+  assert.match(r.result.content[0].text, /^Clicked link "Open"\nThe click opened a new tab in this session's group: tab 3/);
+});
+
+test("the cursor animates only in the tab the user is looking at", async () => {
+  const env = await clickEnv();
+  await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] });
+  await env.callTool("computer", { action: "hover", tabId: 2, coordinate: [10, 10] });
+  await env.callTool("computer", { action: "left_click_drag", tabId: 2, start_coordinate: [1, 1], coordinate: [10, 10] });
+  assert.deepEqual(env.calls.filter((c) => ["click", "hover", "drag"].includes(c.op)).map((c) => [c.op, c.args.animate]), [["click", false], ["hover", false], ["drag", false]]);
+  env.browser.tabsMap.get(2).active = true;
+  await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] });
+  assert.equal(env.calls.findLast((c) => c.op === "click").args.animate, true);
 });

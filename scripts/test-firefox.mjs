@@ -60,12 +60,18 @@ const PAGE_HTML = `<!doctype html>
 
 const OTHER_HTML = `<!doctype html><title>Other page</title><p>Opened by target=_blank</p>`;
 
+// The select sits in a shadow root, as MDN's live samples do.
 const FRAME_HTML = `<!doctype html>
-<html><head><style>body { margin: 0; } #fbtn { position: absolute; left: 20px; top: 20px; width: 140px; height: 50px; }</style></head>
+<html><head><style>body { margin: 0; } #fbtn { position: absolute; left: 20px; top: 20px; width: 140px; height: 50px; }
+  #fnote { position: absolute; left: 20px; top: 80px; width: 100px; height: 20px; box-sizing: border-box; }
+  #fhost { position: absolute; left: 180px; top: 20px; }</style></head>
 <body><button id="fbtn">Frame button</button>
+<input id="fnote" aria-label="Frame note">
+<div id="fhost"></div>
 <script>
   let n = 0;
   document.getElementById("fbtn").addEventListener("click", (e) => parent.postMessage({ isTrusted: e.isTrusted, count: ++n }, "*"));
+  document.getElementById("fhost").attachShadow({ mode: "open" }).innerHTML = '<select aria-label="Ice cream flavor"><option>Chocolate</option><option>Sardine</option><option>Vanilla</option></select>';
 </script></body></html>`;
 
 // ---- helpers -------------------------------------------------------------------------------
@@ -234,6 +240,30 @@ try {
       return v.length ? v : null;
     }, 5000);
     assert.deepEqual(got, [{ isTrusted: true, count: 1 }]);
+  });
+
+  await h.step("read_page and find reach a select in a shadow root in the cross-origin frame", async () => {
+    const tree = (await agent.ok("read_page", { tabId: tab, filter: "interactive" })).text;
+    assert.match(tree, /iframe \[ref_\d+\] src="[^"]*\/frame" frame=f\d+\n\s+button "Frame button" \[ref_\d+@f\d+\]/, tree);
+    const found = (await agent.ok("find", { tabId: tab, query: "ice cream select" })).text;
+    const ref = found.match(/combobox "Ice cream flavor" \[(ref_\d+@f\d+)\]/)?.[1];
+    assert.ok(ref, found);
+    assert.match(found, /\(in frame 127\.0\.0\.1:\d+\)/);
+    assert.match((await agent.ok("form_input", { tabId: tab, ref, value: "Sardine" })).text, /Selected "Sardine"/);
+    assert.match((await agent.ok("read_page", { tabId: tab, filter: "interactive" })).text, /combobox "Ice cream flavor" \[ref_\d+@f\d+\] selected="Sardine"/);
+  });
+
+  await h.step("keys go to the frame the last click landed in, and say where they went", async () => {
+    const frame = JSON.parse(await agent.js(tab, "(() => { const r = document.getElementById('frame').getBoundingClientRect(); return JSON.stringify({ x: r.left + 2, y: r.top + 2 }); })()"));
+    // The frame's note field is at 20,80 (100x20).
+    await agent.ok("computer", { action: "left_click", tabId: tab, coordinate: [Math.round((frame.x + 70) * scale), Math.round((frame.y + 90) * scale)] });
+    const typed = (await agent.ok("computer", { action: "type", tabId: tab, text: "abc" })).text;
+    assert.match(typed, /^Typed 3 character\(s\) → textbox "Frame note" = "abc" in frame 127\.0\.0\.1:\d+$/, typed);
+    const key = (await agent.ok("computer", { action: "key", tabId: tab, text: "Backspace" })).text;
+    assert.match(key, /→ textbox "Frame note" = "ab" in frame/, key);
+    // A click back in the top page sends keys there again.
+    await agent.ok("computer", { action: "left_click", tabId: tab, coordinate: await centerOf(agent, tab, "#text", scale) });
+    assert.match((await agent.ok("computer", { action: "key", tabId: tab, text: "End" })).text, /→ textbox "Your name" = /);
   });
 
   await h.step("file_upload sets the file input without a picker", async () => {

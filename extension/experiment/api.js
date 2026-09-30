@@ -24,6 +24,11 @@ const POINT_EVENTS = Object.fromEntries(
 const PICK_TOPIC = "firefox-agent-bridge:pick";
 // Refs made in a child frame name it (ref_7@f12), so ops on them start in that frame.
 const FRAME_REF = /@f(\d+)$/;
+// Keys go where the last click landed. A click inside a cross-origin frame focuses an element in
+// that frame without making the <iframe> the top document's activeElement, so following focus
+// down from the top would send the keys to the top page.
+const CLICK_OPS = new Set(["click", "fill"]);
+const KEY_OPS = new Set(["type", "key"]);
 // Teach (docs/teach.md): the browser ids of tabs being recorded, shared with every content
 // process, and the topic the parent actor reports recorded steps on.
 const RECORDING_KEY = "firefox-agent-bridge:recording";
@@ -148,6 +153,7 @@ this.claudePage = class extends ExtensionAPI {
     this.watchWindows();
     this.watchFrames();
     this.renderingWindows = new Set(); // windows keepRendering is keeping active
+    this.clickFrames = new WeakMap(); // tab's top browsing context -> { id, window } of the child frame last clicked in
   }
 
   // Documents that load in an armed tab (a navigation, a late iframe) are armed as they appear.
@@ -244,11 +250,20 @@ this.claudePage = class extends ExtensionAPI {
       return tab.linkedBrowser.browsingContext;
     }
 
+    // The child frame the last click in this tab landed in, if it still shows the same document.
+    function clickFrame(top) {
+      const last = self.clickFrames.get(top);
+      const bc = last && top.getAllBrowsingContextsInSubtree().find((c) => c.id === last.id);
+      return bc && bc.currentWindowGlobal?.innerWindowId === last.window ? bc : null;
+    }
+
     // Runs op in the tab's top frame. When the child answers { descend: { id, args } } the
     // target lives in a child frame (possibly another process), so the op is re-sent there.
     // A frame that answers { bubble } couldn't act (a scroll over a frame that can't scroll),
     // so the op goes back to the frame that descended, with noDescend set. An op with a `frame`
-    // path (a Teach step's) starts in that frame instead of the top one.
+    // path (a Teach step's) starts in that frame instead of the top one, one with a `frameId`
+    // (read_page reading a child frame) in the frame with that browsing context id, and keys in
+    // the frame the last click landed in.
     async function run(tabId, op, args) {
       await self.ready;
       const top = topContext(tabId);
@@ -258,6 +273,11 @@ this.claudePage = class extends ExtensionAPI {
       if (framed) {
         bc = top.getAllBrowsingContextsInSubtree().find((c) => c.id === Number(framed[1]));
         if (!bc) throw new Error(`${current.ref ?? current.refId} is gone (its frame closed or navigated). Call find or read_page again for a fresh ref.`);
+      } else if (Number.isInteger(current.frameId)) {
+        bc = top.getAllBrowsingContextsInSubtree().find((c) => c.id === current.frameId);
+        if (!bc) throw new Error("That frame is gone (it closed or navigated). Call read_page again.");
+      } else if (KEY_OPS.has(op) && bc === top) {
+        bc = clickFrame(top) ?? top;
       }
       const path = [];
       for (let hop = 0; hop <= 2 * MAX_FRAME_HOPS; hop++) {
@@ -270,7 +290,13 @@ this.claudePage = class extends ExtensionAPI {
           current = { ...current, noDescend: true };
           continue;
         }
-        if (!result?.descend) return result;
+        if (!result?.descend) {
+          if (CLICK_OPS.has(op)) {
+            if (bc.parent) self.clickFrames.set(top, { id: bc.id, window: wg.innerWindowId });
+            else self.clickFrames.delete(top);
+          }
+          return result;
+        }
         path.push([bc, current]);
         bc = top.getAllBrowsingContextsInSubtree().find((c) => c.id === result.descend.id);
         current = { ...current, ...result.descend.args };

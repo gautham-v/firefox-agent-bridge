@@ -95,7 +95,7 @@ const TOOLS = [
   {
     name: "read_page",
     description:
-      'Accessibility-style tree of the page with a ref for each element (use refs with computer, form_input, file_upload). Output is capped at max_chars (default 50000); use filter "interactive", a smaller depth, or ref_id to focus. Only the top frame is walked; use javascript_tool for same-origin iframes.',
+      'Accessibility-style tree of the page with a ref for each element (use refs with computer, form_input, file_upload). Output is capped at max_chars (default 50000); use filter "interactive", a smaller depth, or ref_id to focus. Child frames (cross-origin ones and ones inside shadow roots too) are walked: a frame\'s tree sits under its iframe line, and its refs (ref_3@f12) work with every tool that takes a ref.',
     inputSchema: {
       type: "object",
       properties: {
