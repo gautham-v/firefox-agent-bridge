@@ -96,6 +96,27 @@ test("a call without tabId uses the tab navigate reported", async () => {
   }
 });
 
+test("a tab list after a created-tab note is still read, from tabs_context_mcp and navigate", async () => {
+  const note = (id) => `Created tab ${id} for this session; close it with tabs_close_mcp when done.`;
+  const s = await start((tool, args) => (tool === "tabs_context_mcp" ? ok(`${note(9)}\n${tabList(9)}`) : ok(`${tool} on ${args.tabId}`)));
+  try {
+    await s.call("tabs_context_mcp", { createIfEmpty: true });
+    await s.call("get_page_text", {});
+    assert.deepEqual(s.calls.map((c) => [c.tool, c.args.tabId]), [["get_page_text", 9]], "the list was read without asking again");
+  } finally {
+    s.stop();
+  }
+  const t = await start((tool, args) =>
+    tool === "navigate" ? ok(`Tab 11: https://a.example/\nTitle: A\n${note(11)}\n\nThis session's tabs:\n${tabList(11)}`) : ok(`${tool} on ${args.tabId}`));
+  try {
+    await t.call("navigate", { url: "a.example" });
+    await t.call("find", { query: "x" });
+    assert.deepEqual(t.calls.map((c) => [c.tool, c.args.tabId]), [["find", 11]]);
+  } finally {
+    t.stop();
+  }
+});
+
 test("the last tab used wins, and tabs_create_mcp's new tab becomes the current one", async () => {
   const s = await start((tool, args) =>
     tool === "tabs_create_mcp" ? ok(`Created tab 8 in the g tab group.\n${tabList(7, 8)}`) : ok(`${tool} on ${args.tabId}`));

@@ -1754,7 +1754,7 @@ test("find runs in every frame with the top frame's viewport and merges matches 
   assert.deepEqual(find.args.origin, { x: 100, y: 50, width: 1000, height: 800 });
   assert.equal(
     r.result.content[0].text,
-    'Found 2 for "ice cream select" (screenshot coordinates; click by ref if off-screen):\ncombobox "Choose a flavor" [ref_1@f12] at (320, 540) (in frame play.example)\ntext "Ice cream select example" [ref_4] at (300, 200)',
+    'Found 2 for "ice cream select" (screenshot coordinates; if off-screen, computer left_click its ref):\ncombobox "Choose a flavor" [ref_1@f12] at (320, 540) (in frame play.example)\ntext "Ice cream select example" [ref_4] at (300, 200)',
   );
   assert.equal(r.result.content[1].text, "1 field masked on play.example");
 });
@@ -1827,6 +1827,89 @@ test("find with no match anywhere says so, and a top frame that failed is an err
   const e = await failed.callTool("find", { tabId: 2, query: "x" });
   assert.equal(e.result.isError, true);
   assert.match(e.result.content[0].text, /No document in this frame/);
+});
+
+// scroll_to: `frameAt` lists where the frame's viewport is on each read after the scroll (the
+// page around a cross-process frame scrolls after the frame answers); the top viewport is at
+// (100, 50) on screen, 1000x800.
+async function scrollEnv(answer, frameAt = []) {
+  const env = await framesEnv();
+  const calls = [];
+  env.browser.claudePage.call = async (tabId, op, args) => {
+    calls.push({ op, args: plain(args) });
+    if (op === "scrollTo") return answer;
+    if (op === "viewport" && args.frameId != null) {
+      const at = frameAt.length > 1 ? frameAt.shift() : frameAt[0];
+      return { width: 698, height: 71, screenX: at.x, screenY: at.y };
+    }
+    if (op === "viewport") return { width: 1000, height: 800, dpr: 1, scrollX: 0, scrollY: 0, screenX: 100, screenY: 50 };
+    return "done";
+  };
+  return { ...env, calls };
+}
+
+test("scroll_to on a top-frame ref answers the center as the page gave it", async () => {
+  const env = await scrollEnv({ x: 50.4, y: 20.6, frame: null });
+  const r = await env.callTool("computer", { action: "scroll_to", tabId: 2, ref: "ref_3" });
+  assert.equal(r.result.content[0].text, "Scrolled ref_3 into view; its center is now at (50, 21)");
+  assert.equal(env.calls.find((c) => c.op === "scrollTo").args.ref, "ref_3");
+  assert.ok(!env.calls.some((c) => c.args.frameId != null), "no frame is asked where it is");
+});
+
+test("scroll_to on a frame ref answers the center in screenshot coordinates, once the frame holds still", async () => {
+  // MDN: the frame answered (227, 10) in its own viewport while it still sat at (400, 700); the
+  // page then scrolled it to (463, 443).
+  const env = await scrollEnv({ x: 227, y: 10, frame: { host: "live.mdnplay.dev", screenX: 400, screenY: 700 } }, [
+    { x: 463, y: 600 },
+    { x: 463, y: 443 },
+    { x: 463, y: 443 },
+  ]);
+  const r = await env.callTool("computer", { action: "scroll_to", tabId: 2, ref: "ref_1@f12" });
+  assert.equal(r.result.content[0].text, "Scrolled ref_1@f12 into view; its center is now at (590, 403) (in frame live.mdnplay.dev)");
+  const reads = env.calls.filter((c) => c.op === "viewport" && c.args.frameId != null);
+  assert.deepEqual(reads.map((c) => c.args.frameId), [12, 12, 12], "read again until two reads agree");
+});
+
+test("scroll_to on a frame ref that ends up outside the page's viewport says so", async () => {
+  const env = await scrollEnv({ x: 227, y: 10, frame: { host: "live.mdnplay.dev", screenX: 463, screenY: 2000 } }, [{ x: 463, y: 2000 }]);
+  const r = await env.callTool("computer", { action: "scroll_to", tabId: 2, ref: "ref_1@f12" });
+  assert.equal(r.result.content[0].text, "Scrolled ref_1@f12 into view; its center is now at (590, 1960) (in frame live.mdnplay.dev), outside the page's viewport; take a screenshot to see where it is");
+});
+
+test("read_page on a frame ref tells the frame where the top viewport is; on a top ref it doesn't", async () => {
+  const env = await framesEnv({ pages: { 0: "Frame: x\n\nbutton [ref_1@f12]" } });
+  await env.callTool("read_page", { tabId: 2, ref_id: "ref_1@f12" });
+  assert.deepEqual(env.calls.find((c) => c.op === "readPage").args.origin, { x: 100, y: 50 });
+  env.calls.length = 0;
+  await env.callTool("read_page", { tabId: 2, ref_id: "ref_4" });
+  assert.equal(env.calls.find((c) => c.op === "readPage").args.origin, undefined);
+});
+
+// A model that never called tabs_create_mcp believes it opened no tab, and leaves it open.
+const CREATED = (id) => `Created tab ${id} for this session; close it with tabs_close_mcp when done.`;
+
+test("tabs_context_mcp says when createIfEmpty opened the session's first tab, before the tab list", async () => {
+  const env = await load();
+  const first = (await env.callTool("tabs_context_mcp", { createIfEmpty: true })).result.content[0].text;
+  const [note, ...json] = first.split("\n");
+  assert.equal(note, CREATED(2));
+  assert.deepEqual(JSON.parse(json.join("\n")).availableTabs.map((t) => t.tabId), [2]);
+  const again = (await env.callTool("tabs_context_mcp", { createIfEmpty: true })).result.content[0].text;
+  assert.doesNotMatch(again, /Created tab/, "no tab opened, no note");
+  assert.equal(JSON.parse(again).availableTabs.length, 1);
+  const other = (await env.callTool("tabs_context_mcp", {}, "s2")).result.content[0].text;
+  assert.deepEqual(JSON.parse(other).availableTabs, [], "without createIfEmpty nothing is opened");
+});
+
+test("navigate without a tabId says when it opened the session's first tab", async () => {
+  const env = await load();
+  const first = (await env.callTool("navigate", { url: "a.example" })).result.content[0].text;
+  assert.match(first, /^Tab 2: https:\/\/a\.example/);
+  assert.ok(first.includes(`\n${CREATED(2)}\n\nThis session's tabs:\n{`), first);
+  const again = (await env.callTool("navigate", { url: "b.example" })).result.content[0].text;
+  assert.match(again, /^Tab 2: https:\/\/b\.example/);
+  assert.doesNotMatch(again, /Created tab/);
+  assert.match(again, /This session's tabs:/, "the tab list is still appended");
 });
 
 test("key and type answer where the keys went, with a masked line when the field is masked", async () => {
