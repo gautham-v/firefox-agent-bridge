@@ -391,6 +391,7 @@ const S = {
   group: null, // {chatId, label, color, tabs}; no tabs until the chat is bound
   activeTab: null,
   caps: {}, // engine -> the last chat.capabilities reply
+  settings: null, // the last chat.settings reply: {permissions, memory, memories} (Claude chats)
   history: null,
   historyQuery: "",
   prefs: {}, // remembered choices: {engine, claude: {model, effort}, codex: {...}}
@@ -613,6 +614,10 @@ function onMessage(m) {
       if (m.requestId !== historyRequest) return;
       S.history = m.chats ?? [];
       return fillHistory();
+    case "chat.settings":
+      S.settings = m;
+      if (S.ui.menu) renderMenu();
+      return;
     case "chat.capabilities":
       if (!m.engine) return;
       S.caps[m.engine] = m;
@@ -1659,6 +1664,7 @@ function openMenu(id, anchor, extra = {}) {
     for (const name of Object.keys(ENGINES)) if (!S.caps[name]) requestCaps(name);
   }
   if (id === "addtab") loadWindowTabs();
+  if (id === "more") post("chat.settings", { requestId: `settings${++requestCount}` });
   renderMenu();
   render("head", "dock");
 }
@@ -1819,10 +1825,37 @@ function modelMenu() {
   return rows;
 }
 
+// Settings for Claude chats, kept by the host; a change applies from each chat's next message.
+function setSetting(set) {
+  post("chat.settings", { requestId: `settings${++requestCount}`, set });
+  S.settings = { ...S.settings, ...set };
+  renderMenu();
+}
+
 function moreMenu() {
+  const st = S.settings;
+  const ready = st && !st.hostDown;
+  const memories = ready ? (st.memories ?? []) : [];
+  if (S.ui.menu.view === "memory") {
+    return [
+      backRow("Memory"),
+      sep(),
+      caption("Share with sessions in · notes"),
+      ...memories.map((m) =>
+        mi(null, m.label, { check: true, sel: st.memory === m.dir, right: m.notes ? String(m.notes) : "", onclick: () => setSetting({ memory: m.dir }) }),
+      ),
+      mi(null, "Off", { check: true, sel: st?.memory === "off", onclick: () => setSetting({ memory: "off" }) }),
+    ];
+  }
+  const memoryLabel = !ready ? "" : st.memory === "off" ? "Off" : (memories.find((m) => m.dir === st.memory)?.label ?? "");
   return [
     mi("list", "Agents and activity", { onclick: () => { closeMenu(false); openSheet("agents"); } }),
     mi("stop", "Stop all agents", { right: S.shortcut, onclick: () => { closeMenu(false); post("stopAll"); } }),
+    sep(),
+    caption("Claude Code permissions"),
+    mi(null, "Ask before acting", { check: true, sel: st?.permissions === "ask", disabled: !ready, onclick: () => setSetting({ permissions: "ask" }) }),
+    mi(null, "Don't ask", { check: true, sel: st?.permissions === "bypass", disabled: !ready, sub: "Even if a page tells it to", onclick: () => setSetting({ permissions: "bypass" }) }),
+    mi("file", "Memory", { disabled: !ready, right: [memoryLabel, icon("chevr")], onclick: () => { S.ui.menu.view = "memory"; renderMenu(); } }),
     S.popout ? null : sep(),
     S.popout ? null : mi("popout", "Pop out", { onclick: () => { closeMenu(false); post("popout"); } }),
   ];

@@ -1605,6 +1605,7 @@ function offlineReply({ type, requestId, engine, chatId }) {
   if (type === "chat.history") return { type, requestId, chats: [] };
   if (type === "teach.save") return { type: "teach.saved", requestId, ok: false, error: HOST_DOWN };
   if (type === "chat.load") return { type: "chat.transcript", requestId, chatId, items: [], done: true };
+  if (type === "chat.settings") return { type, requestId, hostDown: true };
   return { type, requestId, engine, available: false, hostDown: true, version: null, error: HOST_DOWN, skills: [], plugins: [], connectors: [], models: [], efforts: [] };
 }
 
@@ -1991,6 +1992,7 @@ const panelCommands = {
   },
   "chat.history": (panel, m) => ask(panel, { type: "chat.history", requestId: m.requestId }),
   "chat.capabilities": (panel, m) => ask(panel, { type: "chat.capabilities", requestId: m.requestId, engine: m.engine }),
+  "chat.settings": (panel, m) => ask(panel, { type: "chat.settings", requestId: m.requestId, ...(m.set && typeof m.set === "object" && { set: m.set }) }),
 
   "group.add"(panel, m) {
     if (typeof m.tabId !== "number") return;

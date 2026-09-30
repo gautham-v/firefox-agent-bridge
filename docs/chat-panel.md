@@ -32,8 +32,14 @@ Out of scope for now: turning connectors on and off per chat, and voice input.
   (or one that isn't a valid model id or effort) resets to the engine's default, a missing field
   leaves the last value, and a stored value from the other engine (a Codex model, Claude's `max`)
   is never passed on. A change of engine, model or effort restarts the process with `--resume`.
-  Environment: `FIREFOX_AGENT_BRIDGE_SESSION=<chatId>` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (an
-  agent steered by a page shouldn't be able to write memory that outlives the chat). An appended system prompt says the agent runs in the
+  Environment: `FIREFOX_AGENT_BRIDGE_SESSION=<chatId>`. Memory (the ⋯ menu's Memory, below): a
+  new chat uses the auto-memory of the chosen project, passed as `autoMemoryDirectory` in
+  `--settings`; a resumed terminal session keeps its own project's; Off sets
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. The same `--settings` pre-allows reading any project's
+  memory (`~/.claude/projects/*/memory/**`) and adds `ask` rules for Write, Edit and MultiEdit
+  there: Claude Code writes its memory folder without asking, and a page the agent reads could
+  otherwise plant a note that steers later sessions, terminal ones included. A memory write's card
+  shows the path and what would be written; one too long to show whole is denied. An appended system prompt says the agent runs in the
   Firefox sidebar, that the user's tabs are in its tab group (use `tabs_context_mcp`, work in those
   tabs rather than opening new ones unless needed), that it can link a page element as
   `[label](ref:ref_N)` (or `ref:<tabId>/ref_N` for a tab other than the one it last used), and to
@@ -42,7 +48,16 @@ Out of scope for now: turning connectors on and off per chat, and voice input.
   server is passed explicitly with `--mcp-config` (the host's node, this checkout's
   `mcp/server.mjs`, session env pinned); an entry there replaces a user-scope server of the same
   name, so there is no duplicate and chats work even if the server was never registered with
-  Claude Code. The user's own default permission mode is overridden with `--permission-mode default`.
+  Claude Code. The user's own default permission mode is overridden with `--permission-mode default`,
+  or `bypassPermissions` when the ⋯ menu's permissions are set to Don't ask (which also ignores
+  the memory `ask` rules).
+- Settings: the ⋯ menu's Claude Code permissions (Ask before acting / Don't ask) and Memory (a
+  project whose memory panel chats share, or Off) are kept by the host in
+  `~/.firefox-agent-bridge/chat/settings.json` (`{permissions: "ask" | "bypass", memory: null |
+  "off" | "<memory folder>"}`, null being the home folder's). Memory offers every project in
+  `~/.claude/projects/` with at least one note, labeled with the folder its sessions ran in (or,
+  with none left, a folder on disk that encodes to its name). A change restarts each chat's
+  process with `--resume` on its next message.
 - A message with a `skill` runs it as a user-invoked skill. Claude Code: the text is
   `/<skill> <typed text>` followed by the context block (`claude -p` runs a message that starts
   with `/name` as that skill, the rest being its arguments; the session file then records it as
@@ -119,6 +134,7 @@ Extension to host:
 | `chat.history` | `requestId` |
 | `chat.load` | `requestId`, `chatId`, `source` (`panel` \| `terminal`), `path` for terminal sessions |
 | `chat.capabilities` | `requestId`, `engine` |
+| `chat.settings` | `requestId`, `set?: {permissions?, memory?}` (a memory folder outside `~/.claude/projects/*/memory` is ignored) |
 | `teach.save` | Teach's Save and Try it once ([docs/teach.md](teach.md)): `requestId`, `chatId`, `engine`, `mode`, `draft`, `recording`, `replay`, `replace`, `shots` |
 
 Host to extension:
@@ -129,6 +145,7 @@ Host to extension:
 | `chat.history` | `requestId`, `chats: [{id, title, updatedAt, engine, model, source, origin?, cwd, path, running}]`, newest first; `updatedAt` is epoch ms; `running` means a turn is in progress; `origin: "phone"` marks a chat-folder session with a `bridge-session` entry, i.e. one started by `claude remote-control` (the panel shows "From phone"); `source: "terminal"` for Claude Code sessions outside the chat folder that used `mcp__firefox__` tools in the last 14 days (at most 30; panel chats at most 100) |
 | `chat.transcript` | `requestId`, `chatId`, `items` (the same shapes as events, each with its `kind`: `user`, `text`, `tool_start`, `tool_end`, `result`), `done`; the last 1500 items, in chunks under 600 KB |
 | `teach.saved` | `requestId`, `ok`, `dir`, `replayPath`, or `error` (and `exists` when a skill of that name is there) |
+| `chat.settings` | `requestId`, `permissions`, `memory` (the folder in use, or `"off"`), `memories: [{dir, label, notes}]` |
 | `chat.capabilities` | `requestId`, `engine`, `available`, `version`, `error`, `skills: [{name, description, sites}]`, `plugins: [{name}]`, `connectors: [{name, status}]`, `models: [{id, label, efforts?, default?}]`, `efforts` |
 
 Capabilities cost no model tokens: for Claude Code the host asks a prompt-less `claude -p` for its
@@ -174,7 +191,7 @@ history row's own; the chat continues on that engine and model, and a terminal s
 Claude's), `chat.send` (as above,
 without `context` but with `elements`, the picked elements; background adds the group's tabs and
 binds the chat first), `chat.interrupt`,
-`chat.permission`, `chat.history {requestId}`, `chat.capabilities {requestId, engine}`,
+`chat.permission`, `chat.history {requestId}`, `chat.capabilities {requestId, engine}`, `chat.settings {requestId, set?}`,
 `group.add {tabId}`, `teach.start`, `teach.stop {requestId, draft}`, `teach.discard`, `teach.save` (Teach, [docs/teach.md](teach.md); a `chat.send` with `teach: true` doesn't adopt the viewed tab),
 `group.remove {tabId}`, `resume` (undoes Stop all agents: every paused session, and the pause on
 new ones), `stopAll` (pauses Firefox calls and also sends `chat.interrupt` for every chat whose
@@ -185,7 +202,7 @@ chat's group, and `reveal` switches to the tab), `point.clear` (Alt was let go i
 
 Background to panel: `state {windowId, chatId, events, group, activeTab, paused, engine, model, effort, teach}`
 on hello and on chat switches; `chat.event`, `chat.history`, `chat.transcript`,
-`chat.capabilities` relayed; `group {chatId, label, color, tabs: [{tabId, title, url, favIconUrl, active}]}`
+`chat.capabilities`, `chat.settings` relayed; `group {chatId, label, color, tabs: [{tabId, title, url, favIconUrl, active}]}`
 when membership or titles change (in `state`, a chat with no group yet has `label` and `color`
 null and `tabs` empty); `activeTab {tab}` (same tab shape as in `group`, or null) when the window's active tab changes or
 its title, URL or icon does;
@@ -217,8 +234,8 @@ new group holding the window's active tab (labels as for MCP clients: "Claude", 
 If the chat already has a group, the message's context is that group's tabs, with `current` on the
 tab the user is viewing.
 
-Background answers `chat.history` and `chat.capabilities` itself when the host isn't connected
-(`chats: []`; `available: false`, `hostDown: true` and `error`), and a `chat.send` then gets an `error` event with
+Background answers `chat.history`, `chat.capabilities` and `chat.settings` itself when the host isn't connected
+(`chats: []`; `available: false`, `hostDown: true` and `error`; `hostDown: true`), and a `chat.send` then gets an `error` event with
 `code: "spawn"`. When the host disconnects, chats that were running get an `error` event with
 `code: "crashed"` and a `status: exited` event. Request ids the panel sends are its own: background
 swaps in its own id toward the host and puts the panel's back on the reply.

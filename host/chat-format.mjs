@@ -130,11 +130,17 @@ const CARD_INPUT_CHARS = 1000;
 // The user is deciding on this text, so nothing is silently cut: a Bash command is shown as it
 // is (whitespace and all), a file or URL by its full name, and any other tool (a connector's, say)
 // by its inputs. `complete` is false when the card had to clip something.
-export function summarizePermission(tool, input) {
+// `content`: show what a Write or Edit would put in the file too (memory writes, which the user
+// has to be able to read before approving).
+export function summarizePermission(tool, input, { content = false } = {}) {
   const a = input && typeof input === "object" ? input : {};
   const fit = (text, max) => ({ summary: text.length > max ? `${text.slice(0, max - 1)}…` : text, complete: text.length <= max });
   if (tool === "Bash") return fit(String(a.command ?? "").trim(), CARD_COMMAND_CHARS);
   const target = a.file_path ?? a.notebook_path ?? a.url;
+  if (content && typeof target === "string") {
+    const body = tool === "Write" ? a.content : tool === "Edit" ? a.new_string : tool === "MultiEdit" ? (a.edits ?? []).map((e) => e?.new_string).join("\n…\n") : null;
+    if (typeof body === "string") return fit(`${target}\n\n${body}`, CARD_COMMAND_CHARS);
+  }
   if (typeof target === "string" && target) return fit(target, CARD_TARGET_CHARS);
   const keys = Object.keys(a);
   if (!keys.length) return { summary: summarizeToolUse(tool, a), complete: true };

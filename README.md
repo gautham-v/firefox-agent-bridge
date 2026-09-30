@@ -256,7 +256,9 @@ Nothing is billed beyond your existing subscription, and nothing runs until you 
   edit, a read outside the chat folder or a web fetch, shows an Allow once / Always allow in this
   chat / Deny card with what it would do, and waits. Always allow covers the exact command (or the
   prefix Claude Code suggests, never a chained command), the exact file, or a connector tool, not
-  more. If the sidebar is closed while a card waits, the toolbar button shows a `!`. Codex chats
+  more. If the sidebar is closed while a card waits, the toolbar button shows a `!`. To skip the
+  cards, set **Claude Code permissions** to **Don't ask** in the ⋯ menu; the agent then runs
+  anything, including what a page it reads tells it to. Codex chats
   run in a read-only sandbox, since `codex exec` can't ask; it can still read files, so it is the
   less contained engine.
 - **History.** The clock button lists recent tasks: chats from the panel, and Claude Code sessions
@@ -265,6 +267,10 @@ Nothing is billed beyond your existing subscription, and nothing runs until you 
   `~/.claude/projects/` (their working folder is `~/.firefox-agent-bridge/chat/`), and the panel
   keeps only its own index in `~/.firefox-agent-bridge/chat/chats.json`; Codex chats are kept in
   Codex's own history. Attachments go to `~/.firefox-agent-bridge/chat/uploads/`.
+- **Memory.** Claude chats share Claude Code's auto-memory with your terminal sessions in one
+  project, your home folder's by default; pick another, or Off, under **Memory** in the ⋯ menu.
+  The agent can also read every other project's memory. With Ask before acting, saving a memory
+  shows a card with the note's text, since a page could try to plant one.
 - **Errors.** A usage limit, a missing sign-in and a missing `claude` or `codex` binary each show
   a banner. The host finds the binaries from `CLAUDE_BIN` / `CODEX_BIN` (baked into its launcher
   by `scripts/install.sh`), then common install paths and your login shell.

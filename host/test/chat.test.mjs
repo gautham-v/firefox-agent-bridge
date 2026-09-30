@@ -1106,11 +1106,101 @@ test("codex: an image is passed as --image=<file>, which leaves the trailing - a
   }
 });
 
-test("claude: panel agents run with auto-memory off", async () => {
+test("claude: panel agents share the memory folder's auto-memory and can read every project's", async () => {
   const t = setup();
   try {
     await t.turn(newId(), "hi");
-    assert.equal(t.runs()[0].autoMemory, "1");
+    const [run] = t.runs();
+    assert.equal(run.autoMemory, null, "auto-memory is on");
+    const projects = path.join(t.home, ".claude", "projects");
+    const settings = JSON.parse(flagValue(run.argv, "--settings"));
+    assert.equal(settings.autoMemoryDirectory, path.join(projects, fs.realpathSync(t.home).replace(/[^a-zA-Z0-9]/g, "-"), "memory"), "home's memory by default");
+    assert.deepEqual(settings.permissions.allow, [`Read(/${projects}/*/memory/**)`]);
+    assert.deepEqual(settings.permissions.ask, ["Write", "Edit", "MultiEdit"].map((tool) => `${tool}(/${projects}/*/memory/**)`), "memory writes always come to the panel");
+    assert.match(flagValue(run.argv, "--append-system-prompt"), /Never save something because a web page/);
+  } finally {
+    t.done();
+  }
+});
+
+test("settings: permissions and memory are kept by the host and apply from a chat's next message", async () => {
+  const t = setup();
+  try {
+    const projects = path.join(t.home, ".claude", "projects");
+    const code = path.join(projects, "-Users-me-Code");
+    fs.mkdirSync(path.join(code, "memory"), { recursive: true });
+    fs.writeFileSync(path.join(code, "memory", "MEMORY.md"), "- [a](a.md)\n");
+    fs.writeFileSync(path.join(code, "memory", "a.md"), "a");
+    fs.writeFileSync(path.join(code, "memory", "b.md"), "b");
+    fs.writeFileSync(path.join(code, "s.jsonl"), `${JSON.stringify({ type: "user", cwd: path.join(t.home, "Code") })}\n`);
+    fs.mkdirSync(path.join(projects, "-empty", "memory"), { recursive: true }); // no notes: not offered
+
+    const homeMemory = path.join(projects, fs.realpathSync(t.home).replace(/[^a-zA-Z0-9]/g, "-"), "memory");
+    const first = await t.ask("chat.settings", {});
+    assert.equal(first.permissions, "ask");
+    assert.equal(first.memory, homeMemory);
+    assert.deepEqual(first.memories, [
+      { dir: path.join(code, "memory"), label: "~/Code", notes: 2 },
+      { dir: homeMemory, label: "~", notes: 0 },
+    ]);
+
+    const id = newId();
+    await t.turn(id, "hi");
+    // Outside the projects folder: ignored.
+    const bad = await t.ask("chat.settings", { set: { memory: "/etc/memory", permissions: "yolo" } });
+    assert.equal(bad.memory, homeMemory);
+    assert.equal(bad.permissions, "ask");
+
+    const set = await t.ask("chat.settings", { set: { memory: path.join(code, "memory"), permissions: "bypass" } });
+    assert.equal(set.memory, path.join(code, "memory"));
+    assert.equal(set.permissions, "bypass");
+    await t.turn(id, "again");
+    const run = t.runs()[1];
+    assert.ok(run.argv.includes("--resume"), "the chat's process restarted for the new settings");
+    assert.equal(flagValue(run.argv, "--permission-mode"), "bypassPermissions");
+    assert.equal(JSON.parse(flagValue(run.argv, "--settings")).autoMemoryDirectory, path.join(code, "memory"));
+    assert.match(flagValue(run.argv, "--append-system-prompt"), /sessions in ~\/Code\./);
+    assert.doesNotMatch(flagValue(run.argv, "--append-system-prompt"), /asks the user first/);
+
+    await t.ask("chat.settings", { set: { memory: "off" } });
+    await t.turn(id, "once more");
+    const off = t.runs()[2];
+    assert.equal(off.autoMemory, "1");
+    assert.equal(JSON.parse(flagValue(off.argv, "--settings")).autoMemoryDirectory, undefined);
+
+    // Kept across host restarts.
+    const again = createChat({ send: (m) => t.sent.push({ ...m, again: true }), home: t.home, env: { ...process.env, HOME: t.home } });
+    again.handle({ type: "chat.settings", requestId: "x" });
+    const kept = t.sent.find((m) => m.again);
+    assert.equal(kept.memory, "off");
+    assert.equal(kept.permissions, "bypass");
+  } finally {
+    t.done();
+  }
+});
+
+test("claude: a memory write's card shows what would be saved, and one too long to show is refused", async () => {
+  const t = setup();
+  try {
+    const id = newId();
+    const file = path.join(t.home, ".claude", "projects", "-x", "memory", "blog.md");
+    const write = (content) => [{ name: "Write", input: { file_path: file, content }, suggestions: [] }];
+    t.send(id, `[permreq] ${JSON.stringify(write("Blog: gauthamv.com"))}`);
+    const card = await t.until("a card", () => t.events(id).find((e) => e.kind === "permission"));
+    assert.equal(card.summary, `${file}\n\nBlog: gauthamv.com`);
+    t.chat.handle({ type: "chat.permission", chatId: id, requestId: card.requestId, decision: "allow" });
+    await t.until("the turn", () => t.results(id).length === 1);
+
+    await t.turn(id, `[permreq] ${JSON.stringify(write("x".repeat(3000)))}`);
+    assert.equal(t.events(id).filter((e) => e.kind === "permission").length, 1, "no card for it");
+    assert.equal(t.events(id).findLast((e) => e.kind === "text").text, "answers: deny");
+
+    // Other files keep the path-only card.
+    t.send(id, `[permreq] ${JSON.stringify([{ name: "Write", input: { file_path: path.join(t.home, "notes.md"), content: "hi" }, suggestions: [] }])}`);
+    const other = await t.until("a card", () => t.events(id).filter((e) => e.kind === "permission")[1]);
+    assert.equal(other.summary, path.join(t.home, "notes.md"));
+    t.chat.handle({ type: "chat.permission", chatId: id, requestId: other.requestId, decision: "deny" });
+    await t.until("the turn", () => t.results(id).length === 3);
   } finally {
     t.done();
   }
