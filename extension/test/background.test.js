@@ -563,6 +563,26 @@ test("group changes are pushed: titles, drag in and out, closes, the active tab"
   assert.equal(a.of("activeTab").filter((m) => m.tab?.tabId === 9).length, 0, "other windows' panels aren't told");
 });
 
+test("sub-agents opening tabs at once all land in the chat's group, and a new session gets one group", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await a.send("chat.send", { engine: "claude", text: "compare" });
+  const claude = { id: 9, name: "claude" };
+  const made = await Promise.all([1, 2, 3, 4, 5].map(() => env.callTool("tabs_create_mcp", {}, a.chatId, claude)));
+  assert.ok(made.every((r) => !r.result.isError));
+  assert.equal(env.browser.groups.size, 1);
+  assert.deepEqual([...env.browser.tabsMap.values()].map((t) => t.groupId), [100, 100, 100, 100, 100, 100]);
+  await Promise.all([2, 3, 4, 5, 6].map((tabId) => env.callTool("tabs_close_mcp", { tabId }, a.chatId, claude)));
+  assert.deepEqual([...env.browser.tabsMap.keys()], [1], "each sub-agent closes its own tab");
+
+  // A session with no group yet: parallel creates must not each start a group of their own.
+  await Promise.all([1, 2, 3].map(() => env.callTool("tabs_create_mcp", {}, "fresh", { id: 2, name: "claude-code" })));
+  const fresh = [...env.browser.tabsMap.values()].filter((t) => t.id !== 1);
+  assert.equal(fresh.length, 3);
+  assert.equal(new Set(fresh.map((t) => t.groupId)).size, 1);
+  assert.equal(env.browser.groups.size, 2);
+});
+
 test("pausing or resuming the chat's session is pushed to its panels", async () => {
   const env = await load();
   const a = await env.panel();

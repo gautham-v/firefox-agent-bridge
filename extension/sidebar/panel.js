@@ -345,6 +345,8 @@ const BUILTIN_VERBS = {
   WebFetch: ["Fetching", "Fetched"],
   Skill: ["Loading skill", "Loaded skill"],
   TodoWrite: ["Planning", "Updated plan"],
+  Task: ["Running a sub-agent", "Ran a sub-agent"],
+  Agent: ["Running a sub-agent", "Ran a sub-agent"],
   Bash: ["Running", "Ran"],
   Edit: ["Editing", "Edited"],
   Write: ["Writing", "Wrote"],
@@ -400,6 +402,7 @@ const S = {
   stick: true,
   shortcut: "",
   fresh: new Map(), // tab id -> when it joined the group
+  tabInfo: new Map(), // tab id -> {url, title, favIconUrl} as last seen, for sub-agents' closed tabs
   ui: { menu: null, sheet: null, tray: false },
   windowTabs: [],
   pendingAdd: null, // a tab to add once the chat's group exists
@@ -512,7 +515,8 @@ function applyEvent(ev, replay = false) {
     }
     case "tool_start": {
       const t = openTurn(now);
-      t.steps.push({ id: ev.toolUseId, name: ev.name ?? "", summary: ev.summary ?? "", tabId: Number.isInteger(ev.tabId) ? ev.tabId : null, done: false, ok: true, start: now, end: null, result: "" });
+      // `parent` is the Task step of the sub-agent that made this call.
+      t.steps.push({ id: ev.toolUseId, name: ev.name ?? "", summary: ev.summary ?? "", tabId: Number.isInteger(ev.tabId) ? ev.tabId : null, parent: typeof ev.parent === "string" ? ev.parent : null, done: false, ok: true, start: now, end: null, result: "", open: false });
       if (!t.blocks.some((b) => b.type === "steps")) t.blocks.push({ type: "steps" });
       resolvePerms(t);
       t.dirty = true;
@@ -620,6 +624,7 @@ function onMessage(m) {
       return;
     case "activeTab":
       S.activeTab = m.tab ?? null;
+      rememberTabs([S.activeTab]);
       return render("body", "dock");
     case "paused":
       S.paused = !!m.paused;
@@ -661,6 +666,7 @@ function onState(s) {
   if (!S.title && pendingTitle?.chatId === s.chatId) S.title = pendingTitle.title;
   S.group = s.group ?? null;
   S.activeTab = s.activeTab ?? null;
+  rememberTabs([...(S.group?.tabs ?? []), S.activeTab]);
   S.paused = !!s.paused;
   S.rec = s.teach ?? null;
   if (s.engine) S.engine = s.engine;
@@ -691,6 +697,12 @@ function onTranscript(m) {
   render("head", "title", "body", "dock");
 }
 
+// A sub-agent closes its tab when it's done; its row still names the site it worked in.
+function rememberTabs(tabs) {
+  for (const t of tabs) if (t && Number.isInteger(t.tabId)) S.tabInfo.set(t.tabId, { url: t.url, title: t.title, favIconUrl: t.favIconUrl });
+  for (const id of [...S.tabInfo.keys()].slice(0, Math.max(0, S.tabInfo.size - 300))) S.tabInfo.delete(id);
+}
+
 function onGroup(m) {
   if (m.chatId != null && m.chatId !== S.chatId) return;
   if (!m.tabs) return;
@@ -698,6 +710,7 @@ function onGroup(m) {
   const before = S.group?.tabs ?? [];
   const joined = before.length ? tabs.filter((t) => !before.some((b) => b.tabId === t.tabId)) : [];
   S.group = { chatId: m.chatId, label: m.label, color: m.color, tabs };
+  rememberTabs(tabs);
   if (S.pendingAdd != null && tabs.length) {
     post("group.add", { tabId: S.pendingAdd });
     S.pendingAdd = null;
@@ -799,11 +812,11 @@ function userBubble(u) {
 
 const PAUSED_RESULT = /^The user (stopped|paused) /;
 
-function stepRow(t, s, current) {
+function stepRow(t, s, current, extra = "") {
   const words = describeTool(s.name, s.summary);
   // A call the user stopped or paused fails with a message saying so; it shows as stopped, not failed.
   const halted = s.halted || (current && S.paused) || (s.done && !s.ok && PAUSED_RESULT.test(s.result));
-  let cls = "step";
+  let cls = extra ? `step ${extra}` : "step";
   let mark = "check";
   let verb = words.ed;
   let detail = s.done && !s.ok && s.result ? s.result : words.detail;
@@ -853,7 +866,8 @@ function camEl() {
 // The tab to watch: the running turn's latest step that names a tab still in the group.
 function camTarget() {
   const t = activeTurn();
-  if (!t) return null;
+  // a fan-out works in several tabs at once, so there is no one tab to watch
+  if (!t || fanoutRows(t.steps)) return null;
   const id = [...t.steps].reverse().find((s) => s.tabId != null)?.tabId;
   return id != null && S.group?.tabs?.some((x) => x.tabId === id) ? id : null;
 }
@@ -913,14 +927,63 @@ function maskedNotes(t) {
   return [...bySite.values()].map((line) => el("div", { class: "note" }, icon("lock"), el("span", { text: line })));
 }
 
+// One sub-agent (fanout.js): its site, what it is doing or how many calls it made, and its status.
+// It opens to its own steps; once it finishes, what it returned shows under it, so the answer
+// fills in row by row before the agent writes it up.
+function agentRows(t, a) {
+  const s = a.step;
+  const info = agentRow(a, S.tabInfo);
+  const halted = info.status === "halted" || (info.status === "running" && S.paused);
+  const name = siteName(info.url) || s.summary || "Sub-agent";
+  let cls = "step agent";
+  let mark = "check";
+  let detail = info.calls ? plural(info.calls, "call") : "Starting";
+  if (halted) {
+    cls += " halt";
+    mark = "pause";
+    detail = "Stopped";
+  } else if (info.status === "failed") {
+    cls += " bad";
+    mark = "x";
+    detail = s.result || "Failed";
+  } else if (info.status === "running") {
+    cls += " cur";
+    mark = "pointer";
+    if (info.current) detail = describeTool(info.current.name, info.current.summary).ing;
+  }
+  const toggle = () => {
+    s.open = !s.open;
+    t.dirty = true;
+    render("body");
+  };
+  const out = [
+    el(
+      "button",
+      { class: cls, "aria-expanded": String(s.open), title: [s.summary, info.result].filter(Boolean).join(" — "), onclick: toggle },
+      fav(info.tab ?? { url: info.url, title: name }),
+      el("span", { class: "w", text: name }),
+      el("span", { class: "d", text: detail }),
+      icon(mark, "mk"),
+    ),
+  ];
+  if (info.status === "done" && info.result) out.push(el("div", { class: "step-res", text: info.result, title: info.result }));
+  if (s.open) {
+    if (a.calls.length) out.push(...a.calls.map((c) => stepRow(t, c, c === info.current, "sub")));
+    else out.push(el("div", { class: "step sub" }, el("span", { class: "d", text: "No calls yet" })));
+  }
+  return out;
+}
+
 function stepsBlock(t) {
   const running = !t.done;
-  const cur = running ? t.steps.findLast((s) => !s.done) : null;
+  const fan = fanoutRows(t.steps);
+  const own = fan ? fan.rows.filter((r) => r.step).map((r) => r.step) : t.steps;
+  const cur = running ? own.findLast((s) => !s.done) : null;
   const usedFirefox = t.steps.some((s) => isFirefoxTool(s.name));
   const kids = [];
   if (t.done) {
     const dur = t.durationMs ?? (t.t1 && t.t0 ? t.t1 - t.t0 : null);
-    const label = [usedFirefox ? "Used Firefox" : "Used tools", plural(t.steps.length, "step"), dur ? secs(dur) : null].filter(Boolean).join(" · ");
+    const label = [usedFirefox ? "Used Firefox" : "Used tools", fan ? plural(fan.agents.length, "sub-agent") : null, plural(t.steps.length, "step"), dur ? secs(dur) : null].filter(Boolean).join(" · ");
     kids.push(
       el(
         "button",
@@ -939,6 +1002,21 @@ function stepsBlock(t) {
       ),
     );
     if (!t.open) return [...kids, ...maskedNotes(t)];
+  }
+  if (fan) {
+    const { done, total } = fanoutProgress(fan.agents);
+    const inTabs = fan.agents.some((a) => a.calls.some((c) => isFirefoxTool(c.name)));
+    const title = total === 1 ? "Ran a sub-agent" : inTabs ? `Fanned out to ${total} tabs` : `Ran ${total} sub-agents`;
+    const head = el(
+      "div",
+      { class: "sh" },
+      icon("list"),
+      el("span", { class: "st", text: title }),
+      el("span", { class: "n", text: S.paused && running ? "Paused" : running ? `${done} of ${total} done` : plural(t.steps.length, "step") }),
+    );
+    const rows = fan.rows.flatMap((r) => (r.agent ? agentRows(t, r.agent) : [stepRow(t, r.step, r.step === cur)]));
+    kids.push(el("div", { class: `steps fan${t.done ? " open" : ""}` }, head, el("div", { class: "list" }, rows), ...maskedNotes(t)));
+    return kids;
   }
   const site = workSite(t);
   const { name } = site;
@@ -1048,7 +1126,8 @@ function renderBody() {
   if (S.loading && !S.turns.length) kids.push(el("div", { class: "loading", text: "Loading…" }));
   if (kids.length !== msgs.children.length || kids.some((k, i) => k !== msgs.children[i])) msgs.replaceChildren(...kids);
   const live = activeTurn();
-  if (live?.el) for (const list of live.el.querySelectorAll(".steps .list")) list.scrollTop = list.scrollHeight;
+  // A fan-out card's rows change in place, and one the user opened shouldn't scroll away.
+  if (live?.el) for (const list of live.el.querySelectorAll(".steps:not(.fan) .list")) list.scrollTop = list.scrollHeight;
   if (S.stick) $("scroll").scrollTop = $("scroll").scrollHeight;
 }
 

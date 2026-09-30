@@ -62,6 +62,14 @@ test("tool results only carry text when they failed, plus a few harmless one-lin
   assert.equal(summarizeToolResult("Bash", "", true), "Failed");
 });
 
+test("a sub-agent's result is its reply, without Claude Code's id and usage trailer, clipped", () => {
+  assert.equal(summarizeToolResult("Agent", [{ type: "text", text: "Uplift V2: $599, 30 in, 15 yr" }, { type: "text", text: "agentId: abc123\n<usage>total_tokens: 5</usage>" }], false), "Uplift V2: $599, 30 in, 15 yr");
+  assert.equal(summarizeToolResult("Task", "Price $449\n\nWarranty 15 yr", false), "Price $449 Warranty 15 yr");
+  assert.equal(summarizeToolResult("Task", "x".repeat(400), false).length, 300);
+  assert.equal(summarizeToolResult("Agent", "Sub-agent hit an error", true), "Sub-agent hit an error");
+  assert.equal(summarizeToolUse("Agent", { description: "Read Uplift V2", prompt: "a long prompt" }), "Read Uplift V2");
+});
+
 test("errors map to the contract's codes", () => {
   assert.equal(classifyError("You've hit your limit · resets 3pm (America/Los_Angeles)"), "limit");
   assert.equal(classifyError("Claude AI usage limit reached|1790725800"), "limit");

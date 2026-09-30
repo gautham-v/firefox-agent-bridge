@@ -96,7 +96,7 @@ test("claude: a turn streams text and pins the chat's session, model, effort and
     assert.equal(flagValue(run.argv, "--effort"), "high");
     assert.equal(flagValue(run.argv, "--permission-mode"), "default");
     assert.equal(flagValue(run.argv, "--permission-prompt-tool"), "stdio");
-    assert.deepEqual(flagValue(run.argv, "--allowedTools").split(","), ["mcp__firefox", "Skill", "TodoWrite"]);
+    assert.deepEqual(flagValue(run.argv, "--allowedTools").split(","), ["mcp__firefox", "Skill", "TodoWrite", "Task", "Agent"]);
     assert.match(flagValue(run.argv, "--append-system-prompt"), /Firefox sidebar/);
     const mcp = JSON.parse(flagValue(run.argv, "--mcp-config")).mcpServers.firefox;
     assert.equal(mcp.command, process.execPath);
@@ -237,6 +237,63 @@ test("claude: tool events carry short summaries that never include typed text, s
     const all = JSON.stringify(ev);
     for (const secret of ["hunter2", "document.cookie", "#frag"]) assert.ok(!all.includes(secret), `${secret} must not appear`);
     assert.equal(ev.find((e) => e.kind === "text").text, "Done with the page.");
+  } finally {
+    t.done();
+  }
+});
+
+test("claude: sub-agents' calls are reported under their Agent step, and each Agent step ends with what it returned", async () => {
+  const t = setup();
+  try {
+    const id = newId();
+    await t.turn(id, "[fanout] compare");
+    const ev = t.events(id);
+    const starts = ev.filter((e) => e.kind === "tool_start");
+    assert.deepEqual(starts.map((e) => [e.toolUseId, e.name, e.summary, e.parent ?? null, e.tabId ?? null]), [
+      ["toolu_agent_a", "Agent", "Read requests on PyPI", null, null],
+      ["toolu_agent_b", "Agent", "Read httpx on PyPI", null, null],
+      ["toolu_a1", "mcp__firefox__tabs_create_mcp", "Open a new tab", "toolu_agent_a", null],
+      ["toolu_b1", "mcp__firefox__tabs_create_mcp", "Open a new tab", "toolu_agent_b", null],
+      ["toolu_a2", "mcp__firefox__navigate", "Open pypi.org/project/requests/", "toolu_agent_a", 7],
+      ["toolu_b2", "mcp__firefox__javascript_tool", "Run a script on the page", "toolu_agent_b", 8],
+    ]);
+    const ends = ev.filter((e) => e.kind === "tool_end");
+    assert.deepEqual(ends.map((e) => [e.toolUseId, e.ok, e.summary]), [
+      ["toolu_a1", true, "Created tab 7 in the Claude tab group."],
+      ["toolu_b1", true, "Created tab 8 in the Claude tab group."],
+      ["toolu_b2", false, "TypeError: document.querySelector(...) is null"],
+      ["toolu_a2", true, "Tab 7: https://pypi.org/project/requests/"],
+      ["toolu_agent_a", true, "requests 2.32.3"],
+      ["toolu_agent_b", true, "httpx 0.28.1 (read from the page text)"],
+    ]);
+    // A sub-agent's own text and stream stay out of the chat; only the top-level answer is shown.
+    assert.deepEqual(ev.filter((e) => e.kind === "text").map((e) => e.text), ["| Package | Version |\n| --- | --- |\n| requests | 2.32.3 |\n| httpx | 0.28.1 |"]);
+    const all = JSON.stringify(ev);
+    for (const secret of ["Opening the page", "querySelector('h1')", "?q=1", "agentId"]) assert.ok(!all.includes(secret), `${secret} must not appear`);
+  } finally {
+    t.done();
+  }
+});
+
+test("claude: the chat's system prompt says when and how to fan out; Codex's doesn't", async () => {
+  const t = setup();
+  try {
+    await t.turn(newId(), "hi");
+    const prompt = flagValue(t.runs()[0].argv, "--append-system-prompt");
+    assert.match(prompt, /4 or more/);
+    assert.match(prompt, /at most 5/);
+    assert.match(prompt, /without calling tabs_context_mcp/);
+    assert.match(prompt, /find or a targeted javascript_tool read/);
+    assert.match(prompt, /get_page_text/);
+    assert.match(prompt, /tabs_close_mcp/);
+    assert.match(prompt, /model: "sonnet"/);
+    assert.deepEqual(flagValue(t.runs()[0].argv, "--allowedTools").split(","), ["mcp__firefox", "Skill", "TodoWrite", "Task", "Agent"]);
+    const cid = newId();
+    await t.turn(cid, "hi", { engine: "codex" });
+    const codex = t.runs().find((r) => r.argv[0] === "exec");
+    const instructions = codex.argv.find((a) => a.startsWith("developer_instructions="));
+    assert.match(instructions, /Firefox sidebar/);
+    assert.doesNotMatch(instructions, /sub-agent/);
   } finally {
     t.done();
   }

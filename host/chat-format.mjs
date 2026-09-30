@@ -142,13 +142,22 @@ export function summarizePermission(tool, input) {
   return fit(lines.join("\n"), CARD_INPUT_CHARS);
 }
 
+export const AGENT_TOOLS = new Set(["Task", "Agent"]);
+
 // Result summaries: only errors carry text (the bridge already cuts typed values out of its error
-// messages). Page content, script output and screenshots never leave the host.
+// messages). Page content, script output and screenshots never leave the host. A sub-agent's
+// result is the exception: it is the agent's own reply (the values it was sent for), shown in
+// the panel as each one finishes, like the agent's other text.
 export function summarizeToolResult(name, content, isError) {
   const parts = Array.isArray(content) ? content : typeof content === "string" ? [{ type: "text", text: content }] : [];
   const text = parts.filter((p) => p?.type === "text").map((p) => p.text).join("\n");
   const first = text.split("\n").find((l) => l.trim()) ?? "";
   if (isError) return clip(first || "Failed", 120);
+  if (AGENT_TOOLS.has(name)) {
+    // Claude Code appends the agent's id and token usage as a last text block.
+    const reply = parts.filter((p) => p?.type === "text" && !/^\s*agentId:/.test(p.text)).map((p) => p.text).join("\n");
+    return clip(reply.replace(/<usage>[\s\S]*?<\/usage>/g, ""), 300);
+  }
   if (parts.some((p) => p?.type === "image")) return /^mcp__firefox__computer$/.test(name) ? "Screenshot captured" : "Image";
   if (/^mcp__firefox__(navigate|tabs_|replay_steps)/.test(name)) return clip(first, 100);
   if (name === "Bash") return clip(first, 100);

@@ -125,6 +125,30 @@ async function runTurn(content) {
     await assistantText(`msg_${++counter}`, "Done with the page.");
     return result({ num_turns: 3 });
   }
+  // Two sub-agents at once, their messages interleaved and tagged with the Agent call's id, the
+  // way Claude Code streams them.
+  if (text.includes("[fanout]")) {
+    const tasks = [
+      { id: "toolu_agent_a", name: "Agent", input: { description: "Read requests on PyPI", prompt: "Open pypi.org/project/requests and return the version", subagent_type: "general-purpose" } },
+      { id: "toolu_agent_b", name: "Agent", input: { description: "Read httpx on PyPI", prompt: "Open pypi.org/project/httpx and return the version", subagent_type: "general-purpose" } },
+    ];
+    write({ type: "assistant", message: { id: `msg_${++counter}`, role: "assistant", content: tasks.map((x) => ({ type: "tool_use", ...x })) }, parent_tool_use_id: null, uuid: `u-${++counter}` });
+    const sub = (parent, content) => write({ type: "assistant", message: { id: `msg_${++counter}`, role: "assistant", content }, parent_tool_use_id: parent, uuid: `u-${++counter}` });
+    const subResult = (parent, id, content, isError = false) => write({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content, is_error: isError }] }, parent_tool_use_id: parent });
+    write({ type: "stream_event", event: { type: "message_start", message: { id: "msg_sub_stream", role: "assistant", content: [] } }, parent_tool_use_id: "toolu_agent_a" });
+    sub("toolu_agent_a", [{ type: "tool_use", id: "toolu_a1", name: "mcp__firefox__tabs_create_mcp", input: {} }]);
+    sub("toolu_agent_b", [{ type: "tool_use", id: "toolu_b1", name: "mcp__firefox__tabs_create_mcp", input: {} }]);
+    subResult("toolu_agent_a", "toolu_a1", "Created tab 7 in the Claude tab group.");
+    subResult("toolu_agent_b", "toolu_b1", "Created tab 8 in the Claude tab group.");
+    sub("toolu_agent_a", [{ type: "text", text: "Opening the page" }, { type: "tool_use", id: "toolu_a2", name: "mcp__firefox__navigate", input: { tabId: 7, url: "https://pypi.org/project/requests/?q=1" } }]);
+    sub("toolu_agent_b", [{ type: "tool_use", id: "toolu_b2", name: "mcp__firefox__javascript_tool", input: { action: "javascript_exec", tabId: 8, text: "document.querySelector('h1').textContent" } }]);
+    subResult("toolu_agent_b", "toolu_b2", "TypeError: document.querySelector(...) is null", true);
+    subResult("toolu_agent_a", "toolu_a2", "Tab 7: https://pypi.org/project/requests/\nTitle: requests");
+    toolResult("toolu_agent_a", [{ type: "text", text: "requests 2.32.3" }, { type: "text", text: "agentId: a1b2c3 (use SendMessage to continue)\n<usage>total_tokens: 900</usage>" }]);
+    toolResult("toolu_agent_b", [{ type: "text", text: "httpx 0.28.1\n(read from the page text)" }]);
+    await assistantText(`msg_${++counter}`, "| Package | Version |\n| --- | --- |\n| requests | 2.32.3 |\n| httpx | 0.28.1 |");
+    return result({ num_turns: 2 });
+  }
   if (text.includes("[perm]")) {
     const input = { command: "touch fake-file", description: "Create a file" };
     const decision = await permission("Bash", input);

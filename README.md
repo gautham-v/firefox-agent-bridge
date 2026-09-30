@@ -10,8 +10,9 @@ Unofficial. Not affiliated with Anthropic, OpenAI or Mozilla.
 
 - A [chat panel](#chat-panel) in Firefox's sidebar: click the toolbar button, ask, and the agent
   works in the tab you're on. Drag more tabs into its group and it sees those too. Tasks can also
-  start from the [address bar](#address-bar) or [your phone](#start-a-task-from-your-phone), and
-  you can [point at elements](#point-and-ask) or [teach it a task](#teach) by doing it.
+  start from the [address bar](#address-bar) or [your phone](#start-a-task-from-your-phone), you
+  can [point at elements](#point-and-ask) or [teach it a task](#teach) by doing it, and for
+  several pages it can [fan out](#fan-out) to one sub-agent per tab.
 - Tabs live in a per-session tab group named after the client (**Claude**, **Codex**, ...; a
   second session from the same client gets "Codex 2") and stay in the background. Every agent
   group is grey, with a [state icon](#tab-group-icons) in its label. Nothing takes
@@ -165,6 +166,30 @@ starts it with the viewed tab in the group, and the two most recent chats are of
 the sidebar. The group label shows Working and Done as usual; if the task finishes while you're
 elsewhere, one notification ("Claude 2 finished" and the first line of the reply) takes you to the
 group when clicked.
+
+### Fan-out
+
+For a task that needs the same facts from 4 or more independent pages ("compare these six
+desks on price, depth and warranty"), a Claude Code chat can start one sub-agent per page, each
+in its own background tab in the chat's group, and merge their replies into one table. Codex has
+no sub-agents, so its chats don't fan out.
+
+- **Steps card.** It shows one row per sub-agent: favicon, site, what it's doing now (or how many
+  calls it made), and a status mark, under a "Fanned out to 6 tabs · 4 of 6 done" header. Click a
+  row to see that sub-agent's own steps. When a sub-agent finishes, what it returned shows under
+  its row, so the answer fills in row by row before the agent writes it up. The
+  [agent cam](#agent-cam) is off while sub-agents run, since they work in several tabs at once.
+- **Guidance, not a default.** The chat's system prompt asks for fan-out only at 4 or more pages
+  (below that, one tab read page by page is about as fast), at most 5 sub-agents at a time, each on
+  a cheaper model where the Task tool takes one. Each sub-agent is told the exact URL and fields,
+  to open its own tab with `tabs_create_mcp` without listing tabs first, to read just those fields
+  with `find` or a targeted `javascript_tool` read (falling back to `get_page_text` when a selector
+  comes back null), to close its tab, and to reply with only the values. The
+  [speed eval](#speed-eval) found it faster but about 2.75x the cost, hence the threshold.
+- **Tabs.** Sub-agents share the chat's MCP connection, so their tabs land in its group. Tabs
+  opened at the same moment by a session with no group yet join one new group, not one each.
+- **History.** A reloaded chat shows each sub-agent's description and reply but not its calls,
+  which Claude Code keeps outside the main session file.
 
 ## Tab group icons
 
@@ -382,6 +407,30 @@ Codex can run on either of these instead:
     `KEEP=1` keeps their temp dir.
 - Logs are in `~/.firefox-agent-bridge/host.log`. Screenshots saved with `save_to_disk` go to
   `~/.firefox-agent-bridge/screenshots/`.
+
+## Speed eval
+
+`eval/` holds a harness that tested four speed ideas against today's tools before building any
+of them (tasks, arms and how to run it in [eval/README.md](eval/README.md); results in
+[eval/results/report.md](eval/results/report.md)). Only [fan-out](#fan-out) was built:
+
+- **Fan-out: built, as guidance.** It cut median wall time on both five-page compare tasks (PyPI
+  27.8s to 22.9s, -18%; npm 31.6s to 18.7s, -41%) with 6/6 success, but cost about 2.75x ($0.068
+  to $0.188 a run) and about 3x the input tokens. So the prompt asks for it only at 4 or more
+  pages, with targeted reads in the sub-agents, and it isn't the default.
+- **Strip (reader-view extraction): skipped.** On the 3 eval articles it raised tokens (1.08x
+  input, 2.2x output), since they had almost no page chrome to strip. In a 22-URL probe the
+  savings came with lost paragraphs on 6 URLs (BBC kept 0.33 of them, Wired 0.50), and Wikipedia
+  errored.
+- **Data (re-fetching the page's JSON): skipped.** Success fell to 8/9: one Hacker News run
+  re-queried the Algolia API with different defaults and confidently answered 62 against the true
+  41. Tool-call savings weren't consistent (crates -1, HN 0, Ashby +4).
+- **Accessibility tree: inconclusive, not built.** The probe estimates `read_page` misses about 2%
+  of interactive elements, but it undercounts payment and captcha fields: a cross-origin frame's
+  URL opened on its own renders nothing for Stripe card fields and hCaptcha. No real accessibility
+  tree was compared.
+
+There were no infrastructure failures or flaky-task confounds in the eval runs.
 
 ## Caveats
 

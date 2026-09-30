@@ -245,12 +245,36 @@ browser.tabGroups.onMoved?.addListener((group) => {
   scheduleRefresh();
 });
 
+// session -> the tab whose new group is being started, so calls made at the same time (sub-agents
+// each opening a tab) join that group instead of each starting one of their own.
+const groupStarts = new Map();
+
 async function createSessionTab(session, client, url = "about:blank", preferWindowId = null) {
   let groupId = await sessionGroupId(session);
-  const windowId = groupId != null ? (await browser.tabGroups.get(groupId)).windowId : preferWindowId ?? (await targetWindowId());
-  const tab = await browser.tabs.create({ url, active: false, windowId });
-  if (groupId != null) await browser.tabs.group({ tabIds: [tab.id], groupId });
-  else await startGroup(session, client, tab.id, windowId);
+  while (groupId == null && groupStarts.has(session)) {
+    await groupStarts.get(session).catch(() => {});
+    groupId = await sessionGroupId(session);
+  }
+  let tab;
+  if (groupId != null) {
+    const { windowId } = await browser.tabGroups.get(groupId);
+    tab = await browser.tabs.create({ url, active: false, windowId });
+    await browser.tabs.group({ tabIds: [tab.id], groupId });
+  } else {
+    // Registered before the first await, so the next call waits for this group.
+    const start = (async () => {
+      const windowId = preferWindowId ?? (await targetWindowId());
+      const t = await browser.tabs.create({ url, active: false, windowId });
+      await startGroup(session, client, t.id, windowId);
+      return t;
+    })();
+    groupStarts.set(session, start);
+    try {
+      tab = await start;
+    } finally {
+      if (groupStarts.get(session) === start) groupStarts.delete(session);
+    }
+  }
   try {
     await browser.tabs.update(tab.id, { autoDiscardable: false });
   } catch {
