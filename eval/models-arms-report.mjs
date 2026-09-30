@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Compares experiment arms (models.mjs --experiments) with the "none" arm, per effort and over
-// all, and reads each run's stream to check that a flag did what it should.
+// Compares experiment arms (models.mjs --experiments) with the reference arm ("none", else
+// "baseline"), per effort and over all, and reads each run's stream to check that a flag did what
+// it should.
 //
 //   node eval/models-arms-report.mjs [--in eval/results/models-hard/arms/runs.jsonl] [--prefix arms-]
 //
@@ -15,7 +16,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { armOf } from "./lib/experiments.mjs";
+import { armOf, refFirst } from "./lib/experiments.mjs";
 
 const EVAL = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(EVAL);
@@ -138,7 +139,7 @@ const f = (x, d = 2) => (x == null || !Number.isFinite(x) ? "–" : x.toFixed(d)
 const x = (v) => (v == null || !Number.isFinite(v) ? "–" : `×${v.toFixed(2)}`);
 const pct = (v) => (v == null ? "–" : `${Math.round(v * 100)}%`);
 
-const ARMS = [...new Set(rows.map((r) => r.arm))].sort((a, b) => (a === "none" ? -1 : b === "none" ? 1 : 0));
+const ARMS = [...new Set(rows.map((r) => r.arm))].sort(refFirst);
 const EFFORTS = [...new Set(rows.map((r) => r.effort))].sort((a, b) => ["low", "medium", "high"].indexOf(a) - ["low", "medium", "high"].indexOf(b));
 const TASKS = [...new Set(rows.map((r) => r.task))].sort();
 const REF = ARMS[0];

@@ -15,7 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { armOf } from "./lib/experiments.mjs";
+import { armOf, refFirst } from "./lib/experiments.mjs";
 import { shortTool } from "./lib/trace.mjs";
 import { TASKS } from "./tasks.mjs";
 
@@ -577,7 +577,7 @@ function experimentFacts(cols) {
 const EXPERIMENTS = opt("experiments", path.join(EVAL, "results/experiments.jsonl"));
 const experimentRows = readJsonl(EXPERIMENTS).filter((r) => browserOf(r) === "firefox");
 if (experimentRows.length) {
-  const arms = [...new Set(experimentRows.map(armOf))].sort((a, b) => (a === "none" ? -1 : b === "none" ? 1 : 0));
+  const arms = [...new Set(experimentRows.map(armOf))].sort(refFirst);
   const cols = arms.map((a) => [a, experimentRows.filter((r) => armOf(r) === a)]);
   const ids = TASKS.map((t) => t.id).filter((id) => experimentRows.some((r) => r.task === id));
   out.push("## Experiment arms (Firefox)", "");

@@ -8,7 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { armOf } from "./lib/experiments.mjs";
+import { armOf, refFirst } from "./lib/experiments.mjs";
 
 const EVAL = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -18,7 +18,9 @@ const OUT = opt("out");
 const BAND = 0.1; // a task's median "moved" when it changed by more than this
 
 const rows = fs.readFileSync(IN, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
-const arms = [...new Set(rows.map(armOf))].sort((a, b) => (a === "none" ? -1 : b === "none" ? 1 : 0));
+const arms = [...new Set(rows.map(armOf))].sort(refFirst);
+const REF = arms[0]; // "none", else "baseline"
+const RUNS = Math.max(...rows.map((r) => r.run));
 const tasks = [...new Set(rows.map((r) => r.task))];
 const of = (arm, task) => rows.filter((r) => armOf(r) === arm && (!task || r.task === task));
 
@@ -59,7 +61,7 @@ const metrics = {
 const out = [];
 const P = (...s) => out.push(...s);
 
-P("## Experiment arms against no flags (Firefox, 16 tasks x 2 runs each)", "");
+P(`## Arms against ${REF === "none" ? "no flags" : REF} (Firefox, ${tasks.length} tasks x ${RUNS} run${RUNS > 1 ? "s" : ""} each)`, "");
 P(`Source: \`${path.relative(path.join(EVAL, ".."), IN)}\`. ${rows.length} runs, ${arms.length} arms, ${tasks.length} tasks, arms interleaved within each task and run. Cost is list price from the result event.`, "");
 
 // ---- per arm totals ----
@@ -95,7 +97,7 @@ const signP = (up, down) => {
 const noise = (m) => {
   let up = 0, down = 0;
   for (const t of tasks) {
-    const [a, b] = [1, 2].map((n) => rows.find((r) => armOf(r) === "none" && r.task === t && r.run === n));
+    const [a, b] = [1, 2].map((n) => rows.find((r) => armOf(r) === REF && r.task === t && r.run === n));
     if (!a || !b) continue;
     const x = metrics[m](a), y = metrics[m](b);
     if (y > x * (1 + BAND)) up++;
@@ -104,8 +106,8 @@ const noise = (m) => {
   return { up, down, same: tasks.length - up - down };
 };
 
-P("### Each arm against none, by task", "");
-P(`Ratios are arm / none. "Geomean" is the geometric mean of the per-task median ratios (each task counts once). "Up / down" counts tasks whose median moved by more than ${BAND * 100}% in that direction, out of ${tasks.length}; "p" is a two-sided sign test on those. With 2 runs a task's median is their mean, so single-run luck moves it a lot: the last row shows none's run 1 against none's run 2 the same way, which is the noise floor.`, "");
+P(`### Each arm against ${REF}, by task`, "");
+P(`Ratios are arm / ${REF}. "Geomean" is the geometric mean of the per-task median ratios (each task counts once). "Up / down" counts tasks whose median moved by more than ${BAND * 100}% in that direction, out of ${tasks.length}; "p" is a two-sided sign test on those. ${RUNS > 1 ? `With 2 runs a task's median is their mean, so single-run luck moves it a lot: the last row shows ${REF}'s run 1 against ${REF}'s run 2 the same way, which is the noise floor.` : "With 1 run a task's median is that run, so single-run luck decides it."}`, "");
 for (const m of Object.keys(metrics)) {
   P(`**${m}**`, "");
   P(`| arm | ratio of means | geomean of task ratios | tasks up / same / down | p |`);
@@ -114,7 +116,7 @@ for (const m of Object.keys(metrics)) {
     let up = 0, down = 0, same = 0;
     const lg = [];
     for (const t of tasks) {
-      const x = taskMed("none", t, m), y = taskMed(a, t, m);
+      const x = taskMed(REF, t, m), y = taskMed(a, t, m);
       if (!(x > 0)) { same++; continue; }
       lg.push(Math.log(Math.max(y, 1e-9) / x));
       if (y > x * (1 + BAND)) up++;
@@ -122,90 +124,102 @@ for (const m of Object.keys(metrics)) {
       else same++;
     }
     const geo = lg.length && m !== "screenshot/zoom actions" ? Math.exp(mean(lg)) : NaN;
-    const rm = mean(of(a).map(metrics[m])) / mean(of("none").map(metrics[m]));
+    const rm = mean(of(a).map(metrics[m])) / mean(of(REF).map(metrics[m]));
     P(`| ${a} | ${f(rm, 2)} | ${f(geo, 2)} | ${up} / ${same} / ${down} | ${f(signP(up, down), 2)} |`);
   }
-  const n = noise(m);
-  P(`| (none run 2 vs run 1) | – | – | ${n.up} / ${n.same} / ${n.down} | ${f(signP(n.up, n.down), 2)} |`);
+  if (RUNS > 1) {
+    const n = noise(m);
+    P(`| (${REF} run 2 vs run 1) | – | – | ${n.up} / ${n.same} / ${n.down} | ${f(signP(n.up, n.down), 2)} |`);
+  }
   P("");
 }
 
 // ---- did each flag do what it should ----
-P("### Did each flag do what it should", "");
+P("### Did each change do what it should", "");
 const calls = (a) => of(a).flatMap((r) => traceOf(r).map((c) => ({ ...c, run: r })));
 const runsWith = (a, pred) => of(a).filter((r) => traceOf(r).some(pred)).length;
 
-P("**batchHint** (batch calls, and how many actions they held)", "");
-P(`| arm | runs using batch | batch calls | actions per batch | runs with 2+ same-turn calls that could have batched (find/read_page then form_input or computer in the next call) |`);
-P(`| --- | --- | --- | --- | --- |`);
-for (const a of ["none", "batchHint"]) {
-  const bs = calls(a).filter((c) => c.short === "batch");
-  const missed = of(a).filter((r) => {
-    const cs = traceOf(r);
-    return cs.some((c, i) => ["find", "read_page"].includes(c.short) && cs[i + 1] && ["form_input", "computer"].includes(cs[i + 1].short) && !(cs[i + 1].action === "screenshot"));
-  }).length;
-  P(`| ${a} | ${runsWith(a, (c) => c.short === "batch")} of ${of(a).length} | ${bs.length} | ${f(mean(bs.map((c) => c.batch_actions ?? 0)))} | ${missed} |`);
+if (arms.includes("batchHint")) {
+  P("**batchHint** (batch calls, and how many actions they held)", "");
+  P(`| arm | runs using batch | batch calls | actions per batch | runs with 2+ same-turn calls that could have batched (find/read_page then form_input or computer in the next call) |`);
+  P(`| --- | --- | --- | --- | --- |`);
+  for (const a of ["none", "batchHint"]) {
+    const bs = calls(a).filter((c) => c.short === "batch");
+    const missed = of(a).filter((r) => {
+      const cs = traceOf(r);
+      return cs.some((c, i) => ["find", "read_page"].includes(c.short) && cs[i + 1] && ["form_input", "computer"].includes(cs[i + 1].short) && !(cs[i + 1].action === "screenshot"));
+    }).length;
+    P(`| ${a} | ${runsWith(a, (c) => c.short === "batch")} of ${of(a).length} | ${bs.length} | ${f(mean(bs.map((c) => c.batch_actions ?? 0)))} | ${missed} |`);
+  }
+  P("");
+  P("Per task, batch calls (none / batchHint), tasks where either used one:", "");
+  const bt = tasks
+    .map((t) => [t, ...["none", "batchHint"].map((a) => of(a, t).reduce((n, r) => n + traceOf(r).filter((c) => c.short === "batch").length, 0))])
+    .filter(([, x, y]) => x || y);
+  P(bt.map(([t, x, y]) => `${t} ${x}/${y}`).join(", ") || "none", "");
 }
-P("");
-P("Per task, batch calls (none / batchHint), tasks where either used one:", "");
-const bt = tasks
-  .map((t) => [t, ...["none", "batchHint"].map((a) => of(a, t).reduce((n, r) => n + traceOf(r).filter((c) => c.short === "batch").length, 0))])
-  .filter(([, x, y]) => x || y);
-P(bt.map(([t, x, y]) => `${t} ${x}/${y}`).join(", ") || "none", "");
 
-P("**fewerShots** (screenshot actions, including zooms and those inside batches)", "");
-P(`| arm | screenshot/zoom actions total | runs with any | mean per run |`);
-P(`| --- | --- | --- | --- |`);
-for (const a of ["none", "fewerShots"]) {
-  const rs = of(a);
-  const sh = rs.map(metrics["screenshot/zoom actions"]);
-  P(`| ${a} | ${sum(sh)} | ${sh.filter((x) => x > 0).length} of ${rs.length} | ${f(mean(sh), 2)} |`);
+if (arms.includes("fewerShots")) {
+  P("**fewerShots** (screenshot actions, including zooms and those inside batches)", "");
+  P(`| arm | screenshot/zoom actions total | runs with any | mean per run |`);
+  P(`| --- | --- | --- | --- |`);
+  for (const a of ["none", "fewerShots"]) {
+    const rs = of(a);
+    const sh = rs.map(metrics["screenshot/zoom actions"]);
+    P(`| ${a} | ${sum(sh)} | ${sh.filter((x) => x > 0).length} of ${rs.length} | ${f(mean(sh), 2)} |`);
+  }
+  P("");
+  P("Per task, screenshot actions (none / fewerShots), tasks where either had one:", "");
+  const st = tasks
+    .map((t) => [t, ...["none", "fewerShots"].map((a) => sum(of(a, t).map(metrics["screenshot/zoom actions"])))])
+    .filter(([, x, y]) => x || y);
+  P(st.map(([t, x, y]) => `${t} ${x}/${y}`).join(", ") || "none", "");
 }
-P("");
-P("Per task, screenshot actions (none / fewerShots), tasks where either had one:", "");
-const st = tasks
-  .map((t) => [t, ...["none", "fewerShots"].map((a) => sum(of(a, t).map(metrics["screenshot/zoom actions"])))])
-  .filter(([, x, y]) => x || y);
-P(st.map(([t, x, y]) => `${t} ${x}/${y}`).join(", ") || "none", "");
 
-P("**screenshotAlias** (calls to the `screenshot` tool; in the other arms it is not offered)", "");
-P(`| arm | screenshot tool calls | errors | runs using it | \`computer\` screenshot actions |`);
-P(`| --- | --- | --- | --- | --- |`);
-for (const a of arms) {
-  const cs = calls(a);
-  const shot = cs.filter((c) => c.short === "screenshot");
-  const viaComputer = cs.filter((c) => c.short === "computer" && c.action === "screenshot").length;
-  P(`| ${a} | ${shot.length} | ${shot.filter((c) => c.is_error).length} | ${new Set(shot.map((c) => c.run.run_id)).size} | ${viaComputer} |`);
+if (arms.includes("screenshotAlias")) {
+  P("**screenshotAlias** (calls to the `screenshot` tool; in the other arms it is not offered)", "");
+  P(`| arm | screenshot tool calls | errors | runs using it | \`computer\` screenshot actions |`);
+  P(`| --- | --- | --- | --- | --- |`);
+  for (const a of arms) {
+    const cs = calls(a);
+    const shot = cs.filter((c) => c.short === "screenshot");
+    const viaComputer = cs.filter((c) => c.short === "computer" && c.action === "screenshot").length;
+    P(`| ${a} | ${shot.length} | ${shot.filter((c) => c.is_error).length} | ${new Set(shot.map((c) => c.run.run_id)).size} | ${viaComputer} |`);
+  }
+  P("");
 }
-P("");
 
-P("**pageTextCap** (`get_page_text` results at the 8000-character cap, and reads that used offset or max_chars)", "");
-P(`| arm | get_page_text calls | result bytes median / max | calls with offset or max_chars | calls that hit the cap (bytes 7900-8300) |`);
-P(`| --- | --- | --- | --- | --- |`);
-for (const a of ["none", "pageTextCap"]) {
-  const g = calls(a).filter((c) => c.short === "get_page_text");
-  P(`| ${a} | ${g.length} | ${k(median(g.map((c) => c.text_bytes)))} / ${k(Math.max(...g.map((c) => c.text_bytes)))} | ${g.filter((c) => /offset|max_chars/.test(c.args)).length} | ${g.filter((c) => c.text_bytes >= 7900 && c.text_bytes <= 8300).length} |`);
+if (arms.includes("pageTextCap")) {
+  P("**pageTextCap** (`get_page_text` results at the 8000-character cap, and reads that used offset or max_chars)", "");
+  P(`| arm | get_page_text calls | result bytes median / max | calls with offset or max_chars | calls that hit the cap (bytes 7900-8300) |`);
+  P(`| --- | --- | --- | --- | --- |`);
+  for (const a of ["none", "pageTextCap"]) {
+    const g = calls(a).filter((c) => c.short === "get_page_text");
+    P(`| ${a} | ${g.length} | ${k(median(g.map((c) => c.text_bytes)))} / ${k(Math.max(...g.map((c) => c.text_bytes)))} | ${g.filter((c) => /offset|max_chars/.test(c.args)).length} | ${g.filter((c) => c.text_bytes >= 7900 && c.text_bytes <= 8300).length} |`);
+  }
+  P("");
+  P("Per task, get_page_text calls in the cap arm against none (tasks where the count differs):", "");
+  const pt = tasks
+    .map((t) => [t, ...["none", "pageTextCap"].map((a) => sum(of(a, t).map((r) => traceOf(r).filter((c) => c.short === "get_page_text").length))), Math.max(0, ...of("none", t).flatMap((r) => traceOf(r).filter((c) => c.short === "get_page_text").map((c) => c.text_bytes)))])
+    .filter(([, x, y]) => x !== y);
+  P(pt.map(([t, x, y, big]) => `${t} ${x} -> ${y} (largest text in none ${k(big)} bytes)`).join("; ") || "no differences", "");
 }
-P("");
-P("Per task, get_page_text calls in the cap arm against none (tasks where the count differs):", "");
-const pt = tasks
-  .map((t) => [t, ...["none", "pageTextCap"].map((a) => sum(of(a, t).map((r) => traceOf(r).filter((c) => c.short === "get_page_text").length))), Math.max(0, ...of("none", t).flatMap((r) => traceOf(r).filter((c) => c.short === "get_page_text").map((c) => c.text_bytes)))])
-  .filter(([, x, y]) => x !== y);
-P(pt.map(([t, x, y, big]) => `${t} ${x} -> ${y} (largest text in none ${k(big)} bytes)`).join("; ") || "no differences", "");
 
-P("**quietTabs** (navigate results that end with the session's tab list)", "");
-P(`| arm | navigate calls | results with a tab list | navigate calls that opened a tab |`);
-P(`| --- | --- | --- | --- |`);
-for (const a of ["none", "quietTabs"]) {
-  const n = calls(a).filter((c) => c.short === "navigate");
-  P(`| ${a} | ${n.length} | ${n.filter((c) => /This session's tabs/.test(c.text_head ?? "")).length} | ${n.filter((c) => /opened a new tab|Created tab/.test(c.text_head ?? "")).length} |`);
+if (arms.includes("quietTabs")) {
+  P("**quietTabs** (navigate results that end with the session's tab list)", "");
+  P(`| arm | navigate calls | results with a tab list | navigate calls that opened a tab |`);
+  P(`| --- | --- | --- | --- |`);
+  for (const a of ["none", "quietTabs"]) {
+    const n = calls(a).filter((c) => c.short === "navigate");
+    P(`| ${a} | ${n.length} | ${n.filter((c) => /This session's tabs/.test(c.text_head ?? "")).length} | ${n.filter((c) => /opened a new tab|Created tab/.test(c.text_head ?? "")).length} |`);
+  }
+  P("");
 }
-P("");
 
-P("**fastNavigate** (navigate time; get_page_text and find issued in the same message wait for it)", "");
+P("**navigate** (navigate time; get_page_text and find issued in the same message wait for it; the fastNavigate flag, now the default)", "");
 P(`| arm | navigate ms median / mean | navigate calls | get_page_text ms median | results with the "returned once the page was parsed" note |`);
 P(`| --- | --- | --- | --- | --- |`);
-for (const a of ["none", "fastNavigate"]) {
+for (const a of arms) {
   const cs = calls(a);
   const n = cs.filter((c) => c.short === "navigate");
   P(`| ${a} | ${f(median(n.map((c) => c.ms)), 0)} / ${f(mean(n.map((c) => c.ms)), 0)} | ${n.length} | ${f(median(cs.filter((c) => c.short === "get_page_text").map((c) => c.ms)), 0)} | ${n.filter((c) => /returned once the page was parsed/.test(c.text_head ?? "")).length} |`);
