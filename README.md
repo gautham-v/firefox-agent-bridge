@@ -161,6 +161,9 @@ Differences from Chrome:
   caught in the switch fails; reading again reads the new page.
 - A click waits only when it opened a tab, to name that tab in its result. A click that opened
   nothing answers at once, so keys and typing sent right after it aren't held up.
+- `read_page` names elements as the accessibility tree would: labels, an image's alt, an icon's
+  svg title, the title of a child with no text. An editor is one textbox, not a line per span.
+  A focusable wrapper that only holds other controls is left out; they are listed.
 - There is no `gif_creator` or shortcuts. Console and network reading is one opt-in tool,
   `devtools`, below.
 

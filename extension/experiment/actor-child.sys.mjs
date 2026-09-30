@@ -7,6 +7,7 @@ import { barLabel, fieldKind, marker, markLabels, scrub, selectorKind, siteSelec
 import { focusEvents } from "resource://firefox-agent-bridge/focus.sys.mjs";
 import { rankFind } from "resource://firefox-agent-bridge/find-rank.sys.mjs";
 import { contentBox, rectToTop, toParent } from "resource://firefox-agent-bridge/frame-offset.sys.mjs";
+import { accessibleName, focusableEntry, labelText } from "resource://firefox-agent-bridge/names.sys.mjs";
 
 const INTERACTIVE_ROLES = new Set([
   "button", "link", "textbox", "searchbox", "combobox", "checkbox", "radio", "switch", "slider",
@@ -143,46 +144,9 @@ function roleOf(el) {
   return fn ? fn(el) : null;
 }
 
+// The accessible name (names.sys.mjs), with content read through shadow roots and slots.
 function nameOf(el, role) {
-  const doc = el.ownerDocument;
-  const labelledBy = el.getAttribute("aria-labelledby");
-  if (labelledBy) {
-    const text = labelledBy.split(/\s+/).map((id) => doc.getElementById(id)?.textContent ?? "").join(" ");
-    if (clean(text)) return clean(text);
-  }
-  const aria = el.getAttribute("aria-label");
-  if (aria && aria.trim()) return clean(aria);
-  if (el.labels?.length) {
-    const text = Array.from(el.labels).map(labelText).join(" ");
-    if (clean(text)) return clean(text);
-  }
-  if (el.tagName === "IMG" || (el.tagName === "INPUT" && el.type === "image")) {
-    const alt = el.getAttribute("alt");
-    if (alt) return clean(alt);
-  }
-  if (el.tagName === "INPUT" && ["button", "submit", "reset"].includes(el.type)) return clean(el.value);
-  if (role && (NAME_FROM_CONTENT.has(role) || role === "heading")) {
-    const text = clean(el.textContent);
-    if (text) return text;
-  }
-  const title = el.getAttribute("title");
-  if (title) return clean(title);
-  const placeholder = el.getAttribute("placeholder");
-  if (placeholder) return clean(placeholder);
-  return "";
-}
-
-// A label's own text, leaving out the text of controls nested inside it (like a select's options).
-function labelText(label) {
-  const parts = [];
-  const walk = (node) => {
-    for (const child of node.childNodes) {
-      if (child.nodeType === 3) parts.push(child.data);
-      else if (child.nodeType === 1 && !["SELECT", "TEXTAREA", "INPUT", "BUTTON", "SCRIPT", "STYLE"].includes(child.tagName)) walk(child);
-    }
-  };
-  walk(label);
-  return parts.join(" ");
+  return accessibleName(el, { fromContent: !!role && NAME_FROM_CONTENT.has(role), children: renderedChildren });
 }
 
 function isRendered(el) {
@@ -196,7 +160,9 @@ function isRendered(el) {
 
 function isInteractive(el, role) {
   if (role && INTERACTIVE_ROLES.has(role)) return true;
-  if (el.isContentEditable) return true;
+  // Only an editor's editing host is a target: the lines and spans inside it are its content
+  // (Square's code sample listed 100 of them, all without names).
+  if (el.isContentEditable && !el.parentElement?.isContentEditable) return true;
   if (el.hasAttribute("onclick")) return true;
   const tabindex = el.getAttribute("tabindex");
   return tabindex !== null && Number(tabindex) >= 0 && el.tagName !== "IFRAME";
@@ -600,9 +566,20 @@ function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, fr
         for (const child of renderedChildren(node)) walk(child, level + 1, depthLeft - 1, true);
         return;
       }
+      let listed = include;
       if (include) {
         if (depthLeft <= 0) return;
-        if (!push(`${"  ".repeat(level)}${describe(el, role, nameOf(el, role), red)}`)) return;
+        let name = nameOf(el, role);
+        // Focusable or clickable without an interactive role (a div with tabindex or onclick):
+        // named by its text, or left out when it only wraps other controls (names.sys.mjs).
+        if (interactive && !(role && INTERACTIVE_ROLES.has(role)) && !el.isContentEditable) {
+          const entry = focusableEntry(el, role, { name, interactiveOnly, children: renderedChildren });
+          name = entry.name;
+          listed = !entry.skip;
+        }
+        if (listed && !push(`${"  ".repeat(level)}${describe(el, role, name, red)}`)) return;
+      }
+      if (listed) {
         nextLevel = level + 1;
         nextDepth = depthLeft - 1;
         if (role && NAME_FROM_CONTENT.has(role)) named = true;
@@ -860,17 +837,24 @@ function modifierInit(modifiers) {
 
 // Event coordinates. Events dispatched through the pres shell take their position from
 // screenX/screenY, read as device pixels, so clientX/clientY alone are overwritten.
+// mozInnerScreenX/Y is right here even in an out-of-process frame, where it is wrong as a place
+// on screen (frame-offset.sys.mjs): nsDOMWindowUtils turns screenX/Y back into a point in the
+// frame by subtracting its root widget's WidgetToScreenOffset, and in a frame with no parent in
+// its process mozInnerScreenX/Y is that same offset, so the two cancel and (x, y) is what lands.
+// The measured frame offset would not cancel, and would move events by the frame's position.
 function at(win, x, y) {
   const dpr = win.devicePixelRatio;
   return { clientX: x, clientY: y, screenX: (win.mozInnerScreenX + x) * dpr, screenY: (win.mozInnerScreenY + y) * dpr };
 }
 
 // Events go through the pres shell, as real input does, so default actions run (focus, :active,
-// a click after mousedown and mouseup, wheel scrolling). Where that dispatch fails (it has thrown
-// NS_ERROR_UNEXPECTED over MDN's live-sample frame, which sits in shadow roots and runs out of
-// process), the same event is dispatched on the target instead. The pres shell dispatch marks an
-// event trusted before it checks for a pres shell, so it should stay trusted. That path skips the
-// default actions, so directDispatches counts it, and click sends the click event itself.
+// a click after mousedown and mouseup, wheel scrolling). Where that dispatch fails, the same event
+// is dispatched on the target instead. It fails with NS_ERROR_UNEXPECTED for any target inside a
+// shadow root (it wants the target's uncomposed document, which a shadow tree has none of), which
+// is what MDN's pages hit, their live samples being in shadow roots; the frame's position has
+// nothing to do with it. The pres shell dispatch marks an event trusted before that check, so it
+// should stay trusted. That path skips the default actions, so directDispatches counts it, and
+// click sends the click event itself.
 let directDispatches = 0;
 
 function fire(win, target, Ctor, type, init) {
