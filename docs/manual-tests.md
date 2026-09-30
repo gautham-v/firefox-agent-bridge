@@ -65,3 +65,12 @@ eval tasks is separate: see "Re-measured after restart" in [eval/README.md](../e
     request that 404s: `kind: "console"` shows the load-time messages, `kind: "network"
     onlyFailed: true` shows the 404, and both survive a navigation. A password logged to the
     console comes back masked. Firefox asks for no new permission when the extension loads.
+19. **Typing fires `change` on blur.** In a background tab, on
+    http://uitestingplayground.com/textinput, click the text box, `type` a name, then press Tab:
+    the button takes the name when clicked. Again with a click on the button straight after
+    typing, and with a click on empty page. Listeners added first with `javascript_tool` show
+    `input` per character, then `change` before `blur` (trusted), and `focus` on the next
+    element; a Tab or click that changed nothing fires no `change`. In TodoMVC (React), double
+    click a todo, type, and click elsewhere: the edit is saved. Typing into a password field
+    still reads back masked, and in the focused tab (the one you're looking at) each event fires
+    once.

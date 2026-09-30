@@ -54,6 +54,8 @@ const PAGE_HTML = `<!doctype html>
   window.frameClicks = [];
   document.getElementById("btn").addEventListener("click", (e) => clicks.push(e.isTrusted));
   document.getElementById("text").addEventListener("keydown", (e) => keys.push([e.key, e.isTrusted]));
+  window.changes = [];
+  document.getElementById("text").addEventListener("change", (e) => changes.push([e.target.value, e.isTrusted]));
   addEventListener("message", (e) => { if (e.origin === ${JSON.stringify(FRAME)}) frameClicks.push(e.data); });
 </script>
 </body></html>`;
@@ -207,6 +209,23 @@ try {
     assert.ok(keys.length >= TYPED.length, `keydowns: ${keys.length}`);
     assert.ok(keys.every(([, trusted]) => trusted === true), "every keydown is trusted");
     assert.deepEqual(keys.at(-1), ["Backspace", true]);
+  });
+
+  await h.step("Tab or a click away from a typed-in field fires change, as a real keyboard would", async () => {
+    // The tab is in the background, where Gecko moves focus without blur; the actor sends it.
+    const value = TYPED.slice(0, -3);
+    assert.equal(await agent.js(tab, "JSON.stringify(changes)"), "[]");
+    await agent.ok("computer", { action: "key", tabId: tab, text: "Tab" });
+    assert.equal(await agent.js(tab, "JSON.stringify(changes)"), JSON.stringify([[value, true]]));
+    await agent.ok("computer", { action: "left_click", tabId: tab, coordinate: await centerOf(agent, tab, "#text", scale) });
+    await agent.ok("computer", { action: "key", tabId: tab, text: "End" });
+    await agent.ok("computer", { action: "type", tabId: tab, text: "!" });
+    await agent.ok("computer", { action: "left_click", tabId: tab, coordinate: await centerOf(agent, tab, "#btn", scale) });
+    assert.equal(await agent.js(tab, "JSON.stringify(changes)"), JSON.stringify([[value, true], [`${value}!`, true]]));
+    // Focus in and out again without typing: no change.
+    await agent.ok("computer", { action: "left_click", tabId: tab, coordinate: await centerOf(agent, tab, "#text", scale) });
+    await agent.ok("computer", { action: "key", tabId: tab, text: "Tab" });
+    assert.equal(Number(await agent.js(tab, "changes.length")), 2);
   });
 
   await h.step("scroll moves the page, also when over an iframe that can't scroll", async () => {
