@@ -17,6 +17,7 @@ const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "fab-test-"));
 const DIR = path.join(HOME, ".firefox-agent-bridge");
 const SOCKET = path.join(DIR, "bridge.sock");
 const env = { ...process.env, HOME };
+delete env.FIREFOX_BRIDGE_DEVTOOLS; // the MCP server here is the default one, without the devtools tool
 const children = [];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -153,6 +154,7 @@ try {
     const pCall = mcp.request("tools/call", { name: "tabs_context_mcp", arguments: { createIfEmpty: true } });
     const ev = await expectHost("connected event", isConnected("test-client"));
     assert.equal(ev.client.version, "1.2.3");
+    assert.equal(ev.client.devtools, undefined, "without FIREFOX_BRIDGE_DEVTOOLS the server doesn't ask for capture");
     assert.equal(ev.client.pid, mcp.proc.pid);
     assert.equal(fs.realpathSync(ev.client.cwd), fs.realpathSync(HOME));
     assert.equal(typeof ev.client.id, "number");
@@ -208,6 +210,16 @@ try {
     assert.equal(hostExit, null);
     c.socket.end();
     await expectHost("raw disconnected", isDisconnected(ev.client.id));
+  });
+
+  await test("a hello from a server with the devtools tool is passed on as devtools: true", async () => {
+    const c = rawClient();
+    await c.ready;
+    c.socket.write(JSON.stringify({ type: "hello", client: { name: "raw-devtools", version: "0" }, pid: 4243, cwd: "/raw", devtools: true }) + "\n");
+    const ev = await expectHost("raw-devtools connected", isConnected("raw-devtools"));
+    assert.deepEqual(ev.client, { id: ev.client.id, name: "raw-devtools", version: "0", pid: 4243, cwd: "/raw", devtools: true });
+    c.socket.end();
+    await expectHost("raw-devtools disconnected", isDisconnected(ev.client.id));
   });
 
   await test("call before hello gets an 'unknown client' connected event first", async () => {

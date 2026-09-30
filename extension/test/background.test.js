@@ -1,6 +1,6 @@
 "use strict";
 
-// Loads control.js and background.js the way the manifest does (two scripts, one global scope)
+// Loads control.js, devtools.js and background.js the way the manifest does (one global scope)
 // against a mocked `browser`, then drives them through the native port, tab events, the Stop
 // command and the popup port.
 const test = require("node:test");
@@ -12,7 +12,12 @@ const { webcrypto } = require("node:crypto");
 
 const event = () => {
   const listeners = [];
-  return { addListener: (f) => listeners.push(f), fire: (...a) => Promise.all(listeners.map((f) => f(...a))), listeners };
+  return {
+    addListener: (f) => listeners.push(f),
+    removeListener: (f) => listeners.includes(f) && listeners.splice(listeners.indexOf(f), 1),
+    fire: (...a) => Promise.all(listeners.map((f) => f(...a))),
+    listeners,
+  };
 };
 
 // noIcons: the experiment can't find the label element, so setGroupState answers false (or throws,
@@ -113,7 +118,15 @@ function mockBrowser({ store = {}, groups: initialGroups = [], noIcons = false, 
     icons,
     // tab id -> whether Teach is recording it
     recorded: new Map(),
+    webRequest: { onBeforeRequest: event(), onBeforeRedirect: event(), onCompleted: event(), onErrorOccurred: event() },
     claudePage: {
+      // the tab ids whose console the experiment was last told to capture
+      devtoolsWatch: async (tabIds, redact) => {
+        b.consoleWatched = tabIds;
+        b.consoleRules = redact;
+        return tabIds.length;
+      },
+      onConsole: event(),
       onPick: event(),
       record: async (tabId, on, redact) => {
         b.recorded.set(tabId, on);
@@ -151,7 +164,7 @@ async function load(opts) {
   const browser = mockBrowser(opts);
   const matchMedia = () => ({ matches: !!opts?.dark, addEventListener: () => {} });
   const ctx = vm.createContext({ browser, console, setTimeout, clearTimeout, URL, Date, Promise, matchMedia, crypto: webcrypto, atob });
-  for (const f of ["control.js", "background.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "..", f), "utf8"), ctx, { filename: f });
+  for (const f of ["control.js", "devtools.js", "background.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "..", f), "utf8"), ctx, { filename: f });
   await wait(20);
   const replies = () => browser.native.sent.filter((m) => m.result);
   let n = 0;
@@ -1769,4 +1782,80 @@ test("the cursor animates only in the tab the user is looking at", async () => {
   env.browser.tabsMap.get(2).active = true;
   await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] });
   assert.equal(env.calls.findLast((c) => c.op === "click").args.animate, true);
+});
+
+// ---- devtools ---------------------------------------------------------------------------------
+
+test("devtools: only tabs of sessions whose MCP server lists the tool are captured, across navigations, until the tab closes", async () => {
+  const { browser, callTool, host } = await load();
+  const plainClient = { id: 1, name: "claude-code" };
+  const devClient = { id: 2, name: "claude-code" };
+  await host({ type: "client", event: "connected", client: plainClient });
+  await host({ type: "client", event: "connected", client: { ...devClient, devtools: true } });
+  const created = async (session, client) => Number((await callTool("tabs_create_mcp", {}, session, client)).result.content[0].text.match(/Created tab (\d+)/)[1]);
+  const listening = () => browser.webRequest.onBeforeRequest.listeners.length;
+
+  // Without the tool, nothing is watched or listened to.
+  const plainTab = await created("plain", plainClient);
+  await wait(80);
+  assert.equal(browser.consoleWatched, undefined);
+  assert.equal(listening(), 0);
+
+  const tab = await created("dev", devClient);
+  assert.deepEqual(plain(browser.consoleWatched), [tab], "watched before tabs_create_mcp answers");
+  assert.deepEqual(plain(browser.consoleRules.always), ["password", "cc-*", "one-time-code", "new-password", "current-password"]);
+  assert.equal(listening(), 1);
+
+  // Requests and console messages from the watched tab are kept; the user's tab and the other
+  // session's tab are ignored.
+  const request = (tabId, requestId, url, statusCode = 200) => {
+    browser.webRequest.onBeforeRequest.fire({ requestId, tabId, url, method: "GET", type: "xmlhttprequest", timeStamp: 1000 });
+    browser.webRequest.onCompleted.fire({ requestId, tabId, statusCode, responseSize: 2048, timeStamp: 1050 });
+  };
+  request(tab, "r1", "https://a.example/api?token=abc", 500);
+  request(1, "r2", "https://user.example/private");
+  request(plainTab, "r3", "https://b.example/");
+  browser.tabsMap.get(tab).url = "https://a.example/next";
+  request(tab, "r4", "https://a.example/next");
+  await browser.claudePage.onConsole.fire(tab, { entries: [{ level: "error", text: "Uncaught Error: boom", source: "https://a.example/app.js", line: 3, time: 1000 }], dropped: 0 });
+  await browser.claudePage.onConsole.fire(1, { entries: [{ level: "log", text: "the user's tab", time: 1000 }], dropped: 0 });
+
+  const net = (await callTool("devtools", { kind: "network", tabId: tab }, "dev", devClient)).result.content[0].text.split("\n");
+  assert.equal(net[0], `Tab ${tab} network: 2 requests. Newest last.`);
+  assert.match(net[1], /GET 500 xhr 2\.0kB 50ms https:\/\/a\.example\/api\?token=\[redacted\]$/);
+  assert.match(net[2], /GET 200 xhr 2\.0kB 50ms https:\/\/a\.example\/next$/);
+  const failed = (await callTool("devtools", { kind: "network", tabId: tab, onlyFailed: true }, "dev", devClient)).result.content[0].text;
+  assert.match(failed, /^Tab \d+ network: 1 request; 1 of 2 kept didn't match failed only\./);
+  const con = (await callTool("devtools", { kind: "console", tabId: tab, clear: true }, "dev", devClient)).result.content[0].text.split("\n");
+  assert.equal(con.length, 2);
+  assert.match(con[1], / error Uncaught Error: boom \(https:\/\/a\.example\/app\.js:3\)$/);
+  assert.equal((await callTool("devtools", { kind: "console", tabId: tab }, "dev", devClient)).result.content[0].text, `Tab ${tab} console: 0 messages.`);
+
+  // The other session can't read its tab: the tool is off for it. Nor can it read this session's.
+  const off = (await callTool("devtools", { kind: "console", tabId: plainTab }, "plain", plainClient)).result;
+  assert.equal(off.isError, true);
+  assert.match(off.content[0].text, /devtools tool is off for this session/);
+  assert.match((await callTool("devtools", { kind: "console", tabId: tab }, "plain", plainClient)).result.content[0].text, /not in this session's tab group/);
+
+  // Closing the tab drops its buffers and stops capture; with no tabs left, the listeners go.
+  await callTool("tabs_close_mcp", { tabId: tab }, "dev", devClient);
+  await browser.tabs.onRemoved.fire(tab);
+  await wait(120);
+  assert.deepEqual(plain(browser.consoleWatched), []);
+  assert.equal(listening(), 0);
+});
+
+test("devtools: a tab the session already had is watched before its first call, and a disconnect stops capture", async () => {
+  const { browser, callTool, host } = await load();
+  const devClient = { id: 2, name: "claude-code" };
+  await host({ type: "client", event: "connected", client: { ...devClient, devtools: true } });
+  // The session's group exists before its devtools client calls (a chat's adopted tab).
+  const tab = Number((await callTool("tabs_create_mcp", {}, "dev", { id: 3, name: "claude-code" })).result.content[0].text.match(/Created tab (\d+)/)[1]);
+  assert.equal(browser.consoleWatched, undefined);
+  await callTool("get_page_text", { tabId: tab }, "dev", devClient);
+  assert.deepEqual(plain(browser.consoleWatched), [tab]);
+  await host({ type: "client", event: "disconnected", client: { id: 2 } });
+  await wait(20);
+  assert.deepEqual(plain(browser.consoleWatched), []);
+  assert.equal(browser.webRequest.onBeforeRequest.listeners.length, 0);
 });

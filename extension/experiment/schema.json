@@ -150,6 +150,27 @@
             "description": "The redaction rules; fields they mask are recorded without their values."
           }
         ]
+      },
+      {
+        "name": "devtoolsWatch",
+        "type": "function",
+        "async": true,
+        "description": "Capture console messages and script errors in every frame of these tabs, and in documents that load in them later, and stop in every other tab. Batches arrive on onConsole.",
+        "parameters": [
+          {
+            "name": "tabIds",
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "redact",
+            "type": "any",
+            "optional": true,
+            "description": "The redaction rules; values of fields they mask are cut out of messages."
+          }
+        ]
       }
     ],
     "events": [
@@ -179,6 +200,21 @@
           },
           {
             "name": "step",
+            "type": "any"
+          }
+        ]
+      },
+      {
+        "name": "onConsole",
+        "type": "function",
+        "description": "Console messages from a frame of a watched tab: {entries: [{level, text, source, line, time}], dropped}.",
+        "parameters": [
+          {
+            "name": "tabId",
+            "type": "integer"
+          },
+          {
+            "name": "batch",
             "type": "any"
           }
         ]

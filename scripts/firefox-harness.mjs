@@ -52,6 +52,7 @@ export async function createHarness({ prefix, firefoxBin }) {
   const env = { ...process.env, HOME, XDG_CONFIG_HOME: path.join(HOME, ".config") };
   delete env.MOZ_HEADLESS;
   delete env.CODEX_HOME;
+  delete env.FIREFOX_BRIDGE_DEVTOOLS; // clients get the default tools unless a test asks
   const MN_PORT = await freePort();
   const children = [];
   const servers = [];
@@ -161,7 +162,7 @@ export async function createHarness({ prefix, firefoxBin }) {
       }, 30_000, 500);
     },
 
-    mcpClient: (name) => mcpClient(name, env, children),
+    mcpClient: (name, extraEnv = {}) => mcpClient(name, { ...env, ...extraEnv }, children),
     marionette: () => marionette(MN_PORT),
 
     async cleanup() {

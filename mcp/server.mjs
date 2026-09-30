@@ -192,6 +192,31 @@ const TOOLS = [
   },
 ];
 
+// devtools is opt-in: listed only with FIREFOX_BRIDGE_DEVTOOLS=1, since every tool definition is
+// sent to the model on every turn. The hello tells Firefox to capture this session's tabs.
+const DEVTOOLS = process.env.FIREFOX_BRIDGE_DEVTOOLS === "1";
+if (DEVTOOLS) {
+  TOOLS.push({
+    name: "devtools",
+    // Kept short: under 600 characters of JSON (host/test/mcp-devtools.test.mjs checks).
+    description:
+      "A tab's console messages or network requests, kept from page load on, across navigations. level is a minimum. onlyFailed: errors and 4xx/5xx. limit: newest N (50). clear: empty after reading.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["console", "network"] },
+        tabId: { type: "number" },
+        pattern: { type: "string", description: "Regex on text or URL." },
+        level: { type: "string", enum: ["error", "warning", "info", "log"] },
+        onlyFailed: { type: "boolean" },
+        limit: { type: "number" },
+        clear: { type: "boolean" },
+      },
+      required: ["kind"],
+    },
+  });
+}
+
 const REPLAY_TIMEOUT_MS = 600_000;
 const MAX_REPLAY_BYTES = 1_000_000;
 
@@ -258,7 +283,7 @@ function connectBridge() {
     socket.setEncoding("utf8");
     socket.once("connect", () => {
       // Identifies this client to Firefox; sent first on every connection, reconnects included.
-      socket.write(JSON.stringify({ type: "hello", client: clientInfo, pid: process.pid, cwd: process.cwd() }) + "\n");
+      socket.write(JSON.stringify({ type: "hello", client: clientInfo, pid: process.pid, cwd: process.cwd(), ...(DEVTOOLS ? { devtools: true } : {}) }) + "\n");
       resolve(socket);
     });
     socket.on("data", (chunk) => {

@@ -14,6 +14,7 @@
 #   --no-clients       only install into Firefox; register no MCP client
 # With no client flags, registers with Claude Code only. Safe to re-run.
 # The host launcher also records where claude and codex are (CLAUDE_BIN / CODEX_BIN override).
+# FIREFOX_BRIDGE_DEVTOOLS=1 in the environment gives the sidebar chat the opt-in devtools tool.
 # Quit Firefox Developer Edition first; prefs are read at startup.
 set -e
 
@@ -22,7 +23,7 @@ EXT_ID="firefox-agent-bridge@local"
 HOST_NAME="firefox_agent_bridge"
 SERVER="$REPO/mcp/server.mjs"
 
-usage() { sed -n '8,16p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '8,17p' "$0" | sed 's/^# \{0,1\}//'; }
 die() { echo "$*" >&2; exit 1; }
 
 FIREFOX=1 CLIENTS=1 CLAUDE_CODE='' CODEX='' DESKTOP='' ALL='' PROFILE=''
@@ -134,6 +135,8 @@ Pass the profile dir (about:profiles shows it)."
     echo '#!/bin/sh'
     [ -z "$CLAUDE_PATH" ] || printf 'export CLAUDE_BIN="%s"\n' "$CLAUDE_PATH"
     [ -z "$CODEX_PATH" ] || printf 'export CODEX_BIN="%s"\n' "$CODEX_PATH"
+    # The sidebar chat gets the opt-in devtools tool only when the host has this set.
+    [ "${FIREFOX_BRIDGE_DEVTOOLS:-}" != "1" ] || echo 'export FIREFOX_BRIDGE_DEVTOOLS=1'
     printf 'exec "%s" "%s/host/host.mjs" "$@"\n' "$NODE" "$REPO"
   } > "$LAUNCHER"
   chmod +x "$LAUNCHER"

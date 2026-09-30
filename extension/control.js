@@ -51,6 +51,9 @@ function summarizeArgs(tool, args) {
     case "file_upload":
       out.detail = `${Array.isArray(args.paths) ? args.paths.length : 0} file(s)`;
       break;
+    case "devtools":
+      out.action = args.kind === "console" || args.kind === "network" ? args.kind : null;
+      break;
     case "replay_steps":
       out.detail = `${Array.isArray(args.replay?.steps) ? args.replay.steps.length : 0} step(s), ${inputValues(args).length} input(s)`;
       break;

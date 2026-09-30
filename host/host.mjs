@@ -97,8 +97,10 @@ function announce(clientId, client, hello) {
     cwd: typeof hello.cwd === "string" ? hello.cwd : null,
   };
   const { name, version, pid, cwd } = client.info;
-  log(`client ${clientId} connected: ${name}${version ? ` ${version}` : ""} pid=${pid} cwd=${cwd}`);
-  send({ type: "client", event: "connected", client: { id: clientId, ...client.info } });
+  // A server that lists the devtools tool says so, and the extension captures its session's tabs.
+  const devtools = hello.devtools === true;
+  log(`client ${clientId} connected: ${name}${version ? ` ${version}` : ""} pid=${pid} cwd=${cwd}${devtools ? " devtools" : ""}`);
+  send({ type: "client", event: "connected", client: { id: clientId, ...client.info, ...(devtools ? { devtools } : {}) } });
 }
 
 try {

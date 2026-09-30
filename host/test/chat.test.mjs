@@ -109,6 +109,21 @@ test("claude: a turn streams text and pins the chat's session, model, effort and
   }
 });
 
+test("the devtools tool is on for chats only when the host runs with FIREFOX_BRIDGE_DEVTOOLS=1", async () => {
+  for (const [value, want] of [[undefined, "0"], ["true", "0"], ["1", "1"]]) {
+    const t = setup({ env: { FIREFOX_BRIDGE_DEVTOOLS: value } });
+    try {
+      await t.turn(newId(), "hello");
+      await t.turn(newId(), "hello", { engine: "codex", model: "gpt-5.5", effort: "medium" });
+      const [claude, codex] = t.runs();
+      assert.equal(JSON.parse(flagValue(claude.argv, "--mcp-config")).mcpServers.firefox.env.FIREFOX_BRIDGE_DEVTOOLS, want);
+      assert.ok(codex.argv.find((a) => a.startsWith("mcp_servers.firefox=")).includes(`FIREFOX_BRIDGE_DEVTOOLS="${want}"`));
+    } finally {
+      t.done();
+    }
+  }
+});
+
 test("claude: a Teach recording sent to draft a skill is titled New skill", async () => {
   const t = setup();
   try {
