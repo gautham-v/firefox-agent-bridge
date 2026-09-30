@@ -5,6 +5,7 @@
 // only.
 //
 //   node eval/report.mjs [--runs eval/results/runs.jsonl] [--compare eval/results/browsers.jsonl]
+//                        [--after eval/results/browsers-after.jsonl] [--devtools eval/results/browsers-devtools.jsonl]
 //                        [--out eval/results/report.md]
 
 import fs from "node:fs";
@@ -321,6 +322,153 @@ function browserSection(rs) {
 }
 
 if (compareRows.length) out.push(browserSection(compareRows));
+
+// ---- re-measure after restart, and devtools on vs off ---------------------------------------
+
+const traceOf = (r) => {
+  const f = r.trace_file && path.join(EVAL, r.trace_file);
+  return f && fs.existsSync(f) ? readJsonl(f) : [];
+};
+const kbOf = (r) => Object.values(r.tool_stats_by_tool ?? {}).reduce((s, x) => s + x.result_bytes, 0) / 1024;
+const RUN_METRICS = [
+  ["wall time (s)", (r) => r.wall_ms / 1000, (v) => fmt(v, 1)],
+  ["tool calls", (r) => r.tool_calls, (v) => fmt(v)],
+  ["screenshot/zoom actions", (r) => r.screenshot_actions ?? r.screenshots, (v) => fmt(v)],
+  ["turns", (r) => r.turns, (v) => fmt(v)],
+  ["input tokens (incl. cache)", inputTokens, k],
+  ["uncached input tokens", uncachedTokens, k],
+  ["output tokens", outputTokens, k],
+  ["tool result KB (text + images)", kbOf, (v) => fmt(v, 1)],
+  ["cost (USD)", (r) => r.cost_usd, (v) => fmt(v, 3)],
+];
+const sum = (xs) => xs.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0);
+
+// Columns: [label, rows]. Overall medians, then per task "wall s / calls / input tok", then the
+// per-call facts the restart was meant to move.
+function compareSets(cols, { ratioOf, taskIds }) {
+  const lines = [];
+  lines.push(`| metric | ${cols.map(([l]) => l).join(" | ")} | ${ratioOf ? `${cols[ratioOf[0]][0]} / ${cols[ratioOf[1]][0]} (medians)` : ""} |`, `| --- | ${cols.map(() => "---").join(" | ")} | --- |`);
+  lines.push(`| runs | ${cols.map(([, rs]) => rs.length).join(" | ")} | |`);
+  lines.push(`| success | ${cols.map(([, rs]) => pct(rs.filter((r) => r.pass).length, rs.length)).join(" | ")} | |`);
+  for (const [name, fn, f] of RUN_METRICS) {
+    const r = ratioOf ? ratio(median(cols[ratioOf[0]][1].map(fn)), median(cols[ratioOf[1]][1].map(fn))) : "";
+    lines.push(`| ${name} | ${cols.map(([, rs]) => spread(rs.map(fn), f)).join(" | ")} | ${r} |`);
+  }
+  lines.push(`| total wall time, all runs (min) | ${cols.map(([, rs]) => fmt(sum(rs.map((r) => r.wall_ms)) / 60000, 1)).join(" | ")} | |`);
+  lines.push(`| total tool calls, all runs | ${cols.map(([, rs]) => sum(rs.map((r) => r.tool_calls))).join(" | ")} | |`);
+  lines.push(`| total cost, all runs (USD) | ${cols.map(([, rs]) => fmt(sum(rs.map((r) => r.cost_usd)), 2)).join(" | ")} | |`);
+  lines.push("", "Median [min–max] per run.", "");
+  lines.push("Per task: median wall s / tool calls / input tokens, and success.", "");
+  lines.push(`| task | ${cols.map(([l]) => l).join(" | ")} |`, `| --- | ${cols.map(() => "---").join(" | ")} |`);
+  for (const id of taskIds) {
+    const cell = (rs) => {
+      const x = rs.filter((r) => r.task === id);
+      return x.length ? `${fmt(median(x.map((r) => r.wall_ms / 1000)), 1)}s / ${fmt(median(x.map((r) => r.tool_calls)))} / ${k(median(x.map(inputTokens)))} (${x.filter((r) => r.pass).length}/${x.length})` : "–";
+    };
+    lines.push(`| ${id} | ${cols.map(([, rs]) => cell(rs)).join(" | ")} |`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+// Facts from the per-call traces: click time, find size, pres-shell errors, tools not offered.
+function callFacts(cols) {
+  const lines = [];
+  const facts = cols.map(([l, rs]) => {
+    const calls = rs.flatMap(traceOf);
+    const clicks = calls.filter((c) => c.short === "computer" && c.action === "left_click").map((c) => c.ms);
+    const finds = calls.filter((c) => c.short === "find").map((c) => c.text_bytes);
+    const scrolls = calls.filter((c) => c.short === "computer" && c.action === "scroll");
+    // Older traces have no result text; their rows keep up to 5 error texts per run.
+    const nsTrace = calls.filter((c) => /NS_ERROR_UNEXPECTED/.test(c.text_head ?? "")).length;
+    const nsRows = sum(rs.map((r) => (r.error_samples ?? []).filter((e) => /NS_ERROR_UNEXPECTED/.test(e)).length));
+    const hasHeads = calls.some((c) => "text_head" in c);
+    const notOffered = {};
+    for (const r of rs)
+      for (const [t, n] of Object.entries(r.tool_calls_by_tool ?? {}))
+        if (r.tools_available && !r.tools_available.includes(t) && t !== "Agent") notOffered[shortTool(t)] = (notOffered[shortTool(t)] ?? 0) + n;
+    const byTool = {};
+    for (const c of calls) (byTool[c.short] ??= []).push(c);
+    return { l, rs, clicks, finds, scrolls, ns: hasHeads ? String(nsTrace) : `≥${nsRows}`, notOffered, byTool, errors: calls.filter((c) => c.is_error).length };
+  });
+  lines.push(`| per call | ${facts.map((f) => f.l).join(" | ")} |`, `| --- | ${facts.map(() => "---").join(" | ")} |`);
+  lines.push(`| computer left_click ms, median [min–max] | ${facts.map((f) => `${spread(f.clicks)} (${f.clicks.length} clicks)`).join(" | ")} |`);
+  lines.push(`| find result bytes, median [min–max] | ${facts.map((f) => `${spread(f.finds)} (${f.finds.length} calls)`).join(" | ")} |`);
+  lines.push(`| computer scroll actions (errors) | ${facts.map((f) => `${f.scrolls.length} (${f.scrolls.filter((c) => c.is_error).length})`).join(" | ")} |`);
+  // Traces from before msg_calls existed can't tell a call issued alone from one queued behind a
+  // navigate in the same message.
+  const alone = (f, tool) => {
+    const cs = (f.byTool[tool] ?? []).filter((c) => c.msg_calls === 1);
+    return (f.byTool[tool] ?? []).some((c) => "msg_calls" in c) ? `${cs.length ? fmt(sum(cs.map((c) => c.ms)) / cs.length) : "–"} (${cs.length} of ${f.byTool[tool].length})` : "not recorded";
+  };
+  lines.push(`| get_page_text mean ms, issued alone | ${facts.map((f) => alone(f, "get_page_text")).join(" | ")} |`);
+  lines.push(`| find mean ms, issued alone | ${facts.map((f) => alone(f, "find")).join(" | ")} |`);
+  lines.push(`| NS_ERROR_UNEXPECTED results | ${facts.map((f) => f.ns).join(" | ")} |`);
+  lines.push(`| tool errors, all calls | ${facts.map((f) => f.errors).join(" | ")} |`);
+  lines.push(`| calls to tools not offered | ${facts.map((f) => Object.entries(f.notOffered).map(([t, n]) => `${t} ${n}`).join(", ") || "0").join(" | ")} |`);
+  lines.push("", "NS_ERROR_UNEXPECTED: a count from the traces' result text where the trace has it; \"≥n\" counts the error samples a row keeps (at most 5 per run), so it's a lower bound.", "");
+  const tools = [...new Set(facts.flatMap((f) => Object.keys(f.byTool)))].sort((a, b) => sum(facts.map((f) => f.byTool[b]?.length ?? 0)) - sum(facts.map((f) => f.byTool[a]?.length ?? 0)));
+  lines.push("By tool: calls per run, and mean ms per call. A call issued in the same message as a navigate waits for it, so its ms includes the page load; the after runs did that more often (navigate then get_page_text or find in one turn), which is why those two look slower per call here and not in the issued-alone rows above.", "");
+  lines.push(`| tool | ${facts.map((f) => `${f.l} calls`).join(" | ")} | ${facts.map((f) => `${f.l} ms`).join(" | ")} |`, `| --- | ${facts.map(() => "---").join(" | ")} | ${facts.map(() => "---").join(" | ")} |`);
+  for (const t of tools)
+    lines.push(`| ${t} | ${facts.map((f) => fmt((f.byTool[t]?.length ?? 0) / f.rs.length, 2)).join(" | ")} | ${facts.map((f) => (f.byTool[t] ? fmt(sum(f.byTool[t].map((c) => c.ms)) / f.byTool[t].length) : "–")).join(" | ")} |`);
+  lines.push("");
+  return lines.join("\n");
+}
+
+const AFTER = opt("after", path.join(EVAL, "results/browsers-after.jsonl"));
+const DEVTOOLS = opt("devtools", path.join(EVAL, "results/browsers-devtools.jsonl"));
+const afterRows = readJsonl(AFTER).filter((r) => browserOf(r) === "firefox" && r.arm === "baseline");
+const devtoolsRows = readJsonl(DEVTOOLS).filter((r) => browserOf(r) === "firefox" && r.arm === "baseline");
+const beforeRows = compareRows.filter((r) => browserOf(r) === "firefox" && r.arm === "baseline");
+const chromeRows = compareRows.filter((r) => browserOf(r) === "chrome" && r.arm === "baseline");
+
+if (afterRows.length) {
+  const ids = TASKS.map((t) => t.id).filter((id) => afterRows.some((r) => r.task === id));
+  const cols = [["firefox before", beforeRows.filter((r) => ids.includes(r.task))], ["firefox after", afterRows], ["chrome", chromeRows.filter((r) => ids.includes(r.task))]];
+  out.push("## Re-measure after restart: Firefox before, Firefox after, Chrome (baseline arm)", "");
+  out.push(
+    `Sources: Firefox before and Chrome are the rows in \`${path.relative(EVAL, COMPARE)}\`; Firefox after is \`${path.relative(EVAL, AFTER)}\`, the same ${ids.length} tasks, model and prompt, run again once Firefox had loaded main's extension (frames in find/read_page, keys follow the clicked frame, input fallback, click floor, trimmed find, occluded-window fix). The after runs also have everything else that landed on the MCP server since the first run: the batch tool, multi-field form_input, the tabId fill-in and the fetch hint in javascript_tool. Chrome's extension didn't change, so it wasn't run again.`,
+    "",
+    compareSets(cols, { ratioOf: [1, 0], taskIds: ids }),
+    "### Per call",
+    "",
+    callFacts(cols),
+  );
+  const mdn = (rs) => rs.filter((r) => r.task === "gen-mdn-iframe");
+  const [b, a] = [mdn(cols[0][1]), mdn(cols[1][1])];
+  if (a.length) {
+    const toolsUsed = (rs) => {
+      const o = {};
+      for (const r of rs) for (const [t, n] of Object.entries(r.tool_calls_by_tool ?? {})) o[shortTool(t)] = (o[shortTool(t)] ?? 0) + n;
+      return Object.entries(o).sort((x, y) => y[1] - x[1]).map(([t, n]) => `${t} ${n}`).join(", ");
+    };
+    const frameRefs = (rs) => rs.filter((r) => traceOf(r).some((c) => c.short === "form_input" && /@f\d+/.test(c.args) && !c.is_error)).length;
+    out.push("### gen-mdn-iframe", "", "| | firefox before | firefox after |", "| --- | --- | --- |");
+    out.push(`| wall s | ${spread(b.map((r) => r.wall_ms / 1000), (v) => fmt(v, 1))} | ${spread(a.map((r) => r.wall_ms / 1000), (v) => fmt(v, 1))} |`);
+    out.push(`| tool calls | ${spread(b.map((r) => r.tool_calls))} | ${spread(a.map((r) => r.tool_calls))} |`);
+    out.push(`| input tokens | ${spread(b.map(inputTokens), k)} | ${spread(a.map(inputTokens), k)} |`);
+    out.push(`| runs that set the select through a frame ref (form_input ref_N@fM) | ${frameRefs(b)}/${b.length} | ${frameRefs(a)}/${a.length} |`);
+    out.push(`| runs that used javascript_tool | ${b.filter((r) => r.tool_calls_by_tool?.mcp__firefox__javascript_tool).length}/${b.length} | ${a.filter((r) => r.tool_calls_by_tool?.mcp__firefox__javascript_tool).length}/${a.length} |`);
+    out.push(`| tools, all runs | ${toolsUsed(b)} | ${toolsUsed(a)} |`, "");
+  }
+}
+
+if (devtoolsRows.length) {
+  const ids = TASKS.map((t) => t.id).filter((id) => devtoolsRows.some((r) => r.task === id));
+  const off = afterRows.filter((r) => ids.includes(r.task));
+  const cols = [["devtools off", off], ["devtools on", devtoolsRows]];
+  const dtCalls = sum(devtoolsRows.map((r) => r.tool_calls_by_tool?.mcp__firefox__devtools ?? 0));
+  out.push("## devtools on vs off (Firefox, baseline arm)", "");
+  out.push(
+    `Sources: off is \`${path.relative(EVAL, AFTER)}\`; on is \`${path.relative(EVAL, DEVTOOLS)}\`, the same tasks with the MCP server started with FIREFOX_BRIDGE_DEVTOOLS=1 (\`run.mjs --devtools\`), run right after. With it on, the model is offered one more tool (devtools) and the extension keeps each session tab's console and network log from page load. The model called devtools ${dtCalls} time(s) in ${devtoolsRows.length} runs.`,
+    "",
+    compareSets(cols, { ratioOf: [1, 0], taskIds: ids }),
+    "### Per call",
+    "",
+    callFacts(cols),
+  );
+}
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, out.join("\n"));

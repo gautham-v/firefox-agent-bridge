@@ -88,6 +88,7 @@ export function toolTrace(timed) {
           batch_actions: Array.isArray(b.input?.actions) ? b.input.actions.length : null,
           screenshot_actions: screenshotActions(b.name, b.input),
           subagent: !!e.parent_tool_use_id,
+          msg: e.message?.id ?? null,
           t_use: t,
           t_result: null,
           ms: null,
@@ -115,14 +116,22 @@ export function toolTrace(timed) {
             c.images.push(d ? `${d.w}x${d.h}` : "?");
             c.image_bytes += Math.floor((String(data).length * 3) / 4);
             c.image_tokens_est = (c.image_tokens_est ?? 0) + imageTokens(d);
-          } else c.text_bytes += Buffer.byteLength(x.text ?? "", "utf8");
+          } else {
+            c.text_bytes += Buffer.byteLength(x.text ?? "", "utf8");
+            // The start of the text, so errors and result shapes can be read from the trace.
+            if (!c.text_head) c.text_head = String(x.text ?? "").slice(0, 300);
+          }
         }
         c.result_bytes = c.text_bytes + c.image_bytes;
         c.tokens_est = textTokens(c.text_bytes) + (c.image_tokens_est ?? 0);
       }
     }
   }
-  return order.map(({ t_use, t_result, ...c }) => c);
+  // Calls issued in the same assistant message run back to back, so a call's ms can include
+  // waiting for the one before it (a navigate, say); msg_calls says how many shared its message.
+  const perMsg = {};
+  for (const c of order) if (c.msg) perMsg[c.msg] = (perMsg[c.msg] ?? 0) + 1;
+  return order.map(({ t_use, t_result, msg, ...c }) => ({ ...c, msg_calls: msg ? perMsg[msg] : 1 }));
 }
 
 // Per-tool totals for the results row.
