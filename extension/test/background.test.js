@@ -85,12 +85,16 @@ function mockBrowser({ store = {}, groups: initialGroups = [], noIcons = false, 
         if (!tabs.has(id)) throw new Error("no tab");
         return { ...tabs.get(id) };
       },
-      create: async ({ url, windowId }) => {
+      create: async ({ url, windowId, active = true }) => {
         const t = { id: nextTab++, windowId, groupId: -1, active: false, url, status: "complete", title: "" };
         tabs.set(t.id, t);
+        if (active) b.select(t.id);
         return { ...t };
       },
-      update: async (id, props) => Object.assign(tabs.get(id), props),
+      update: async (id, props) => {
+        if (props.active) b.select(id);
+        return Object.assign(tabs.get(id), props);
+      },
       group: async ({ tabIds, groupId, createProperties }) => {
         const gid = groupId ?? nextGroup++;
         if (!groups.has(gid)) groups.set(gid, { id: gid, windowId: createProperties?.windowId, title: "" });
@@ -152,6 +156,12 @@ function mockBrowser({ store = {}, groups: initialGroups = [], noIcons = false, 
       setBadgeBackgroundColor: () => {},
     },
     commands: { onCommand: event() },
+    // One active tab per window, as in Firefox; tabs.create defaults to active like the real API.
+    select(id) {
+      const t = tabs.get(id);
+      for (const o of tabs.values()) if (o.windowId === t.windowId) o.active = false;
+      t.active = true;
+    },
   };
   return b;
 }
@@ -2266,4 +2276,64 @@ test("devtools: a tab the session already had is watched before its first call, 
   await wait(20);
   assert.deepEqual(plain(browser.consoleWatched), []);
   assert.equal(browser.webRequest.onBeforeRequest.listeners.length, 0);
+});
+
+// ---- show tabs (demo-only) ----------------------------------------------------------------------
+
+test("show tabs: a session whose MCP server asks opens its tabs in front and keeps the one it acts on selected", async () => {
+  const { browser, callTool, host } = await load();
+  const plainClient = { id: 1, name: "claude-code" };
+  const showClient = { id: 2, name: "claude-code" };
+  await host({ type: "client", event: "connected", client: plainClient });
+  await host({ type: "client", event: "connected", client: { ...showClient, showTabs: true } });
+  const active = () => [...browser.tabsMap.values()].filter((t) => t.active).map((t) => t.id);
+  const createdIn = (r) => Number(r.result.content[0].text.match(/Created tab (\d+)/)[1]);
+
+  // Everyone else: background tabs, the user's tab stays selected, no window is raised.
+  const bg = createdIn(await callTool("tabs_create_mcp", {}, "plain", plainClient));
+  await callTool("navigate", { url: "https://a.example/", tabId: bg }, "plain", plainClient);
+  assert.deepEqual(active(), [1]);
+  assert.equal(browser.action.focused, undefined);
+
+  // tabs_create_mcp: active in the focused window, and the window is raised.
+  const shown = createdIn(await callTool("tabs_create_mcp", {}, "show", showClient));
+  assert.deepEqual(active(), [shown]);
+  assert.deepEqual(plain(browser.action.focused), { id: 10, focused: true });
+
+  // The user (or anything else) selects another tab; the next call in the tab brings it back.
+  await browser.tabs.update(1, { active: true });
+  await browser.tabs.onActivated.fire({ tabId: 1, previousTabId: shown, windowId: 10 });
+  await callTool("navigate", { url: "https://b.example/", tabId: shown }, "show", showClient);
+  assert.deepEqual(active(), [shown]);
+
+  // A tab its page opens stays in front instead of handing focus back.
+  const t = { id: 50, windowId: 10, groupId: -1, active: false, openerTabId: shown, url: "https://c.example/", status: "complete", title: "c" };
+  browser.tabsMap.set(50, t);
+  browser.select(50);
+  await browser.tabs.onCreated.fire({ ...t, active: true });
+  await browser.tabs.onActivated.fire({ tabId: 50, previousTabId: shown, windowId: 10 });
+  await wait(20);
+  assert.deepEqual(active(), [50]);
+  assert.equal(browser.tabsMap.get(50).groupId, browser.tabsMap.get(shown).groupId);
+});
+
+test("show tabs: navigate without a tab and tabs_context_mcp createIfEmpty open the first tab in front; a disconnect ends it", async () => {
+  const { browser, callTool, host } = await load();
+  const showClient = { id: 2, name: "claude-code" };
+  await host({ type: "client", event: "connected", client: { ...showClient, showTabs: true } });
+  const active = () => [...browser.tabsMap.values()].filter((t) => t.active).map((t) => t.id);
+
+  const nav = (await callTool("navigate", { url: "https://a.example/" }, "s-nav", showClient)).result.content[0].text;
+  const navTab = Number(nav.match(/^Tab (\d+)/)[1]);
+  assert.deepEqual(active(), [navTab]);
+
+  const ctx = (await callTool("tabs_context_mcp", { createIfEmpty: true }, "s-ctx", showClient)).result.content[0].text;
+  const ctxTab = Number(ctx.match(/Created tab (\d+)/)[1]);
+  assert.deepEqual(active(), [ctxTab]);
+
+  // Once its client is gone the session is an ordinary one again: new tabs open in the background.
+  await host({ type: "client", event: "disconnected", client: { id: 2 } });
+  await browser.tabs.update(1, { active: true });
+  await callTool("tabs_create_mcp", {}, "s-ctx", { id: 3, name: "claude-code" });
+  assert.deepEqual(active(), [1]);
 });

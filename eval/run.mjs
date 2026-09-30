@@ -28,11 +28,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ARM_PROMPTS, ARM_TOOLS } from "./arms.mjs";
+import { ARM_TOOLS } from "./arms.mjs";
 import { lastJson } from "./lib/check.mjs";
+import { browserClaudeArgs, firefoxMcpConfig } from "./lib/claude-args.mjs";
 import { armEnv, fileSafe, parseArms } from "./lib/experiments.mjs";
 import { screenshotActions, toolTrace, traceTotals } from "./lib/trace.mjs";
-import { TASKS, promptFor } from "./tasks.mjs";
+import { TASKS } from "./tasks.mjs";
 
 const EVAL = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(EVAL);
@@ -130,10 +131,7 @@ const mcpConfigs = new Map();
 EXPERIMENT_ARMS.forEach((x, i) => {
   const file = path.join(TMP, i ? `mcp-${i}.json` : "mcp.json");
   const env = { ...(DEVTOOLS ? { FIREFOX_BRIDGE_DEVTOOLS: "1" } : {}), ...armEnv(x) };
-  fs.writeFileSync(
-    file,
-    JSON.stringify({ mcpServers: { firefox: { type: "stdio", command: process.execPath, args: [path.join(ROOT, "mcp/server.mjs")], ...(Object.keys(env).length ? { env } : {}) } } }, null, 2),
-  );
+  fs.writeFileSync(file, JSON.stringify(firefoxMcpConfig(path.join(ROOT, "mcp/server.mjs"), env), null, 2));
   mcpConfigs.set(x.label, file);
 });
 // Chrome runs: no MCP servers from config, so the Firefox tools aren't offered; --chrome adds
@@ -146,35 +144,11 @@ const STRIP_ENV = [
   "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
   "CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
   "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_EXECPATH", "CLAUDE_PID", "CLAUDE_EFFORT", "AI_AGENT",
-  "FIREFOX_AGENT_BRIDGE_SESSION", "FIREFOX_BRIDGE_DEVTOOLS", "FIREFOX_BRIDGE_EXPERIMENTS",
+  "FIREFOX_AGENT_BRIDGE_SESSION", "FIREFOX_BRIDGE_DEVTOOLS", "FIREFOX_BRIDGE_EXPERIMENTS", "FIREFOX_BRIDGE_SHOW_TABS",
 ];
 
 export function claudeArgs(task, arm, browser = "firefox", mcpConfig = mcpConfigs.get(EXPERIMENT_ARMS[0].label)) {
-  if (browser === "chrome")
-    return [
-      "-p", promptFor(task, browser),
-      "--chrome",
-      "--output-format", "stream-json", "--verbose",
-      "--model", MODEL,
-      "--strict-mcp-config", "--mcp-config", EMPTY_MCP_CONFIG,
-      "--tools", "",
-      "--allowedTools", "mcp__claude-in-chrome__*",
-      "--disallowedTools", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch",
-      "--no-session-persistence",
-    ];
-  const args = [
-    "-p", promptFor(task, browser),
-    "--output-format", "stream-json", "--verbose",
-    "--model", MODEL,
-    "--strict-mcp-config", "--mcp-config", mcpConfig,
-    "--tools", ARM_TOOLS[arm] ?? "",
-    // The sub-agent tool is listed as "Task" but its tool_use blocks are named "Agent".
-    "--allowedTools", ["mcp__firefox__*", ...(ARM_TOOLS[arm] ? [ARM_TOOLS[arm], "Agent"] : [])].join(","),
-    "--disallowedTools", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch",
-    "--no-session-persistence",
-  ];
-  if (ARM_PROMPTS[arm]) args.push("--append-system-prompt", ARM_PROMPTS[arm]);
-  return args;
+  return browserClaudeArgs({ task, arm, browser, model: MODEL, mcpConfig, emptyMcpConfig: EMPTY_MCP_CONFIG });
 }
 
 // Folds stream-json events into the per-run metrics.

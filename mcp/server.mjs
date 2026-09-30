@@ -217,6 +217,11 @@ if (DEVTOOLS) {
   });
 }
 
+// Demo-only (eval/demo, the race video): with FIREFOX_BRIDGE_SHOW_TABS=1 the hello asks Firefox to
+// open this session's tabs in front, active in the focused window, and to keep the tab it acts on
+// selected, so a screen recording shows the work. tools/list and every call are the same either way.
+const SHOW_TABS = process.env.FIREFOX_BRIDGE_SHOW_TABS === "1";
+
 // ---- experiments ----------------------------------------------------------------------------
 // Switches for A/B runs in the eval (eval/README.md, "Experiments"), so a change to what the model
 // sees can be measured without restarting Firefox. FIREFOX_BRIDGE_EXPERIMENTS is a comma-separated
@@ -304,7 +309,7 @@ function connectBridge() {
     socket.setEncoding("utf8");
     socket.once("connect", () => {
       // Identifies this client to Firefox; sent first on every connection, reconnects included.
-      socket.write(JSON.stringify({ type: "hello", client: clientInfo, pid: process.pid, cwd: process.cwd(), ...(DEVTOOLS ? { devtools: true } : {}) }) + "\n");
+      socket.write(JSON.stringify({ type: "hello", client: clientInfo, pid: process.pid, cwd: process.cwd(), ...(DEVTOOLS ? { devtools: true } : {}), ...(SHOW_TABS ? { showTabs: true } : {}) }) + "\n");
       resolve(socket);
     });
     socket.on("data", (chunk) => {

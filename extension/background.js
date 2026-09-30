@@ -51,11 +51,13 @@ function onRequest(msg) {
   if (msg.type?.startsWith("chat.") || msg.type?.startsWith("teach.")) return chatFromHost(msg);
   if (msg.type === "client") {
     devtoolsClient(msg);
+    showTabsClient(msg);
     return control.clientEvent(msg);
   }
   if (msg.type === "redact") return setRedactRules(msg.rules);
   if (msg.type !== "call") return;
   if (devtoolsClients.has(msg.client?.id)) devtoolsSessions.set(msg.session, msg.client.id);
+  if (showTabsClients.has(msg.client?.id)) showTabsSessions.set(msg.session, msg.client.id);
   control.handleCall(msg, runTool, async (tabId) => (await browser.tabs.get(tabId)).url);
 }
 
@@ -293,16 +295,19 @@ async function createSessionTab(session, client, url = "about:blank", preferWind
     await groupStarts.get(session).catch(() => {});
     groupId = await sessionGroupId(session);
   }
+  // Demo sessions (FIREFOX_BRIDGE_SHOW_TABS=1) open their tabs in front; everyone else's stay
+  // in the background.
+  const active = showTabsSessions.has(session);
   let tab;
   if (groupId != null) {
     const { windowId } = await browser.tabGroups.get(groupId);
-    tab = await browser.tabs.create({ url, active: false, windowId });
+    tab = await browser.tabs.create({ url, active, windowId });
     await browser.tabs.group({ tabIds: [tab.id], groupId });
   } else {
     // Registered before the first await, so the next call waits for this group.
     const start = (async () => {
       const windowId = preferWindowId ?? (await targetWindowId());
-      const t = await browser.tabs.create({ url, active: false, windowId });
+      const t = await browser.tabs.create({ url, active, windowId });
       await startGroup(session, client, t.id, windowId);
       return t;
     })();
@@ -319,6 +324,7 @@ async function createSessionTab(session, client, url = "about:blank", preferWind
     // not supported on this version
   }
   await keepActive(tab.id);
+  if (active) await browser.windows.update(tab.windowId, { focused: true }).catch(() => {});
   // Captured from its first page on, when the session has the devtools tool.
   await syncDevtools();
   scheduleGroupPush(session);
@@ -351,6 +357,8 @@ async function requireTab(session, tabId) {
     throw new Error(`Tab ${tabId} is not in this session's tab group${label ? ` ("${label}")` : ""}. Use tabs_create_mcp for a new tab, or drag the tab into the group.`);
   }
   await keepActive(tabId);
+  // A demo session's tab stays the one on screen while it acts in it.
+  if (showTabsSessions.has(session) && !tab.active) await browser.tabs.update(tabId, { active: true }).catch(() => {});
   return tab;
 }
 
@@ -1046,6 +1054,32 @@ async function runTool(session, tool, args, client) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Show tabs (demo-only, for screen recordings): sessions whose MCP server runs with
+// FIREFOX_BRIDGE_SHOW_TABS=1 (it says so in its hello) open their tabs active in the focused
+// window, bring the tab they act on back to the front, and keep tabs their pages open in front.
+// Every other session works in background tabs as always.
+
+const showTabsClients = new Set(); // client ids whose MCP server asked for it
+const showTabsSessions = new Map(); // session -> the client id that made its calls
+
+function showTabsClient(msg) {
+  const id = msg.client?.id;
+  if (msg.event === "connected" && msg.client?.showTabs === true) return showTabsClients.add(id);
+  if (msg.event !== "disconnected") return;
+  showTabsClients.delete(id);
+  for (const [session, clientId] of showTabsSessions) if (clientId === id) showTabsSessions.delete(session);
+}
+
+async function openedByShownSession(tabId) {
+  if (!showTabsSessions.size) return false;
+  const tab = await browser.tabs.get(tabId).catch(() => null);
+  const opener = tab?.openerTabId != null ? await browser.tabs.get(tab.openerTabId).catch(() => null) : null;
+  if (!opener) return false;
+  for (const session of showTabsSessions.keys()) if ((await sessionGroupId(session)) === opener.groupId) return true;
+  return false;
+}
+
+// ---------------------------------------------------------------------------------------------
 // devtools (opt-in): console messages and network requests of the tabs of sessions whose MCP
 // server lists the tool (it says so in its hello, with FIREFOX_BRIDGE_DEVTOOLS=1), kept per tab
 // in devtools.js from when the tab joins such a session until it closes, across navigations.
@@ -1289,6 +1323,8 @@ const justOpened = new Set();
 async function restoreUserTab(windowId, tabId) {
   const back = userTabByWindow.get(windowId);
   if (back == null || back === tabId) return;
+  // A demo session's pages keep the tabs they open in front, like its own tabs.
+  if (await openedByShownSession(tabId)) return;
   await browser.tabs.update(back, { active: true }).catch(() => {});
 }
 

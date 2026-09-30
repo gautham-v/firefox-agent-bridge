@@ -1,0 +1,171 @@
+// Pure pieces of the race video tooling (race.mjs records, compose.mjs composites), kept here so
+// they can be unit tested without a screen, a browser or ffmpeg: host/test/race-demo.test.mjs.
+
+// ---- recording side --------------------------------------------------------------------------
+
+// Cap prints NDJSON (one JSON object per line) for record/export; anything else is ignored.
+export function parseNdjson(text) {
+  const out = [];
+  for (const line of String(text ?? "").split("\n")) {
+    const s = line.trim();
+    if (!s.startsWith("{")) continue;
+    try {
+      out.push(JSON.parse(s));
+    } catch {}
+  }
+  return out;
+}
+
+// The recording id from `cap record start --detach --json` (camelCase wrapper keys).
+export function recordingIdOf(events) {
+  for (const e of events) {
+    const id = e.recordingId ?? e.recording_id ?? e.id;
+    if (typeof id === "string" && id) return id;
+  }
+  return null;
+}
+
+const OWNERS = {
+  firefox: (w) => w.bundleIdentifier === "org.mozilla.firefoxdeveloperedition" || w.ownerName === "Firefox Developer Edition",
+  chrome: (w) => w.bundleIdentifier === "com.google.Chrome" || w.ownerName === "Google Chrome",
+};
+
+// The browser window to crop to, from `cap targets windows --json`: the first (front-most) big
+// enough window of that browser whose id isn't in `exclude` (Chrome's windows from before the
+// run, so the one the run opens is found). `id` picks one window by id instead.
+export function pickWindow(windows, browser, { exclude = new Set(), id = null } = {}) {
+  const mine = (Array.isArray(windows) ? windows : []).filter((w) => OWNERS[browser]?.(w));
+  if (id != null) return mine.find((w) => String(w.id) === String(id)) ?? null;
+  return mine.find((w) => !exclude.has(String(w.id)) && w.bounds?.width >= 400 && w.bounds?.height >= 300) ?? null;
+}
+
+// Wall-clock time (ms) of the recording's first video frame, t=0 of its display video, from the
+// project's recording-logs.log ("Start gate admitted first video frame ..."). null when absent.
+export function firstFrameAt(logText) {
+  for (const line of String(logText ?? "").split("\n")) {
+    if (!/admitted first video frame/.test(line)) continue;
+    const m = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z)/.exec(line.trim());
+    if (m) return Date.parse(m[1]);
+  }
+  return null;
+}
+
+// When things happened in a run, from stream-json events stamped with the time they were read
+// ({t, e}): the first tool call, the first tabs_close_mcp (the page is about to go away), the
+// result event.
+export function runTimes(timed) {
+  let first = null;
+  let close = null;
+  let result = null;
+  for (const { t, e } of timed) {
+    if (e.type === "assistant" && !e.parent_tool_use_id) {
+      for (const b of e.message?.content ?? []) {
+        if (b.type !== "tool_use") continue;
+        if (!first) first = { at: t, tool: b.name };
+        if (close == null && /tabs_close_mcp$/.test(b.name)) close = t;
+      }
+    } else if (e.type === "result" && result == null) result = t;
+  }
+  return { first_tool_at: first?.at ?? null, first_tool: first?.tool ?? null, close_call_at: close, result_at: result };
+}
+
+// ---- compose side ----------------------------------------------------------------------------
+
+const even = (n) => Math.max(2, 2 * Math.round(n / 2));
+const evenDown = (n) => Math.max(2, 2 * Math.floor(n / 2));
+
+// The crop in video pixels for a window's logical bounds. The scale comes from the video against
+// the display's logical size (2 on a Retina display recorded at native resolution). Clamped to
+// the frame and even, as yuv420p needs.
+export function cropBox(bounds, display, video) {
+  const sx = video.width / display.width;
+  const sy = video.height / display.height;
+  let x = Math.max(0, Math.round(bounds.x * sx));
+  let y = Math.max(0, Math.round(bounds.y * sy));
+  x -= x % 2;
+  y -= y % 2;
+  const w = evenDown(Math.min(bounds.width * sx, video.width - x));
+  const h = evenDown(Math.min(bounds.height * sy, video.height - y));
+  return { x, y, w, h, sx, sy };
+}
+
+// The take to show for one browser: the median time among the passing takes (the lower middle
+// one for an even count), or among all when none passed.
+export function medianTake(sidecars) {
+  if (!sidecars.length) return null;
+  const passing = sidecars.filter((s) => s.pass);
+  const pool = (passing.length ? passing : sidecars).filter((s) => Number.isFinite(s.done_s)).sort((a, b) => a.done_s - b.done_s);
+  return pool.length ? pool[Math.floor((pool.length - 1) / 2)] : null;
+}
+
+// Seconds with one decimal, cut rather than rounded, so the running timer (which shows the
+// tenths passed) and the badge agree: 12.46 -> "12.4".
+export const tenths = (s) => (Math.floor(s * 10 + 1e-6) / 10).toFixed(1);
+
+// Where one side sits in its raw video and on the race's clock (all seconds, t=0 = the agent
+// process starting): offset into the video, the time its picture holds from, the time its
+// timer stops. hold: "close" freezes the picture at the first tabs_close_mcp call (the page as
+// the agent left it; the timer runs on to the result), "result" at the result event.
+export function sideTiming(sc, { hold = "close" } = {}) {
+  const start = sc.agent_started_at;
+  const done = (sc.result_at - start) / 1000;
+  const closeAt = sc.close_call_at != null && sc.close_call_at < sc.result_at ? (sc.close_call_at - start) / 1000 : null;
+  return {
+    offset: (start - sc.recording.video_t0_at) / 1000,
+    done,
+    holdFrom: hold === "close" && closeAt != null ? closeAt : done,
+  };
+}
+
+// Two panes scaled to one height, side by side and centered, between a header row (labels,
+// timers) and a caption row.
+export function layout(a, b, { width = 1920, height = 1080, top = 104, bottom = 72, side = 48, gap = 40 } = {}) {
+  const availH = height - top - bottom;
+  const availW = width - 2 * side - gap;
+  const h = evenDown(Math.min(availH, availW / (a.w / a.h + b.w / b.h)));
+  const wa = even((a.w * h) / a.h);
+  const wb = even((b.w * h) / b.h);
+  const x1 = evenDown((width - (wa + gap + wb)) / 2);
+  const y = evenDown(top + (availH - h) / 2);
+  return { h, y, panes: [{ x: x1, w: wa }, { x: x1 + wa + gap, w: wb }] };
+}
+
+// Header strip above each pane (label left, timer right) and the badge's distance from the
+// pane's bottom edge, in output pixels.
+export const STYLE = { stripH: 56, stripGap: 10, badgeMargin: 28 };
+
+// The ffmpeg filtergraph. Inputs: 0 = canvas, 1 = static overlay (strips, labels, caption), then
+// per side (left, right): raw video, timer frames (10 a second; the last one stays up, frozen, by
+// eof_action=repeat), done badge (shown from that side's done time). Each side's picture holds
+// its last frame from holdFrom to the end.
+export function filterGraph({ sides, lay, total, fps = 30, style = STYLE }) {
+  const parts = [];
+  sides.forEach((s, i) => {
+    const v = 2 + i * 3;
+    const { crop, timing } = s;
+    const pane = lay.panes[i];
+    const pre = timing.offset < 0 ? `tpad=start_mode=clone:start_duration=${(-timing.offset).toFixed(3)},` : "";
+    const start = Math.max(0, timing.offset);
+    parts.push(
+      `[${v}:v]${pre}trim=start=${start.toFixed(3)}:end=${(start + timing.holdFrom).toFixed(3)},setpts=PTS-STARTPTS,` +
+        `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y},scale=${pane.w}:${lay.h}:flags=lanczos,setsar=1,fps=${fps},` +
+        `tpad=stop_mode=clone:stop_duration=${(total - timing.holdFrom + 1).toFixed(3)},trim=duration=${total.toFixed(3)}[p${i}]`,
+    );
+  });
+  parts.push("[0:v][1:v]overlay=0:0[b0]");
+  let n = 0;
+  sides.forEach((s, i) => {
+    const v = 2 + i * 3;
+    const pane = lay.panes[i];
+    parts.push(`[b${n}][p${i}]overlay=${pane.x}:${lay.y}[b${n + 1}]`);
+    n++;
+    parts.push(`[b${n}][${v + 1}:v]overlay=${pane.x + pane.w - s.timerSize.w}:${lay.y - style.stripGap - style.stripH}:eof_action=repeat[b${n + 1}]`);
+    n++;
+    parts.push(
+      `[b${n}][${v + 2}:v]overlay=${pane.x + Math.round((pane.w - s.badgeSize.w) / 2)}:${lay.y + lay.h - s.badgeSize.h - style.badgeMargin}:enable='gte(t,${s.timing.done.toFixed(3)})'[b${n + 1}]`,
+    );
+    n++;
+  });
+  parts.push(`[b${n}]format=yuv420p[out]`);
+  return parts.join(";\n");
+}

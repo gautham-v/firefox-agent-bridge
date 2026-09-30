@@ -66,6 +66,64 @@ Known confound: Claude in Chrome's `find` calls a model server-side; those token
 counts. Claude in Chrome also has tools the Firefox server lacks (browser_batch, gif_creator,
 console/network readers, shortcuts, resize_window, upload_image, browser selection).
 
+### Race video
+
+A side-by-side recording of one task in both browsers, for showing the gap rather than a table.
+`demo/race.mjs` runs takes exactly as `run.mjs` does (same prompt, model and flags, through
+`lib/claude-args.mjs`) while Cap records the whole screen, one take at a time, Firefox's first.
+`demo/compose.mjs` crops each browser window out of its recording, starts both at the agent
+process starting, and stacks them (Firefox left) with a label, a timer that stops when that
+side's answer arrives, a "done in 12.4s" badge, and the faster side's last frame held until the
+slower one finishes. Output: 1920x1080 h264 (yuv420p, faststart, no audio) and a 1200x676 cut for
+social (yuv420p needs an even height). ffmpeg here has no drawtext, so the text is drawn with
+ImageMagick (`magick`) and overlaid.
+
+Task: `gen-apg-datepicker`. Both browsers do the same visible thing there: click "Choose Date",
+page the calendar forward five months with clicks, click the 26th (9–10 visible actions a run on
+each side, no typing into the field). Its gap is a little under the benchmark's: medians 31.2s
+Chrome against 20.1s Firefox (x1.55; `results/browsers.jsonl`, `results/browsers-after-2.jsonl`),
+where all 16 tasks give 25.5s against 14.9s (x1.71; x1.69 as the median of per-task ratios).
+`gen-httpbin-form` (23.1s against 12.5s, x1.85) is the shorter alternative: every field fills at
+once (`form_input`), then Submit and the echoed JSON. Not these: `gen-wiki-chain` (Chrome reads and
+follows the links with `javascript_tool`, so its side shows almost nothing), `gen-datatables-scroll`
+(both sides are `javascript_tool`), `gen-mdn-iframe` (x6.2, the most extreme gap).
+
+Before recording:
+
+1. Restart Firefox once on an extension with `FIREFOX_BRIDGE_SHOW_TABS` (the switch is in the
+   extension and host, which load at startup). race.mjs sets `FIREFOX_BRIDGE_SHOW_TABS=1` in the
+   Firefox runs' MCP config, so the agent's tab opens active in the front window and stays
+   selected; without the restart it works in a background tab and nothing moves on camera. Off by
+   default everywhere else; tools/list is the same either way.
+2. Arrange the Firefox Developer Edition window where it should be filmed (race.mjs brings it
+   forward and crops to its bounds; it takes the front-most one, or `--firefox-window <id>` from
+   `cap targets windows --json`). Chrome must be running with the Claude extension connected; its
+   runs open their own window, whose bounds are read once it appears.
+3. Don't use the Mac during takes: the whole screen is recorded and anything that covers a
+   browser window is in the crop. Close anything private; the raw `.cap` recordings show the
+   whole screen, so they go to `~/Movies/fab-race/` (or `--dir`), never into the repo.
+
+```sh
+node eval/demo/race.mjs --task gen-apg-datepicker --takes 3 --dry-run   # prints what it will run
+node eval/demo/race.mjs --task gen-apg-datepicker --takes 3             # 3 Firefox takes, then 3 Chrome
+node eval/demo/compose.mjs --dir ~/Movies/fab-race/gen-apg-datepicker-<time>
+node eval/demo/dry-run.mjs            # compose on synthetic recordings; frames to check by eye
+```
+
+Each take leaves `<browser>-<n>.cap` (the Cap project; compose crops its raw display video, whose
+first frame's wall-clock time comes from the project's `recording-logs.log`), `<browser>-<n>.mp4`
+(`cap export`, Cap's editor look, for watching), `.stream.jsonl`, `.trace.jsonl` and a
+`<browser>-<n>.json` sidecar: agent start, first tool call, first `tabs_close_mcp`, result event,
+pass/fail from the task's checker, cost, tool calls, the window's bounds. compose.mjs picks the
+median-time passing take of each browser (`--firefox`/`--chrome <sidecar>` to choose), and
+freezes each picture at its `tabs_close_mcp` call (the prompt makes the agent close its tab
+before answering) while its timer runs on to the answer (`--hold result` to freeze at the answer).
+The timers include `claude` starting up, the same on both sides.
+
+Honesty rule: the video is one take per side. Say so wherever it's posted (the caption says "one
+take each"), and link the medians above and in `results/report.md` next to it. Don't pick the
+takes that make the gap look biggest; the default is each side's median take.
+
 ## Running
 
 ```sh
