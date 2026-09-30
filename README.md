@@ -567,6 +567,14 @@ of them (tasks, arms and how to run it in [eval/README.md](eval/README.md); resu
 
 There were no infrastructure failures or flaky-task confounds in the eval runs.
 
+**Model and effort.** A second harness (`eval/models.mjs`) ran 6 complex tasks on Haiku 4.5 and
+on Sonnet 5.5, Opus 5.5 and Fable 5.1 at low, medium and high effort (180 runs; analysis in
+[eval/results/models/analysis.md](eval/results/models/analysis.md)). Sonnet, Opus and Fable passed
+every run at every level, so effort bought no score; high only added cost and steps. Use Sonnet
+5.5 medium for the sidebar chat and Sonnet 5.5 low for quick tasks and fan-out sub-agents ($0.114
+a run, against 1.6x for Opus low and 4.1x for Fable low, at about the same median time). Haiku
+4.5 failed 8 of 18 runs, was 4x slower and still cost 3x Sonnet low.
+
 The same harness also compares these tools with Claude in Chrome; see
 [Compared with Claude in Chrome](#compared-with-claude-in-chrome).
 
