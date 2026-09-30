@@ -132,14 +132,31 @@ overall change isn't all from the restart. What each item measured:
 - **devtools on vs off**: the model never called devtools. Medians on/off: wall 0.97, calls 1.00,
   input tokens 1.02 (about the tool's definition), cost 0.94. Tool mix was the same.
 
-Seen in the traces, not yet fixed:
+Seen in the traces, and fixed since (branch `fix/remeasure-regressions`). The unit tests cover
+the wording and the arithmetic; these need a Firefox restart and a rerun to confirm:
 
-- `computer:scroll_to` on a frame ref (`ref_1@f…`) reports the element's center in the frame's
+- `computer:scroll_to` on a frame ref (`ref_1@f…`) reported the element's center in the frame's
   own coordinates: "its center is now at (227, 10)" in all 6 MDN runs, where the select was at
   about (590, 403) in the screenshot (one run clicked there and hit it). `read_page` on a frame
-  ref also labels the frame's 698x71 viewport as "Viewport (screenshot frame)".
+  ref also labeled the frame's 698x71 viewport as "Viewport (screenshot frame)". Now the center
+  is moved into the top frame's viewport by where each viewport sits on screen, as `find` does,
+  after the frame's place stops changing (the page around a cross-process frame scrolls after
+  the frame answers), and `read_page` on a frame ref says "Frame viewport (a part of the page,
+  not the whole screenshot): WxH at (x, y) in the screenshot". **Check**: in gen-mdn-iframe,
+  scroll_to on the select's ref answers about where the screenshot shows it, and a click there
+  hits it. The settle loop is untested against real cross-process timing.
+- The made-up `left_click` calls: `find`'s header now names the tool, "(screenshot coordinates;
+  if off-screen, computer left_click its ref)". **Check**: calls to `mcp__firefox__left_click`
+  (or any tool not offered) right after a `find`, per find call; the target is the old
+  wording's 0 in 34.
 - 5 of 48 after runs and 4 of 48 devtools runs didn't close their tab (1 of 48 before). Their
   answers say "I didn't open any tabs": the tab came from `tabs_context_mcp` with createIfEmpty.
+  Now `tabs_context_mcp` and `navigate` without a tabId say "Created tab N for this session;
+  close it with tabs_close_mcp when done." when they open the session's first tab. **Check**:
+  runs that end with their tab still open, against 9 of 96.
+- The fetch hint in `javascript_tool` led a data-hn-readability run to call the Algolia API 7
+  times; the task's median input tokens went from 58k to 111k. The description now adds "Fetch the pages you would have
+  navigated to, not the site's API." **Check**: API calls from `javascript_tool` in data tasks.
 
 `scripts/test-firefox.mjs` has steps for frames and keys but runs on Linux under Xvfb, so it
 wasn't run here.
