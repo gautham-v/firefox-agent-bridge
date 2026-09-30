@@ -9,7 +9,8 @@ Unofficial. Not affiliated with Anthropic, OpenAI or Mozilla.
 ![Asking Claude in the Firefox sidebar to draw a timeline of Pavement's albums; it opens Excalidraw in its tab group and draws the boxes, labels and arrows with the mouse](docs/demo.gif)
 
 - A [chat panel](#chat-panel) in Firefox's sidebar: click the toolbar button, ask, and the agent
-  works in the tab you're on. Drag more tabs into its group and it sees those too.
+  works in the tab you're on. Drag more tabs into its group and it sees those too. Comparing
+  several pages, it can [fan out](#fan-out) to one sub-agent per tab.
 - Tabs live in a per-session tab group named after the client (**Claude**, **Codex**, ...; a
   second session from the same client gets "Codex 2") and stay in the background. Every agent
   group is grey, with a [state icon](#tab-group-icons) in its label. Nothing takes
@@ -102,6 +103,29 @@ Nothing is billed beyond your existing subscription, and nothing runs until you 
 
 The panel's protocol and the host's process handling are described in
 [docs/chat-panel.md](docs/chat-panel.md). Connector toggles and voice input aren't built.
+
+## Fan-out
+
+For a task that needs the same facts from 4 or more independent pages ("compare these six
+desks on price, depth and warranty"), the Claude Code chat can start one sub-agent per page, each
+in its own background tab in the chat's group, and merge their replies into one table.
+
+- **Steps card.** It shows one row per sub-agent: favicon, site, what it's doing now (or how many
+  calls it made), and a status mark, under a "Fanned out to 6 tabs · 4 of 6 done" header. Click a
+  row to see that sub-agent's own steps. When a sub-agent finishes, what it returned shows under
+  its row, so the answer fills in row by row before the agent writes it up.
+- **Guidance, not a default.** The chat's system prompt asks for fan-out only at 4 or more pages
+  (below that, one tab read page by page is about as fast), at most 5 sub-agents at a time, each on
+  a cheaper model where the Task tool takes one. Each sub-agent is told the exact URL and fields,
+  to open its own tab with `tabs_create_mcp` without listing tabs first, to read just those fields
+  with `find` or a targeted `javascript_tool` read (falling back to `get_page_text` when a selector
+  comes back null), to close its tab, and to reply with only the values.
+- **Why.** In an eval comparing five PyPI or npm packages, fan-out cut the median
+  time from 27.8s to 22.9s and from 31.6s to 18.7s with no rows lost, at about 2.75x the cost
+  ($0.068 to $0.188 a run). Most of the extra cost was sub-agents reading whole pages and listing
+  tabs, which the guidance now rules out.
+- Sub-agents share the chat's MCP connection, so their tabs land in its group. Tabs opened at the
+  same moment by a session with no group yet join one new group, not one each.
 
 ## Tab group icons
 

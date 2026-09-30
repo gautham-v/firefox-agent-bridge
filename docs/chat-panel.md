@@ -17,6 +17,7 @@ Out of scope for now: turning connectors on and off per chat, and voice input.
 | File | Role |
 | --- | --- |
 | `extension/sidebar/panel.{html,css,js}` | The chat UI. Also opened in a popup window by "Pop out". |
+| `extension/sidebar/fanout.js` | Groups a turn's steps into one row per sub-agent for the steps card. |
 | `extension/background.js` | Toggles the sidebar, relays chat messages between panels and the host, binds chats to tab groups, watches group membership, buffers chat events for panels that reconnect, and works out each chat group's state icon. |
 | `host/chat.mjs` (used by `host/host.mjs`) | Spawns and drives engine processes, normalizes their output, answers permission prompts, lists history and capabilities. |
 | `mcp/server.mjs` | Uses `FIREFOX_AGENT_BRIDGE_SESSION` from its environment as the session id when set. |
@@ -34,7 +35,8 @@ Out of scope for now: turning connectors on and off per chat, and voice input.
   Environment: `FIREFOX_AGENT_BRIDGE_SESSION=<chatId>` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (an
   agent steered by a page shouldn't be able to write memory that outlives the chat). An appended system prompt says the agent runs in the
   Firefox sidebar, that the user's tabs are in its tab group (use `tabs_context_mcp`, work in those
-  tabs rather than opening new ones unless needed), and to keep answers short. The firefox MCP
+  tabs rather than opening new ones unless needed), and to keep answers short. Claude's also
+  says when and how to fan out to sub-agents (README, "Fan-out"); Codex's doesn't. The firefox MCP
   server is passed explicitly with `--mcp-config` (the host's node, this checkout's
   `mcp/server.mjs`, session env pinned); an entry there replaces a user-scope server of the same
   name, so there is no duplicate and chats work even if the server was never registered with
@@ -43,7 +45,12 @@ Out of scope for now: turning connectors on and off per chat, and voice input.
   tabs, and the paths of attached files that weren't sent inline). It is stripped again when a
   transcript is loaded. Images (png, jpeg, gif, webp, up to about 3.5 MB) go inline as base64
   image blocks; other attachments are written to `uploads/<chatId>/`.
-- Permissions: only the firefox MCP tools, Skill and TodoWrite are pre-allowed. Everything else
+- Sub-agents (the Task tool, `Agent` in newer Claude Code) run in the same process: their
+  stream-json messages carry `parent_tool_use_id`, the id of the Task call. Their tool calls are
+  passed on as `tool_start` / `tool_end` with `parent` set to that id; their text and streamed
+  deltas are not. They reach Firefox through the chat's own MCP server, so their tabs are in the
+  chat's group, and their permission requests come to the panel like the agent's.
+- Permissions: only the firefox MCP tools, Skill, TodoWrite and Task/Agent are pre-allowed. Everything else
   is what Claude Code would ask about in a terminal, and is asked in the panel through its stdio
   permission prompt (control protocol: a `can_use_tool` control request, answered with a
   `control_response` of `{behavior: "allow" | "deny"}`), with Allow once / Always allow in this chat
@@ -133,8 +140,8 @@ Events (`chat.event`'s `event`):
 | `user` | `text`, `attachments: [{name, mime}]` (echo, so every panel shows it) |
 | `text_delta` | `messageId` (`<api message id>:<n>` for the nth text block), `text` |
 | `text` | `messageId` (same scheme), `text` (full text of a finished assistant text block) |
-| `tool_start` | `toolUseId`, `name` (e.g. `mcp__firefox__navigate`), `summary` (short, no typed text, form values, script source, key sequences or URL queries; `ToolSearch` is not reported), `tabId` (Firefox tools that name a tab; the steps card says "Using Firefox in <site>" from the latest one) |
-| `tool_end` | `toolUseId`, `ok`, `summary` (text only for failures, plus the first line of navigate and shell results; screenshots and page content never leave the host) |
+| `tool_start` | `toolUseId`, `name` (e.g. `mcp__firefox__navigate`), `summary` (short, no typed text, form values, script source, key sequences or URL queries; `ToolSearch` is not reported), `tabId` (Firefox tools that name a tab; the steps card says "Using Firefox in <site>" from the latest one), `parent` (only on a sub-agent's calls: the `toolUseId` of its Task step) |
+| `tool_end` | `toolUseId`, `ok`, `summary` (text only for failures, plus the first line of navigate and shell results, and a Task step's reply clipped to 300 characters without Claude Code's `agentId`/usage trailer; screenshots and page content never leave the host) |
 | `permission` | `requestId`, `tool`, `summary` (what would run, see Permissions), `always` (whether Always allow is offered; absent means yes) |
 | `result` | `ok`, `durationMs`, `numTurns`, `error` (a short message when `ok` is false; every turn ends with one, including failed starts) |
 | `error` | `code`: `not_found` \| `auth` \| `limit` \| `spawn` \| `crashed`, `message`, `resetsAt` (epoch ms when a usage limit lifts and the engine said so, else null) |
@@ -213,7 +220,10 @@ Panel behavior that isn't protocol: a message sent while a turn runs is a later,
 (it doesn't end the running one, and events go to the first turn that isn't over); a step whose
 result says the user stopped or paused it shows as "Stopped before ...", not as a failure; typing
 while paused resumes first; tabs that join the group while the agent is running (its own
-`tabs_create_mcp`) don't open the tray or toast; a model's `efforts` narrows the effort row (none for Haiku 4.5,
+`tabs_create_mcp`) don't open the tray or toast; a turn with Task steps draws its steps card as
+fan-out rows (`sidebar/fanout.js`: one row per top-level Task step holding every call under it,
+its site taken from the tab of its latest call, remembered after the tab closes, or from its
+navigate summary, and its reply shown under it once it ends); a model's `efforts` narrows the effort row (none for Haiku 4.5,
 and the panel then sends an empty effort); a model marked `default` stands for the panel's empty
 model; a `limit` error shows "Your <engine> plan resets at <time>" when `resetsAt` is set, else the
 error's own message; and the message paused calls get from the extension points at the panel, not
