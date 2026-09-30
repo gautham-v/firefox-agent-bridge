@@ -1711,3 +1711,62 @@ test("key and type answer where the keys went, with a masked line when the field
   const t = await env.callTool("computer", { action: "type", tabId: 2, text: "4111" });
   assert.equal(t.result.content.at(-1).text, "1 field masked on shop.example");
 });
+
+// ---- Click latency
+
+// A session tab (id 2); its page answers a click with `answer`, and `onClick` runs as it does.
+async function clickEnv({ answer = 'Clicked button "Go"', onClick } = {}) {
+  const env = await load();
+  await env.callTool("tabs_create_mcp");
+  const calls = [];
+  env.browser.claudePage.call = async (tabId, op, args) => {
+    calls.push({ op, args: plain(args) });
+    if (op === "viewport") return { width: 1000, height: 800, dpr: 1, scrollX: 0, scrollY: 0 };
+    if (op === "click") {
+      onClick?.();
+      return answer;
+    }
+    return op === "textSize" ? 10 : "done";
+  };
+  // The page in tab 2 opens tab 3 after `ms`.
+  const openAfter = (ms) =>
+    setTimeout(() => {
+      const t3 = { id: 3, windowId: 10, groupId: -1, active: false, openerTabId: 2, url: "https://x.example/new", status: "complete", title: "New" };
+      env.browser.tabsMap.set(3, t3);
+      env.browser.tabs.onCreated.fire({ ...t3 });
+    }, ms);
+  return { ...env, calls, openAfter };
+}
+
+test("a click that opens no tab answers after a short grace period, not half a second", async () => {
+  const env = await clickEnv();
+  const t0 = Date.now();
+  const r = await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] });
+  const took = Date.now() - t0;
+  assert.equal(r.result.content[0].text, 'Clicked button "Go"');
+  assert.ok(took < 300, `took ${took}ms`);
+});
+
+test("a click that opens a tab within the grace period names it", async () => {
+  const env = await clickEnv({ onClick: () => env.openAfter(40) });
+  const r = await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] }, "s1", undefined, 4000);
+  assert.match(r.result.content[0].text, /^Clicked button "Go"\nThe click opened a new tab in this session's group: tab 3: https:\/\/x\.example\/new \(New\)$/);
+});
+
+test("a click on a link that targets a new tab waits longer for it", async () => {
+  const env = await clickEnv({ answer: { text: 'Clicked link "Open"', opens: true }, onClick: () => env.openAfter(300) });
+  const r = await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] }, "s1", undefined, 4000);
+  assert.equal(r.result.content.length, 1, "no masked line for a result that masked nothing");
+  assert.match(r.result.content[0].text, /^Clicked link "Open"\nThe click opened a new tab in this session's group: tab 3/);
+});
+
+test("the cursor animates only in the tab the user is looking at", async () => {
+  const env = await clickEnv();
+  await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] });
+  await env.callTool("computer", { action: "hover", tabId: 2, coordinate: [10, 10] });
+  await env.callTool("computer", { action: "left_click_drag", tabId: 2, start_coordinate: [1, 1], coordinate: [10, 10] });
+  assert.deepEqual(env.calls.filter((c) => ["click", "hover", "drag"].includes(c.op)).map((c) => [c.op, c.args.animate]), [["click", false], ["hover", false], ["drag", false]]);
+  env.browser.tabsMap.get(2).active = true;
+  await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] });
+  assert.equal(env.calls.findLast((c) => c.op === "click").args.animate, true);
+});

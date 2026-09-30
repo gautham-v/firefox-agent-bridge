@@ -917,12 +917,13 @@ function cursorFor(doc) {
   return c;
 }
 
-// Moves the cursor to (x, y) and resolves once it has arrived.
-async function moveCursor(doc, x, y) {
+// Moves the cursor to (x, y) and resolves once it has arrived. In a tab the user isn't looking at
+// (animate false) it jumps there, so input isn't held up by an animation no one sees.
+async function moveCursor(doc, x, y, animate = true) {
   const c = cursorFor(doc);
   if (!c) return;
   const first = c.x === null;
-  c.arrow.style.transition = first ? "opacity 300ms ease" : "";
+  c.arrow.style.transition = !animate ? "none" : first ? "opacity 300ms ease" : "";
   c.arrow.style.transform = `translate(${x - 5}px, ${y - 4}px)`;
   c.arrow.classList.add("on");
   const moved = first ? 0 : Math.hypot(x - c.x, y - c.y);
@@ -930,6 +931,7 @@ async function moveCursor(doc, x, y) {
   c.y = y;
   clearTimeout(c.idle);
   c.idle = setTimeout(() => c.arrow.classList.remove("on"), CURSOR_IDLE_MS);
+  if (!animate) return;
   if (moved > 2) await new Promise((r) => setTimeout(r, CURSOR_MOVE_MS));
   else if (first) await new Promise((r) => setTimeout(r, 150));
 }
@@ -994,7 +996,7 @@ async function click(doc, args) {
   const base = { ...at(win, x, y), button, ...modifierInit(args.modifiers) };
   const pointer = { ...base, pointerId: 1, pointerType: "mouse", isPrimary: true };
 
-  await moveCursor(doc, x, y);
+  await moveCursor(doc, x, y, args.animate !== false);
   // The page may have re-rendered while the cursor moved. Like a real mouse, the click lands
   // on whatever is at the point now; a ref that was replaced has to be looked up again.
   if (!el.isConnected || !args.ref) {
@@ -1030,8 +1032,22 @@ async function click(doc, args) {
   // What was clicked is named from its text, which only a site rule can mask; without one the
   // page isn't searched, so clicks stay fast.
   const red = redactor(doc, args.redact);
-  if (!red.siteRules) return `Clicked ${clickedLabel(el)}`;
-  return red.result(red.scrub(`Clicked ${clickedLabel(el)}`));
+  const out = red.siteRules ? red.result(red.scrub(`Clicked ${clickedLabel(el)}`)) : `Clicked ${clickedLabel(el)}`;
+  // A click that may open a tab says so, and background.js waits a little longer for it.
+  if (!opensTab(el, base, button)) return out;
+  return typeof out === "string" ? { text: out, opens: true } : { ...out, opens: true };
+}
+
+// Whether a click here opens a new tab: a link or form that targets another window (or a
+// <base target> that does), or a middle or modified click on a link.
+function opensTab(el, init, button) {
+  const newWindow = (t) => !!t && !["_self", "_parent", "_top"].includes(t.trim().toLowerCase());
+  const base = el.ownerDocument.querySelector("base[target]")?.getAttribute("target");
+  const link = el.closest?.("a[href], area[href]");
+  if (link) return newWindow(link.getAttribute("target") ?? base) || button === 1 || init.metaKey || init.ctrlKey || init.shiftKey;
+  const submit = el.closest?.("button, input[type=submit], input[type=image]");
+  const form = submit && ["submit", "image"].includes(submit.type) ? submit.form : null;
+  return !!form && newWindow(submit.getAttribute("formtarget") ?? form.getAttribute("target") ?? base);
 }
 
 async function hover(doc, args) {
@@ -1043,7 +1059,7 @@ async function hover(doc, args) {
   const win = doc.defaultView;
   const base = { ...at(win, x, y), buttons: 0 };
   const pointer = { ...base, pointerId: 1, pointerType: "mouse", isPrimary: true };
-  await moveCursor(doc, x, y);
+  await moveCursor(doc, x, y, args.animate !== false);
   fire(win, el, "PointerEvent", "pointerover", pointer);
   fire(win, el, "MouseEvent", "mouseover", base);
   el.dispatchEvent(new win.PointerEvent("pointerenter", { ...pointer, bubbles: false, view: win }));
@@ -1056,11 +1072,11 @@ async function hover(doc, args) {
 const DRAG_STEPS = 24;
 const DRAG_STEP_MS = 20;
 
-async function drag(doc, { x0, y0, x, y }) {
+async function drag(doc, { x0, y0, x, y, animate = true }) {
   const win = doc.defaultView;
   const start = deepElementFromPoint(doc, x0, y0);
   if (!start) throw new Error("Nothing at the drag start point.");
-  await moveCursor(doc, x0, y0);
+  await moveCursor(doc, x0, y0, animate);
   pressCursor(doc, true);
   const pointer = { pointerId: 1, pointerType: "mouse", isPrimary: true };
   fire(win, start, "PointerEvent", "pointerdown", { ...pointer, ...at(win, x0, y0), buttons: 1 });
@@ -1076,7 +1092,7 @@ async function drag(doc, { x0, y0, x, y }) {
     fire(win, over, "MouseEvent", "mousemove", { ...at(win, cx, cy), buttons: 1 });
     await new Promise((r) => setTimeout(r, DRAG_STEP_MS));
   }
-  await moveCursor(doc, x, y);
+  await moveCursor(doc, x, y, animate);
   const end = deepElementFromPoint(doc, x, y) ?? start;
   pressCursor(doc, false);
   fire(win, end, "PointerEvent", "pointerup", { ...pointer, ...at(win, x, y), buttons: 0 });

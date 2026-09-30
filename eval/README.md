@@ -60,3 +60,8 @@ against Chrome's numbers (`eval/vs-chrome`) and note what moved.
   now dispatches the event on the element instead (and sends the click itself), and a scroll still
   scrolls or passes up to the parent frame. Was 5 of 7 scrolls and 2 clicks failing over the
   live-sample frame; expect none, and no `window.scrollBy` fallbacks.
+- **Click floor** (gen-apg-datepicker, gen-wiki-chain, gen-mdn-iframe): a click no longer sleeps
+  500ms for a tab it might open (it waits 100ms, 500ms only on a link or form that targets a new
+  tab, and goes on once the tab arrives), and the cursor jumps instead of easing for 150 to 350ms
+  in a tab the user isn't looking at. `computer:left_click` median was 696ms (Chrome 161ms);
+  expect under about 200ms in background tabs.

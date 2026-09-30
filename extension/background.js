@@ -567,13 +567,39 @@ async function toCss(tabId, coordinate) {
 const frameScale = async (tabId) => 1 / (await ratioFor(tabId));
 
 // ---------------------------------------------------------------------------------------------
-// Tabs opened by a session tab (target=_blank, window.open), reported back after clicks
+// Tabs opened by a session tab (target=_blank, window.open), reported back after clicks. A tab a
+// click opens is created at once but reaches onCreated a moment later, so a click waits up to
+// OPEN_GRACE_MS for one, or OPEN_WAIT_MS when it was on a link or form that targets a new tab,
+// and goes on as soon as one arrives.
 
+const OPEN_GRACE_MS = 100;
+const OPEN_WAIT_MS = 500;
 const openedBy = new Map(); // opener tab id -> [{ tabId, at }]
+const openWaiters = new Map(); // opener tab id -> Set of callbacks waiting for a tab it opens
 
-async function openedTabsNote(tabId, since) {
-  await sleep(500);
-  const fresh = (openedBy.get(tabId) ?? []).filter((o) => o.at >= since);
+function tabOpened(openerId) {
+  for (const done of openWaiters.get(openerId) ?? []) done();
+}
+
+function untilTabOpened(tabId, ms) {
+  return new Promise((resolve) => {
+    const waiters = openWaiters.get(tabId) ?? new Set();
+    const done = () => {
+      clearTimeout(timer);
+      waiters.delete(done);
+      if (!waiters.size && openWaiters.get(tabId) === waiters) openWaiters.delete(tabId);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    waiters.add(done);
+    openWaiters.set(tabId, waiters);
+  });
+}
+
+async function openedTabsNote(tabId, since, wait = OPEN_GRACE_MS) {
+  const opened = () => (openedBy.get(tabId) ?? []).filter((o) => o.at >= since);
+  if (!opened().length) await untilTabOpened(tabId, wait);
+  const fresh = opened();
   if (!fresh.length) return "";
   const notes = [];
   for (const { tabId: id } of fresh) {
@@ -672,7 +698,9 @@ async function findAll(tabId, query) {
 
 async function computer(session, args) {
   const { action, tabId } = args;
-  await requireTab(session, tabId);
+  const tab = await requireTab(session, tabId);
+  // The cursor eases to each point only in the tab the user is looking at.
+  const animate = !!tab.active;
   const needsTarget = () => {
     if (!args.coordinate && !args.ref) throw new Error(`${action} needs a coordinate or ref.`);
   };
@@ -689,17 +717,17 @@ async function computer(session, args) {
       const clickCount = { double_click: 2, triple_click: 3 }[action] ?? 1;
       const button = action === "right_click" ? 2 : 0;
       const since = Date.now();
-      const result = await page(tabId, "click", { ...(await toCss(tabId, args.coordinate)), ref: args.ref, button, clickCount, modifiers: args.modifiers });
-      return pageContent(result, await openedTabsNote(tabId, since));
+      const result = await page(tabId, "click", { ...(await toCss(tabId, args.coordinate)), ref: args.ref, button, clickCount, modifiers: args.modifiers, animate });
+      return pageContent(result, await openedTabsNote(tabId, since, result?.opens ? OPEN_WAIT_MS : OPEN_GRACE_MS));
     }
     case "hover":
       needsTarget();
-      return [text(await page(tabId, "hover", { ...(await toCss(tabId, args.coordinate)), ref: args.ref }))];
+      return [text(await page(tabId, "hover", { ...(await toCss(tabId, args.coordinate)), ref: args.ref, animate }))];
     case "left_click_drag": {
       if (!args.start_coordinate || !args.coordinate) throw new Error("left_click_drag needs start_coordinate and coordinate.");
       const start = await toCss(tabId, args.start_coordinate);
       const end = await toCss(tabId, args.coordinate);
-      return [text(await page(tabId, "drag", { x0: start.x, y0: start.y, x: end.x, y: end.y }))];
+      return [text(await page(tabId, "drag", { x0: start.x, y0: start.y, x: end.x, y: end.y, animate }))];
     }
     case "type":
       if (typeof args.text !== "string") throw new Error("type needs text.");
@@ -997,6 +1025,7 @@ browser.tabs.onCreated.addListener(async (tab) => {
   const list = openedBy.get(tab.openerTabId) ?? [];
   list.push({ tabId: tab.id, at: Date.now() });
   openedBy.set(tab.openerTabId, list.slice(-10));
+  tabOpened(tab.openerTabId);
   justOpened.add(tab.id);
   setTimeout(() => justOpened.delete(tab.id), 3000);
   await browser.tabs.group({ tabIds: [tab.id], groupId: opener.groupId }).catch(() => {});
