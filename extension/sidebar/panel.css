@@ -125,6 +125,11 @@ p, ul, ol, pre, blockquote, h4 { margin: 0; }
 .steps .sh { display: flex; align-items: center; gap: 8px; padding: 7px 10px; font-size: 12px; color: var(--p-ink2); background: var(--p-wash); min-width: 0; }
 .steps .sh .st { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .steps .sh .n { margin-left: auto; white-space: nowrap; }
+.steps .cam { position: relative; border-top: 1px solid var(--p-sep); background: var(--p-wash); line-height: 0; }
+.steps .cam img { display: block; width: 100%; height: auto; max-height: 180px; object-fit: cover; object-position: top; }
+.steps .cam .exp { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 5px; background: var(--p-elev); color: var(--p-ink2); box-shadow: 0 0 0 .5px var(--p-sep); }
+.steps .cam .exp:hover { color: var(--p-ink); }
+.steps .cam .exp .ico { width: 11px; height: 11px; }
 .steps .list { max-height: 232px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--p-ink3) transparent; }
 .step { display: flex; align-items: center; gap: 8px; padding: 5px 10px; font-size: 12px; color: var(--p-ink2); border-top: 1px solid var(--p-sep); min-width: 0; }
 .steps .sh + .list .step:first-child { border-top: 1px solid var(--p-sep); }
