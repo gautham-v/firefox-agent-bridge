@@ -9,6 +9,7 @@ import { HIDDEN_TOOLS, clip, mimeFromName, stripContext, summarizeToolResult, su
 
 const HEAD_BYTES = 128 * 1024;
 const NEEDLE = '"name":"mcp__firefox__';
+const BRIDGE_NEEDLE = '"type":"bridge-session"';
 const DAY_MS = 86_400_000;
 
 // Claude Code names a project folder after its cwd with every non-alphanumeric character as "-".
@@ -80,12 +81,12 @@ export async function claudeTitle(file) {
   return ai;
 }
 
-// True if `file` has a firefox tool call after byte `start`.
-async function hasFirefoxTools(file, start, size) {
+// True if `file` has `needle` (a firefox tool call by default) after byte `start`.
+async function hasFirefoxTools(file, start, size, needle = NEEDLE) {
   const fh = await fs.promises.open(file, "r");
   try {
     const buf = Buffer.alloc(1 << 20);
-    const overlap = NEEDLE.length - 1;
+    const overlap = needle.length - 1;
     let pos = Math.max(0, start - overlap);
     let carry = "";
     while (pos < size) {
@@ -93,7 +94,7 @@ async function hasFirefoxTools(file, start, size) {
       if (!bytesRead) break;
       pos += bytesRead;
       const text = carry + buf.subarray(0, bytesRead).toString("latin1");
-      if (text.includes(NEEDLE)) return true;
+      if (text.includes(needle)) return true;
       carry = text.slice(-overlap);
     }
     return false;
@@ -101,6 +102,11 @@ async function hasFirefoxTools(file, start, size) {
     await fh.close();
   }
 }
+
+// True if the Claude app on a phone was connected to this session. Claude Code writes a
+// bridge-session entry once that happens, which is how sessions started by `claude remote-control`
+// (and the ones a terminal session shared with /remote-control) look.
+export const isPhoneSession = (file, size) => hasFirefoxTools(file, 0, size, BRIDGE_NEEDLE);
 
 // Claude Code sessions outside the chat's own project folder that called mcp__firefox__ tools in
 // the last `days`, newest first. Which files qualify is cached (by size), so a file is only read

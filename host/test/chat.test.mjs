@@ -493,6 +493,26 @@ test("history lists panel chats, then terminal sessions that used the firefox to
   }
 });
 
+test("history marks a chat-folder session that a phone was connected to as from the phone", async () => {
+  const t = setup();
+  try {
+    const P = "cccccccc-0000-4000-8000-000000000001";
+    const Q = "cccccccc-0000-4000-8000-000000000002";
+    const chatDir = path.join(fs.realpathSync(t.home), ".firefox-agent-bridge/chat");
+    fs.mkdirSync(chatDir, { recursive: true });
+    const project = chatDir.replace(/[^a-zA-Z0-9]/g, "-");
+    terminalSession(t.home, project, P, [userMsg("Order the usual"), firefoxCall("toolu_p"), { type: "bridge-session", bridgeSessionId: "cse_x", lastSequenceNum: 0 }, answer("Done.")]);
+    terminalSession(t.home, project, Q, [userMsg("Started at the desk"), answer("Ok.")]);
+    const h = await t.ask("chat.history", {});
+    const byId = Object.fromEntries(h.chats.map((c) => [c.id, c]));
+    assert.equal(byId[P].origin, "phone");
+    assert.equal(byId[P].source, "panel");
+    assert.equal(byId[Q].origin, undefined);
+  } finally {
+    t.done();
+  }
+});
+
 test("history marks a chat that is mid-turn as running, and caps terminal sessions", async () => {
   const t = setup();
   try {

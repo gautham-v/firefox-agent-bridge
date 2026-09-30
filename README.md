@@ -127,6 +127,35 @@ title instead: `●` working, `◉` needs you, `○` paused, `✓` done, `⊖` d
 and nothing for idle. With the collapsed vertical-tabs sidebar, which shows only a label's first
 letter, no icon is drawn.
 
+## Start a task from your phone
+
+Claude Code's Remote Control lets the Claude app on your phone start sessions that run on your
+Mac. Because `install.sh` registers the `firefox` MCP server at user scope, those sessions get the
+Firefox tools like any other. `scripts/remote-control.sh` keeps that running in the background:
+
+```sh
+scripts/remote-control.sh --install                      # start now and at every login
+scripts/remote-control.sh --install --permission-mode acceptEdits
+scripts/remote-control.sh --status
+scripts/remote-control.sh --uninstall
+```
+
+It installs a launchd agent (macOS) or a systemd user service (Linux) that runs
+`claude remote-control --name Firefox` in `~/.firefox-agent-bridge/chat/`, the sidebar chat's
+folder, and logs to `~/.firefox-agent-bridge/remote-control.log`. It finds `claude` the way the
+host does (`CLAUDE_BIN`, `PATH`, then the path `install.sh` recorded). Then open the Claude app,
+pick the "Firefox" machine in the Code tab and start a task.
+
+- **The Mac must be awake** and logged in, and **Firefox Developer Edition must be open**; the
+  tools have nothing to drive otherwise.
+- **Permission prompts go to your phone.** Firefox tools run without asking, but anything else
+  (a shell command, a file edit) asks there. `--permission-mode` sets a looser mode for these
+  sessions instead; without it they use Claude Code's default.
+- **They show up in the sidebar's history.** A phone-started session is an ordinary Claude Code
+  session that used the Firefox tools, so the clock button lists it, marked "From phone", and you
+  can open it and continue in the panel. This mark comes from the session file's `bridge-session`
+  entry, so it is only shown for sessions in the chat folder.
+
 ## Safety controls
 
 The toolbar button opens the chat panel, and the panel's **⋯** menu holds the controls. Calls

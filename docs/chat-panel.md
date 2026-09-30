@@ -107,7 +107,7 @@ Host to extension:
 | Message | Fields |
 | --- | --- |
 | `chat.event` | `chatId`, `event` (below) |
-| `chat.history` | `requestId`, `chats: [{id, title, updatedAt, engine, model, source, cwd, path, running}]`, newest first; `updatedAt` is epoch ms; `running` means a turn is in progress; `source: "terminal"` for Claude Code sessions outside the chat folder that used `mcp__firefox__` tools in the last 14 days (at most 30; panel chats at most 100) |
+| `chat.history` | `requestId`, `chats: [{id, title, updatedAt, engine, model, source, origin?, cwd, path, running}]`, newest first; `updatedAt` is epoch ms; `running` means a turn is in progress; `origin: "phone"` marks a chat-folder session with a `bridge-session` entry, i.e. one started by `claude remote-control` (the panel shows "From phone"); `source: "terminal"` for Claude Code sessions outside the chat folder that used `mcp__firefox__` tools in the last 14 days (at most 30; panel chats at most 100) |
 | `chat.transcript` | `requestId`, `chatId`, `items` (the same shapes as events, each with its `kind`: `user`, `text`, `tool_start`, `tool_end`, `result`), `done`; the last 1500 items, in chunks under 600 KB |
 | `chat.capabilities` | `requestId`, `engine`, `available`, `version`, `error`, `skills: [{name, description}]`, `plugins: [{name}]`, `connectors: [{name, status}]`, `models: [{id, label, efforts?, default?}]`, `efforts` |
 
