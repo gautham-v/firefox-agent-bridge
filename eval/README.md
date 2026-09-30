@@ -182,6 +182,7 @@ Chrome's first-run medians were 25.5s, 7 calls, 119k and $0.080. What each fix m
 Still open:
 
 - The made-up `left_click` after `find "search box"` on docs.python.org (2 in 48).
+
 Checked by hand after the next restart (2026-09-30, live on the MDN select page, 1422x809
 screenshot):
 
