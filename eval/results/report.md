@@ -1,6 +1,6 @@
 # Eval report
 
-Generated 2026-09-30T03:38:13.005Z from `results/runs.jsonl` (48 runs).
+Generated 2026-09-30T05:51:49.973Z from `results/runs.jsonl` (48 runs).
 
 Tokens are summed over every model in a run (sub-agents included). "Input tokens (incl. cache)" is input + cache writes + cache reads. Spread is [min–max]. Tool result chars is the text the tools returned into the context.
 
@@ -351,3 +351,170 @@ Calls, KB and images are per run (total / runs of that browser); ms is the mean 
 | task | browser | run | failed fields | errors | trace |
 | --- | --- | --- | --- | --- | --- |
 | gen-mdn-iframe | chrome | 3 | displayed_text, option_count |  | results/traces/gen-mdn-iframe.baseline.chrome.3.2026-09-30T03-23-42-164Z.jsonl |
+
+## Re-measure after restart: Firefox before, Firefox after, Chrome (baseline arm)
+
+Sources: Firefox before and Chrome are the rows in `results/browsers.jsonl`; Firefox after is `results/browsers-after.jsonl`, the same 16 tasks, model and prompt, run again once Firefox had loaded main's extension (frames in find/read_page, keys follow the clicked frame, input fallback, click floor, trimmed find, occluded-window fix). The after runs also have everything else that landed on the MCP server since the first run: the batch tool, multi-field form_input, the tabId fill-in and the fetch hint in javascript_tool. Chrome's extension didn't change, so it wasn't run again.
+
+| metric | firefox before | firefox after | chrome | firefox after / firefox before (medians) |
+| --- | --- | --- | --- | --- |
+| runs | 48 | 48 | 48 | |
+| success | 100% (48/48) | 100% (48/48) | 98% (47/48) | |
+| wall time (s) | 19.1 [7.9–252.1] | 16.6 [7.6–47.7] | 25.5 [10.2–211.0] | 0.87 |
+| tool calls | 7 [3–107] | 6 [3–17] | 7 [3–67] | 0.86 |
+| screenshot/zoom actions | 0 [0–34] | 0 [0–3] | 0 [0–25] | – |
+| turns | 8 [4–108] | 7 [4–18] | 8 [4–68] | 0.88 |
+| input tokens (incl. cache) | 60k [38k–2507k] | 55k [27k–197k] | 119k [48k–1146k] | 0.91 |
+| uncached input tokens | 8.4k [3.7k–65k] | 8.5k [3.8k–20k] | 11k [5.9k–47k] | 1.01 |
+| output tokens | 1.2k [493–19k] | 1.1k [510–4.0k] | 1.5k [548–11k] | 0.91 |
+| tool result KB (text + images) | 13.7 [0.4–1415.0] | 13.6 [0.3–212.6] | 22.0 [1.3–1275.0] | 0.99 |
+| cost (USD) | 0.062 [0.028–0.935] | 0.060 [0.030–0.150] | 0.080 [0.041–0.514] | 0.96 |
+| total wall time, all runs (min) | 22.3 | 14.3 | 30.9 | |
+| total tool calls, all runs | 592 | 351 | 505 | |
+| total cost, all runs (USD) | 4.52 | 2.88 | 5.02 | |
+
+Median [min–max] per run.
+
+Per task: median wall s / tool calls / input tokens, and success.
+
+| task | firefox before | firefox after | chrome |
+| --- | --- | --- | --- |
+| art-ars-dragon | 12.3s / 4 / 48k (3/3) | 10.4s / 4 / 45k (3/3) | 12.2s / 4 / 72k (3/3) |
+| art-ars-firefox | 12.1s / 4 / 54k (3/3) | 9.1s / 4 / 51k (3/3) | 12.3s / 4 / 79k (3/3) |
+| art-guardian-tang | 10.2s / 4 / 58k (3/3) | 10.9s / 4 / 55k (3/3) | 12.9s / 4 / 83k (3/3) |
+| data-hn-readability | 19.2s / 7 / 58k (3/3) | 23.8s / 6 / 111k (3/3) | 36.7s / 11 / 203k (3/3) |
+| data-crates-html | 16.1s / 6 / 59k (3/3) | 13.8s / 6 / 49k (3/3) | 20.5s / 8 / 87k (3/3) |
+| data-ashby-ramp | 13.0s / 4 / 58k (3/3) | 11.4s / 4 / 55k (3/3) | 15.9s / 4 / 100k (3/3) |
+| cmp-pypi | 38.7s / 13 / 93k (3/3) | 26.7s / 5 / 59k (3/3) | 29.4s / 6 / 121k (3/3) |
+| cmp-npm | 29.7s / 12 / 114k (3/3) | 23.9s / 6 / 58k (3/3) | 48.2s / 8 / 191k (3/3) |
+| gen-wiki-chain | 23.1s / 11 / 123k (3/3) | 20.3s / 13 / 152k (3/3) | 35.7s / 13 / 176k (3/3) |
+| gen-pydocs-search | 18.0s / 11 / 94k (3/3) | 17.8s / 13 / 85k (3/3) | 30.0s / 18 / 198k (3/3) |
+| gen-elements-table | 12.4s / 4 / 41k (3/3) | 10.3s / 4 / 45k (3/3) | 12.7s / 4 / 65k (3/3) |
+| gen-quotes-scroll | 25.6s / 4 / 38k (3/3) | 25.9s / 4 / 43k (3/3) | 55.7s / 8 / 135k (3/3) |
+| gen-httpbin-form | 19.0s / 15 / 73k (3/3) | 13.8s / 9 / 69k (3/3) | 23.1s / 8 / 122k (3/3) |
+| gen-mdn-iframe | 114.5s / 71 / 1315k (3/3) | 18.0s / 9 / 72k (3/3) | 99.3s / 41 / 675k (2/3) |
+| gen-apg-datepicker | 23.3s / 15 / 81k (3/3) | 23.6s / 16 / 99k (3/3) | 31.2s / 17 / 153k (3/3) |
+| gen-datatables-scroll | 22.2s / 8 / 64k (3/3) | 17.6s / 6 / 54k (3/3) | 25.1s / 7 / 116k (3/3) |
+
+### Per call
+
+| per call | firefox before | firefox after | chrome |
+| --- | --- | --- | --- |
+| computer left_click ms, median [min–max] | 697 [289–1479] (70 clicks) | 123 [108–235] (38 clicks) | 161 [135–477] (57 clicks) |
+| find result bytes, median [min–max] | 802 [209–4226] (34 calls) | 438 [195–778] (20 calls) | 438 [192–627] (15 calls) |
+| computer scroll actions (errors) | 7 (5) | 0 (0) | 9 (0) |
+| get_page_text mean ms, issued alone | not recorded | 15 (11 of 37) | not recorded |
+| find mean ms, issued alone | not recorded | 54 (7 of 20) | not recorded |
+| NS_ERROR_UNEXPECTED results | ≥6 | 0 | ≥0 |
+| tool errors, all calls | 23 | 13 | 20 |
+| calls to tools not offered | screenshot 4, scroll_to 1 | left_click 5, screenshot 2 | computer 1 |
+
+NS_ERROR_UNEXPECTED: a count from the traces' result text where the trace has it; "≥n" counts the error samples a row keeps (at most 5 per run), so it's a lower bound.
+
+By tool: calls per run, and mean ms per call. A call issued in the same message as a navigate waits for it, so its ms includes the page load; the after runs did that more often (navigate then get_page_text or find in one turn), which is why those two look slower per call here and not in the issued-alone rows above.
+
+| tool | firefox before calls | firefox after calls | chrome calls | firefox before ms | firefox after ms | chrome ms |
+| --- | --- | --- | --- | --- | --- | --- |
+| computer | 4.50 | 1.50 | 4.08 | 402 | 153 | 1411 |
+| javascript_tool | 1.56 | 0.96 | 1.73 | 710 | 1408 | 3707 |
+| navigate | 1.75 | 1.17 | 1.13 | 1904 | 2108 | 2986 |
+| tabs_context_mcp | 1.00 | 1.00 | 1.02 | 55 | 62 | 1937 |
+| tabs_close_mcp | 1.00 | 0.90 | 0.90 | 29 | 102 | 141 |
+| get_page_text | 0.96 | 0.77 | 0.71 | 335 | 1184 | 3661 |
+| find | 0.71 | 0.42 | 0.31 | 264 | 1100 | 3135 |
+| form_input | 0.54 | 0.13 | 0.00 | 12 | 24 | – |
+| read_page | 0.15 | 0.19 | 0.15 | 457 | 487 | 1423 |
+| browser_batch | 0.00 | 0.00 | 0.48 | – | – | 11233 |
+| batch | 0.00 | 0.15 | 0.00 | – | 6984 | – |
+| screenshot | 0.08 | 0.04 | 0.00 | 308 | 63 | – |
+| left_click | 0.00 | 0.10 | 0.00 | – | 0 | – |
+| tabs_create_mcp | 0.06 | 0.00 | 0.00 | 38 | – | – |
+| scroll_to | 0.02 | 0.00 | 0.00 | 0 | – | – |
+| read_network_requests | 0.00 | 0.00 | 0.02 | – | – | 400 |
+
+### gen-mdn-iframe
+
+| | firefox before | firefox after |
+| --- | --- | --- |
+| wall s | 114.5 [82.3–252.1] | 18.0 [13.6–20.9] |
+| tool calls | 71 [44–107] | 9 [9–11] |
+| input tokens | 1315k [782k–2507k] | 72k [70k–74k] |
+| runs that set the select through a frame ref (form_input ref_N@fM) | 0/3 | 3/3 |
+| runs that used javascript_tool | 3/3 | 0/3 |
+| tools, all runs | computer 155, javascript_tool 22, find 15, navigate 7, read_page 4, get_page_text 4, tabs_close_mcp 4, tabs_context_mcp 3, tabs_create_mcp 3, form_input 2, screenshot 2, scroll_to 1 | computer 10, read_page 6, tabs_context_mcp 3, navigate 3, find 3, form_input 3, tabs_close_mcp 1 |
+
+## devtools on vs off (Firefox, baseline arm)
+
+Sources: off is `results/browsers-after.jsonl`; on is `results/browsers-devtools.jsonl`, the same tasks with the MCP server started with FIREFOX_BRIDGE_DEVTOOLS=1 (`run.mjs --devtools`), run right after. With it on, the model is offered one more tool (devtools) and the extension keeps each session tab's console and network log from page load. The model called devtools 0 time(s) in 48 runs.
+
+| metric | devtools off | devtools on | devtools on / devtools off (medians) |
+| --- | --- | --- | --- |
+| runs | 48 | 48 | |
+| success | 100% (48/48) | 100% (48/48) | |
+| wall time (s) | 16.6 [7.6–47.7] | 16.0 [8.3–30.3] | 0.97 |
+| tool calls | 6 [3–17] | 6 [3–16] | 1.00 |
+| screenshot/zoom actions | 0 [0–3] | 0 [0–3] | – |
+| turns | 7 [4–18] | 7 [4–17] | 1.00 |
+| input tokens (incl. cache) | 55k [27k–197k] | 56k [36k–194k] | 1.02 |
+| uncached input tokens | 8.5k [3.8k–20k] | 7.9k [3.7k–15k] | 0.93 |
+| output tokens | 1.1k [510–4.0k] | 1.0k [500–2.2k] | 0.99 |
+| tool result KB (text + images) | 13.6 [0.3–212.6] | 13.6 [0.3–212.8] | 1.00 |
+| cost (USD) | 0.060 [0.030–0.150] | 0.056 [0.029–0.114] | 0.94 |
+| total wall time, all runs (min) | 14.3 | 13.5 | |
+| total tool calls, all runs | 351 | 333 | |
+| total cost, all runs (USD) | 2.88 | 2.69 | |
+
+Median [min–max] per run.
+
+Per task: median wall s / tool calls / input tokens, and success.
+
+| task | devtools off | devtools on |
+| --- | --- | --- |
+| art-ars-dragon | 10.4s / 4 / 45k (3/3) | 10.1s / 4 / 46k (3/3) |
+| art-ars-firefox | 9.1s / 4 / 51k (3/3) | 9.8s / 4 / 52k (3/3) |
+| art-guardian-tang | 10.9s / 4 / 55k (3/3) | 9.5s / 4 / 56k (3/3) |
+| data-hn-readability | 23.8s / 6 / 111k (3/3) | 21.4s / 7 / 67k (3/3) |
+| data-crates-html | 13.8s / 6 / 49k (3/3) | 12.2s / 6 / 50k (3/3) |
+| data-ashby-ramp | 11.4s / 4 / 55k (3/3) | 10.3s / 4 / 56k (3/3) |
+| cmp-pypi | 26.7s / 5 / 59k (3/3) | 25.0s / 5 / 57k (3/3) |
+| cmp-npm | 23.9s / 6 / 58k (3/3) | 27.3s / 4 / 53k (3/3) |
+| gen-wiki-chain | 20.3s / 13 / 152k (3/3) | 23.5s / 11 / 109k (3/3) |
+| gen-pydocs-search | 17.8s / 13 / 85k (3/3) | 15.1s / 13 / 87k (3/3) |
+| gen-elements-table | 10.3s / 4 / 45k (3/3) | 11.1s / 4 / 48k (3/3) |
+| gen-quotes-scroll | 25.9s / 4 / 43k (3/3) | 22.8s / 4 / 45k (3/3) |
+| gen-httpbin-form | 13.8s / 9 / 69k (3/3) | 14.2s / 8 / 60k (3/3) |
+| gen-mdn-iframe | 18.0s / 9 / 72k (3/3) | 21.3s / 9 / 72k (3/3) |
+| gen-apg-datepicker | 23.6s / 16 / 99k (3/3) | 21.3s / 16 / 92k (3/3) |
+| gen-datatables-scroll | 17.6s / 6 / 54k (3/3) | 17.5s / 7 / 70k (3/3) |
+
+### Per call
+
+| per call | devtools off | devtools on |
+| --- | --- | --- |
+| computer left_click ms, median [min–max] | 123 [108–235] (38 clicks) | 128 [118–156] (39 clicks) |
+| find result bytes, median [min–max] | 438 [195–778] (20 calls) | 595 [195–862] (19 calls) |
+| computer scroll actions (errors) | 0 (0) | 0 (0) |
+| get_page_text mean ms, issued alone | 15 (11 of 37) | 16 (4 of 34) |
+| find mean ms, issued alone | 54 (7 of 20) | 57 (5 of 19) |
+| NS_ERROR_UNEXPECTED results | 0 | 0 |
+| tool errors, all calls | 13 | 6 |
+| calls to tools not offered | left_click 5, screenshot 2 | left_click 3 |
+
+NS_ERROR_UNEXPECTED: a count from the traces' result text where the trace has it; "≥n" counts the error samples a row keeps (at most 5 per run), so it's a lower bound.
+
+By tool: calls per run, and mean ms per call. A call issued in the same message as a navigate waits for it, so its ms includes the page load; the after runs did that more often (navigate then get_page_text or find in one turn), which is why those two look slower per call here and not in the issued-alone rows above.
+
+| tool | devtools off calls | devtools on calls | devtools off ms | devtools on ms |
+| --- | --- | --- | --- | --- |
+| computer | 1.50 | 1.58 | 153 | 88 |
+| navigate | 1.17 | 1.13 | 2108 | 1921 |
+| tabs_context_mcp | 1.00 | 1.00 | 62 | 59 |
+| tabs_close_mcp | 0.90 | 0.92 | 102 | 31 |
+| javascript_tool | 0.96 | 0.69 | 1408 | 1458 |
+| get_page_text | 0.77 | 0.71 | 1184 | 1400 |
+| find | 0.42 | 0.40 | 1100 | 1198 |
+| read_page | 0.19 | 0.17 | 487 | 540 |
+| batch | 0.15 | 0.17 | 6984 | 6665 |
+| form_input | 0.13 | 0.13 | 24 | 34 |
+| left_click | 0.10 | 0.06 | 0 | 1 |
+| screenshot | 0.04 | 0.00 | 63 | – |
