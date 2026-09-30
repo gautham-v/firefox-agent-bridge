@@ -99,8 +99,10 @@ function announce(clientId, client, hello) {
   const { name, version, pid, cwd } = client.info;
   // A server that lists the devtools tool says so, and the extension captures its session's tabs.
   const devtools = hello.devtools === true;
-  log(`client ${clientId} connected: ${name}${version ? ` ${version}` : ""} pid=${pid} cwd=${cwd}${devtools ? " devtools" : ""}`);
-  send({ type: "client", event: "connected", client: { id: clientId, ...client.info, ...(devtools ? { devtools } : {}) } });
+  // Demo-only: a server run with FIREFOX_BRIDGE_SHOW_TABS=1 has its session's tabs opened in front.
+  const showTabs = hello.showTabs === true;
+  log(`client ${clientId} connected: ${name}${version ? ` ${version}` : ""} pid=${pid} cwd=${cwd}${devtools ? " devtools" : ""}${showTabs ? " showTabs" : ""}`);
+  send({ type: "client", event: "connected", client: { id: clientId, ...client.info, ...(devtools ? { devtools } : {}), ...(showTabs ? { showTabs } : {}) } });
 }
 
 try {
