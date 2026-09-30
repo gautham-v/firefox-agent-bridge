@@ -1,0 +1,793 @@
+{
+  "rows": {
+    "https://arstechnica.com/space/2026/09/nasa-has-a-dragon-dilemma-and-there-appear-to-be-no-good-answers/": {
+      "url": "https://arstechnica.com/space/2026/09/nasa-has-a-dragon-dilemma-and-there-appear-to-be-no-good-answers/",
+      "at": "2026-09-30T02:48:50.155Z",
+      "ms": 4234,
+      "reference": {
+        "root": "main",
+        "paragraphs": 19,
+        "numbers": 20,
+        "consent_words": false
+      },
+      "page_text": {
+        "chars": 13426,
+        "tokens": 3357,
+        "para_recall": 1,
+        "num_recall": 1,
+        "facts": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      "reader": {
+        "chars": 11862,
+        "tokens": 2966,
+        "para_recall": 1,
+        "num_recall": 1,
+        "facts": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "title": "NASA has a Dragon dilemma, and there appear to be no good answers",
+        "token_ratio": 0.884
+      },
+      "arm": {
+        "chars": 11862,
+        "tokens": 2966,
+        "para_recall": 1,
+        "num_recall": 1,
+        "facts": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "via": "readability",
+        "token_ratio": 0.884
+      }
+    },
+    "https://arstechnica.com/gadgets/2026/09/mozillas-head-of-firefox-talks-product-priorities-ai-skepticism-and-browser-choice/": {
+      "url": "https://arstechnica.com/gadgets/2026/09/mozillas-head-of-firefox-talks-product-priorities-ai-skepticism-and-browser-choice/",
+      "at": "2026-09-30T02:48:54.403Z",
+      "ms": 4235,
+      "reference": {
+        "root": "main",
+        "paragraphs": 54,
+        "numbers": 5,
+        "consent_words": false
+      },
+      "page_text": {
+        "chars": 25714,
+        "tokens": 6429,
+        "para_recall": 1,
+        "num_recall": 1,
+        "facts": [
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      "reader": {
+        "chars": 23874,
+        "tokens": 5969,
+        "para_recall": 1,
+        "num_recall": 1,
+        "facts": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "title": "Interview: Firefox's chief on why he hopes a redesign will help win users from Chrome",
+        "token_ratio": 0.928
+      },
+      "arm": {
+        "chars": 23874,
+        "tokens": 5969,
+        "para_recall": 1,
+        "num_recall": 1,
+        "facts": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "via": "readability",
+        "token_ratio": 0.928
+      }
+    },
+    "https://www.theguardian.com/news/2026/sep/29/why-am-i-obsessed-with-chinas-ancient-golden-age-i-took-my-daughter-on-a-trip-to-find-out": {
+      "url": "https://www.theguardian.com/news/2026/sep/29/why-am-i-obsessed-with-chinas-ancient-golden-age-i-took-my-daughter-on-a-trip-to-find-out",
+      "at": "2026-09-30T02:48:58.685Z",
+      "ms": 4262,
+      "reference": {
+        "root": "main",
+        "paragraphs": 69,
+        "numbers": 29,
+        "consent_words": false
+      },
+      "page_text": {
+        "chars": 29438,
+        "tokens": 7360,
+        "para_recall": 1,
+        "num_recall": 1,
+        "facts": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      "reader": {
+        "chars": 27156,
+        "tokens": 6789,
+        "para_recall": 0.986,
+        "num_recall": 1,
+        "facts": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "title": "Why am I obsessed with China’s ancient golden age? I took my daughter on a trip to find out",
+        "token_ratio": 0.922
+      },
+      "arm": {
+        "chars": 27156,
+        "tokens": 6789,
+        "para_recall": 0.986,
+        "num_recall": 1,
+        "facts": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "via": "readability",
+        "token_ratio": 0.922
+      }
+    },
+    "https://arstechnica.com/cars/2026/09/connected-car-data-privacy-is-still-abysmal-study-finds/": {
+      "url": "https://arstechnica.com/cars/2026/09/connected-car-data-privacy-is-still-abysmal-study-finds/",
+      "at": "2026-09-30T02:49:02.937Z",
+      "ms": 4229,
+      "reference": {
+        "root": "main",
+        "paragraphs": 11,
+        "numbers": 11,
+        "consent_words": true
+      },
+      "page_text": {
+        "chars": 6857,
+        "tokens": 1714,
+        "para_recall": 1,
+        "num_recall": 1
+      },
+      "reader": {
+        "chars": 4894,
+        "tokens": 1224,
+        "para_recall": 1,
+        "num_recall": 1,
+        "title": "This study looks at how and with whom connected cars share your data",
+        "token_ratio": 0.714
+      },
+      "arm": {
+        "chars": 4894,
+        "tokens": 1224,
+        "para_recall": 1,
+        "num_recall": 1,
+        "via": "readability",
+        "token_ratio": 0.714
+      }
+    },
+    "https://www.bbc.com/news/articles/cqn8m342rgk9o": {
+      "url": "https://www.bbc.com/news/articles/cqn8m342rgk9o",
+      "at": "2026-09-30T02:49:07.691Z",
+      "ms": 4752,
+      "reference": {
+        "root": "main",
+        "paragraphs": 18,
+        "numbers": 6,
+        "consent_words": true
+      },
+      "page_text": {
+        "chars": 4602,
+        "tokens": 1151,
+        "para_recall": 1,
+        "num_recall": 1
+      },
+      "reader": {
+        "chars": 1202,
+        "tokens": 301,
+        "para_recall": 0.333,
+        "num_recall": 0.667,
+        "title": "One of the five men arrested near RAF Fairford called 999 himself",
+        "token_ratio": 0.262
+      },
+      "arm": {
+        "chars": 1202,
+        "tokens": 301,
+        "para_recall": 0.333,
+        "num_recall": 0.667,
+        "via": "readability",
+        "token_ratio": 0.262
+      }
+    },
+    "https://apnews.com/article/hurricane-polo-landfall-mexico-baja-california-rachel-db57554d97c70cd44b99df9ff0a41668": {
+      "url": "https://apnews.com/article/hurricane-polo-landfall-mexico-baja-california-rachel-db57554d97c70cd44b99df9ff0a41668",
+      "at": "2026-09-30T02:49:13.676Z",
+      "ms": 5984,
+      "reference": {
+        "root": "main",
+        "paragraphs": 32,
+        "numbers": 15,
+        "consent_words": false
+      },
+      "page_text": {
+        "chars": 11784,
+        "tokens": 2946,
+        "para_recall": 1,
+        "num_recall": 1
+      },
+      "reader": {
+        "chars": 6401,
+        "tokens": 1600,
+        "para_recall": 0.719,
+        "num_recall": 0.8,
+        "title": "Hurricane Polo leaves flooding in northern Mexico as rains pummel US Southwest | AP News",
+        "token_ratio": 0.543
+      },
+      "arm": {
+        "chars": 6401,
+        "tokens": 1600,
+        "para_recall": 0.719,
+        "num_recall": 0.8,
+        "via": "readability",
+        "token_ratio": 0.543
+      }
+    },
+    "https://www.npr.org/2026/09/28/nx-s1-5982739/what-to-know-about-the-810-million-in-spending-canceled-by-president-trump": {
+      "url": "https://www.npr.org/2026/09/28/nx-s1-5982739/what-to-know-about-the-810-million-in-spending-canceled-by-president-trump",
+      "at": "2026-09-30T02:49:18.787Z",
+      "ms": 5110,
+      "reference": {
+        "root": "body",
+        "paragraphs": 12,
+        "numbers": 5,
+        "consent_words": true
+      },
+      "page_text": {
+        "chars": 5570,
+        "tokens": 1393,
+        "para_recall": 1,
+        "num_recall": 1
+      },
+      "reader": {
+        "chars": 3563,
+        "tokens": 891,
+        "para_recall": 0.917,
+        "num_recall": 1,
+        "title": "What to know about the $810 million in spending canceled by President Trump",
+        "token_ratio": 0.64
+      },
+      "arm": {
+        "chars": 3563,
+        "tokens": 891,
+        "para_recall": 0.917,
+        "num_recall": 1,
+        "via": "readability",
+        "token_ratio": 0.64
+      }
+    },
+    "https://www.theverge.com/tech/1001797/nothings-headphone-1-pro-review": {
+      "url": "https://www.theverge.com/tech/1001797/nothings-headphone-1-pro-review",
+      "at": "2026-09-30T02:49:24.963Z",
+      "ms": 6176,
+      "reference": {
+        "root": "main",
+        "paragraphs": 3,
+        "numbers": 4,
+        "consent_words": true
+      },
+      "page_text": {
+        "chars": 4067,
+        "tokens": 1017,
+        "para_recall": 1,
+        "num_recall": 1
+      },
+      "reader": {
+        "chars": 1606,
+        "tokens": 402,
+        "para_recall": 1,
+        "num_recall": 1,
+        "title": "Nothing’s new flagship Headphone 1 Pro put you in the studio",
+        "token_ratio": 0.395
+      },
+      "arm": {
+        "chars": 1606,
+        "tokens": 402,
+        "para_recall": 1,
+        "num_recall": 1,
+        "via": "readability",
+        "token_ratio": 0.395
+      }
+    },
+    "https://techcrunch.com/2026/09/29/tesla-secures-30b-in-new-credit-lines-as-it-looks-to-scale-cybercab-optimus/": {
+      "url": "https://techcrunch.com/2026/09/29/tesla-secures-30b-in-new-credit-lines-as-it-looks-to-scale-cybercab-optimus/",
+      "at": "2026-09-30T02:49:29.428Z",
+      "ms": 4463,
+      "reference": {
+        "root": "main",
+        "paragraphs": 4,
+        "numbers": 6,
+        "consent_words": false
+      },
+      "page_text": {
+        "chars": 3969,
+        "tokens": 992,
+        "para_recall": 1,
+        "num_recall": 1
+      },
+      "reader": {
+        "chars": 975,
+        "tokens": 244,
+        "para_recall": 1,
+        "num_recall": 1,
+        "title": "Tesla secures $30B in new credit lines as it looks to scale Cybercab, Optimus",
+        "token_ratio": 0.246
+      },
+      "arm": {
+        "chars": 975,
+        "tokens": 244,
+        "para_recall": 1,
+        "num_recall": 1,
+        "via": "readability",
+        "token_ratio": 0.246
+      }
+    },
+    "https://www.wired.com/story/anthropic-says-it-discovered-a-crispr-like-system-now-what/": {
+      "url": "https://www.wired.com/story/anthropic-says-it-discovered-a-crispr-like-system-now-what/",
+      "at": "2026-09-30T02:50:02.152Z",
+      "ms": 32723,
+      "reference": {
+        "root": "main",
+        "paragraphs": 18,
+        "numbers": 9,
+        "consent_words": false
+      },
+      "page_text": {
+        "chars": 13224,
+        "tokens": 3306,
+        "para_recall": 1,
+        "num_recall": 1
+      },
+      "reader": {
+        "chars": 3740,
+        "tokens": 935,
+        "para_recall": 0.5,
+        "num_recall": 0.444,
+        "title": "Anthropic Says It Discovered a Crispr-Like System. Now What?",
+        "token_ratio": 0.283
+      },
+      "arm": {
+        "chars": 3740,
+        "tokens": 935,
+        "para_recall": 0.5,
+        "num_recall": 0.444,
+        "via": "readability",
+        "token_ratio": 0.283
+      }
+    },
+    "https://www.quantamagazine.org/mathematicians-harness-randomness-to-crack-a-55-year-old-conjecture-20260928/": {
+      "url": "https://www.quantamagazine.org/mathematicians-harness-randomness-to-crack-a-55-year-old-conjecture-20260928/",
+      "at": "2026-09-30T02:50:08.087Z",
+      "ms": 5933,
+      "reference": {
+        "root": "main",
+        "paragraphs": 35,
+        "numbers": 12,
+        "consent_words": false
+      },
+      "page_text": {
+        "chars": 15038,
+        "tokens": 3760,
+        "para_recall": 0.914,
+        "num_recall": 1
+      },
+      "reader": {
+        "chars": 12258,
+        "tokens": 3065,
+        "para_recall": 0.943,
+        "num_recall": 1,
+        "title": "Mathematicians Harness Randomness To Crack a 55-Year-Old Conjecture | Quanta Magazine",
+        "token_ratio": 0.815
+      },
+      "arm": {
+        "chars": 12258,
+        "tokens": 3065,
+        "para_recall": 0.943,
+        "num_recall": 1,
+        "via": "readability",
+        "token_ratio": 0.815
+      }
+    },
+    "https://www.smithsonianmag.com/history/some-earliest-automobile-enthusiasts-signed-up-help-allies-world-war-i-also-ushered-in-mechanization-war-180989285/": {
+      "url": "https://www.smithsonianmag.com/history/some-earliest-automobile-enthusiasts-signed-up-help-allies-world-war-i-also-ushered-in-mechanization-war-180989285/",
+      "at": "2026-09-30T02:50:12.431Z",
+      "ms": 4341,
+      "reference": {
+        "root": "div",
+        "paragraphs": 52,
+        "numbers": 53,
+        "consent_words": false
+      },
+      "page_text": {
+        "chars": 40942,
+        "tokens": 10236,
+        "para_recall": 1,
+        "num_recall": 1
+      },
+      "reader": {
+        "chars": 38804,
+        "tokens": 9701,
+        "para_recall": 0.962,
+        "num_recall": 1,
+        "title": "Some of the Earliest Automobile Enthusiasts Signed Up to Help the Allies in WWI. They Also Ushered in the Mechanization of War",
+        "token_ratio": 0.948
+      },
+      "arm": {
+        "chars": 38804,
+        "tokens": 9701,
+        "para_recall": 0.962,
+        "num_recall": 1,
+        "via": "readability",
+        "token_ratio": 0.948
+      }
+    },
+    "https://stackoverflow.blog/2026/09/29/your-phone-is-ai-s-newest-hardware/": {
+      "url": "https://stackoverflow.blog/2026/09/29/your-phone-is-ai-s-newest-hardware/",
+      "at": "2026-09-30T02:50:17.345Z",
+      "ms": 4901,
+      "reference": {
+        "root": "article",
+        "paragraphs": 3,
+        "numbers": 0,
+        "consent_words": true
+      },
+      "page_text": {
+        "chars": 2008,
+        "tokens": 502,
+        "para_recall": 1,
+        "num_recall": null
+      },
+      "reader": {
+        "chars": 340,
+        "tokens": 85,
+        "para_recall": 0.667,
+        "num_recall": null,
+        "title": "Your phone is AI’s newest hardware",
+        "token_ratio": 0.169
+      },
+      "arm": {
+        "chars": 340,
+        "tokens": 85,
+        "para_recall": 0.667,
+        "num_recall": null,
+        "via": "readability",
+        "token_ratio": 0.169
+      }
+    },
+    "https://www.cnn.com/2026/09/29/economy/trump-just-banned-canadian-booze-heres-what-you-need-to-know": {
+      "url": "https://www.cnn.com/2026/09/29/economy/trump-just-banned-canadian-booze-heres-what-you-need-to-know",
+      "at": "2026-09-30T02:50:23.310Z",
+      "ms": 5964,
+      "reference": {
+        "root": "article",
+        "paragraphs": 29,
+        "numbers": 7,
+        "consent_words": false
+      },
+      "page_text": {
+        "chars": 12048,
+        "tokens": 3012,
+        "para_recall": 1,
+        "num_recall": 1
+      },
+      "reader": {
+        "chars": 7802,
+        "tokens": 1951,
+        "para_recall": 1,
+        "num_recall": 1,
+        "title": "Trump just banned Canadian booze — but there’s a big catch",
+        "token_ratio": 0.648
+      },
+      "arm": {
+        "chars": 7802,
+        "tokens": 1951,
+        "para_recall": 1,
+        "num_recall": 1,
+        "via": "readability",
+        "token_ratio": 0.648
+      }
+    },
+    "https://simonwillison.net/2026/Sep/29/anthropic-frontier-red-team/": {
+      "url": "https://simonwillison.net/2026/Sep/29/anthropic-frontier-red-team/",
+      "at": "2026-09-30T02:50:27.362Z",
+      "ms": 4050,
+      "reference": {
+        "root": "body",
+        "paragraphs": 1,
+        "numbers": 4,
+        "consent_words": false
+      },
+      "page_text": {
+        "chars": 1221,
+        "tokens": 305,
+        "para_recall": 1,
+        "num_recall": 1
+      },
+      "reader": {
+        "chars": 520,
+        "tokens": 130,
+        "para_recall": 1,
+        "num_recall": 1,
+        "title": "A quote from Anthropic Frontier Red Team",
+        "token_ratio": 0.426
+      },
+      "arm": {
+        "chars": 520,
+        "tokens": 130,
+        "para_recall": 1,
+        "num_recall": 1,
+        "via": "readability",
+        "token_ratio": 0.426
+      }
+    },
+    "https://www.nature.com/articles/d41586-026-03043-w": {
+      "url": "https://www.nature.com/articles/d41586-026-03043-w",
+      "at": "2026-09-30T02:50:32.072Z",
+      "ms": 4709,
+      "reference": {
+        "root": "main",
+        "paragraphs": 13,
+        "numbers": 12,
+        "consent_words": false
+      },
+      "page_text": {
+        "chars": 8442,
+        "tokens": 2111,
+        "para_recall": 1,
+        "num_recall": 1
+      },
+      "reader": {
+        "chars": 3966,
+        "tokens": 992,
+        "para_recall": 0.923,
+        "num_recall": 1,
+        "title": "Old hearts age backwards: transplanted organs adjust to host’s biological age",
+        "token_ratio": 0.47
+      },
+      "arm": {
+        "chars": 3966,
+        "tokens": 992,
+        "para_recall": 0.923,
+        "num_recall": 1,
+        "via": "readability",
+        "token_ratio": 0.47
+      }
+    },
+    "https://hacks.mozilla.org/2026/08/intent-to-ship-jpeg-xl/": {
+      "url": "https://hacks.mozilla.org/2026/08/intent-to-ship-jpeg-xl/",
+      "at": "2026-09-30T02:50:36.165Z",
+      "ms": 4091,
+      "reference": {
+        "root": "main",
+        "paragraphs": 11,
+        "numbers": 11,
+        "consent_words": false
+      },
+      "page_text": {
+        "chars": 3784,
+        "tokens": 946,
+        "para_recall": 1,
+        "num_recall": 1
+      },
+      "reader": {
+        "chars": 3102,
+        "tokens": 776,
+        "para_recall": 1,
+        "num_recall": 1,
+        "title": "Intent to Ship: JPEG XL – Mozilla Hacks - the Web developer blog",
+        "token_ratio": 0.82
+      },
+      "arm": {
+        "chars": 3102,
+        "tokens": 776,
+        "para_recall": 1,
+        "num_recall": 1,
+        "via": "readability",
+        "token_ratio": 0.82
+      }
+    },
+    "https://www.aljazeera.com/news/2025/11/11/how-many-times-has-israel-violated-the-gaza-ceasefire-here-are-the-numbers": {
+      "url": "https://www.aljazeera.com/news/2025/11/11/how-many-times-has-israel-violated-the-gaza-ceasefire-here-are-the-numbers",
+      "at": "2026-09-30T02:50:41.125Z",
+      "ms": 4959,
+      "reference": {
+        "root": "main",
+        "paragraphs": 24,
+        "numbers": 36,
+        "consent_words": true
+      },
+      "page_text": {
+        "chars": 8267,
+        "tokens": 2067,
+        "para_recall": 1,
+        "num_recall": 1
+      },
+      "reader": {
+        "chars": 5992,
+        "tokens": 1498,
+        "para_recall": 1,
+        "num_recall": 1,
+        "title": "How many times has Israel violated the Gaza ceasefire? Here are the numbers",
+        "token_ratio": 0.725
+      },
+      "arm": {
+        "chars": 5992,
+        "tokens": 1498,
+        "para_recall": 1,
+        "num_recall": 1,
+        "via": "readability",
+        "token_ratio": 0.725
+      }
+    },
+    "https://en.wikipedia.org/wiki/Firefox": {
+      "url": "https://en.wikipedia.org/wiki/Firefox",
+      "at": "2026-09-30T02:50:46.111Z",
+      "ms": 4983,
+      "reference": {
+        "root": "main",
+        "paragraphs": 102,
+        "numbers": 395,
+        "consent_words": false
+      },
+      "page_text": {
+        "chars": 125823,
+        "tokens": 31456,
+        "para_recall": 1,
+        "num_recall": 1
+      },
+      "reader": {
+        "chars": 0,
+        "tokens": 0,
+        "para_recall": 0,
+        "num_recall": 0,
+        "title": null,
+        "error": "javascript_tool returned non-JSON: {\"title\":\"Firefox\",\"byline\":\"Contributors to Wikimedia projects\",\"excerpt\":\"This article is about the web browser. For other uses, see Firefox (disambiguation). \\\"Ph",
+        "token_ratio": 0
+      },
+      "arm": {
+        "chars": 0,
+        "tokens": 0,
+        "para_recall": 0,
+        "num_recall": 0,
+        "via": "error",
+        "error": "javascript_tool returned non-JSON: {\"via\":\"readability\",\"title\":\"Firefox\",\"byline\":\"Contributors to Wikimedia projects\",\"text\":\"This article is about the web browser. For other uses, see Firefox (disa",
+        "token_ratio": 0
+      }
+    },
+    "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API": {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API",
+      "at": "2026-09-30T02:50:50.141Z",
+      "ms": 4018,
+      "reference": {
+        "root": "main",
+        "paragraphs": 7,
+        "numbers": 0,
+        "consent_words": false
+      },
+      "page_text": {
+        "chars": 3803,
+        "tokens": 951,
+        "para_recall": 1,
+        "num_recall": null
+      },
+      "reader": {
+        "chars": 2400,
+        "tokens": 600,
+        "para_recall": 0.857,
+        "num_recall": null,
+        "title": "Fetch API - Web APIs | MDN",
+        "token_ratio": 0.631
+      },
+      "arm": {
+        "chars": 2649,
+        "tokens": 662,
+        "para_recall": 1,
+        "num_recall": null,
+        "via": "fallback",
+        "token_ratio": 0.696
+      }
+    },
+    "https://github.com/mozilla/readability": {
+      "url": "https://github.com/mozilla/readability",
+      "at": "2026-09-30T02:50:56.106Z",
+      "ms": 5964,
+      "reference": {
+        "root": "main",
+        "paragraphs": 9,
+        "numbers": 0,
+        "consent_words": false
+      },
+      "page_text": {
+        "chars": 9229,
+        "tokens": 2307,
+        "para_recall": 1,
+        "num_recall": null
+      },
+      "reader": {
+        "chars": 6572,
+        "tokens": 1643,
+        "para_recall": 1,
+        "num_recall": null,
+        "title": "mozilla/readability: A standalone version of the readability lib",
+        "token_ratio": 0.712
+      },
+      "arm": {
+        "chars": 9047,
+        "tokens": 2262,
+        "para_recall": 1,
+        "num_recall": null,
+        "via": "fallback",
+        "token_ratio": 0.98
+      }
+    },
+    "https://www.paulgraham.com/greatwork.html": {
+      "url": "https://www.paulgraham.com/greatwork.html",
+      "at": "2026-09-30T02:51:00.184Z",
+      "ms": 4077,
+      "reference": {
+        "root": "body",
+        "paragraphs": 0,
+        "numbers": 0,
+        "consent_words": false
+      },
+      "page_text": {
+        "chars": 67029,
+        "tokens": 16757,
+        "para_recall": null,
+        "num_recall": null
+      },
+      "reader": {
+        "chars": 59284,
+        "tokens": 14821,
+        "para_recall": null,
+        "num_recall": null,
+        "title": "How to Do Great Work",
+        "token_ratio": 0.884
+      },
+      "arm": {
+        "chars": 59284,
+        "tokens": 14821,
+        "para_recall": null,
+        "num_recall": null,
+        "via": "readability",
+        "token_ratio": 0.884
+      }
+    }
+  },
+  "updated": "2026-09-30T02:51:00.192Z"
+}
