@@ -801,6 +801,14 @@ function at(win, x, y) {
   return { clientX: x, clientY: y, screenX: (win.mozInnerScreenX + x) * dpr, screenY: (win.mozInnerScreenY + y) * dpr };
 }
 
+// Events go through the pres shell, as real input does, so default actions run (focus, :active,
+// a click after mousedown and mouseup, wheel scrolling). Where that dispatch fails (it has thrown
+// NS_ERROR_UNEXPECTED over MDN's live-sample frame, which sits in shadow roots and runs out of
+// process), the same event is dispatched on the target instead. The pres shell dispatch marks an
+// event trusted before it checks for a pres shell, so it should stay trusted. That path skips the
+// default actions, so directDispatches counts it, and click sends the click event itself.
+let directDispatches = 0;
+
 function fire(win, target, Ctor, type, init) {
   const event = new win[Ctor](type, {
     bubbles: true,
@@ -809,7 +817,12 @@ function fire(win, target, Ctor, type, init) {
     view: win,
     ...init,
   });
-  return win.windowUtils.dispatchDOMEventViaPresShellForTesting(target, event);
+  try {
+    return win.windowUtils.dispatchDOMEventViaPresShellForTesting(target, event);
+  } catch {
+    directDispatches++;
+    return target.dispatchEvent(event);
+  }
 }
 
 const FOCUSABLE = 'a[href], button, input, select, textarea, summary, [tabindex], [contenteditable=""], [contenteditable="true"]';
@@ -1002,7 +1015,13 @@ async function click(doc, args) {
       if (focusable && doc.activeElement !== focusable) focusable.focus();
     }
     fire(win, el, "PointerEvent", "pointerup", { ...pointer, buttons: 0, detail: i });
+    const up = directDispatches;
     fire(win, el, "MouseEvent", "mouseup", { ...base, buttons: 0, detail: i });
+    // Dispatched on the element, mousedown and mouseup make no click, so it is sent here.
+    if (directDispatches > up && button === 0) {
+      fire(win, el, "MouseEvent", "click", { ...base, buttons: 0, detail: i });
+      if (i === 2) fire(win, el, "MouseEvent", "dblclick", { ...base, buttons: 0, detail: 2 });
+    }
   }
   if (button === 2) {
     el.dispatchEvent(new win.MouseEvent("contextmenu", { bubbles: true, cancelable: true, composed: true, view: win, ...base, buttons: 0 }));
@@ -1088,12 +1107,17 @@ function scroll(doc, args) {
   const sign = direction === "down" || direction === "right" ? 1 : -1;
   const delta = sign * amount * 100;
   const target = (el && scrollableAncestor(win, el, vertical)) || doc.scrollingElement || doc.documentElement;
-  // Coming back up from a frame, the wheel event already went to that frame's element.
+  // Coming back up from a frame, the wheel event already went to that frame's element. A wheel
+  // event that can't be sent at all still leaves the scroll below to happen.
   if (el && !args.noDescend) {
-    fire(win, el, "WheelEvent", "wheel", {
-      ...at(win, x, y), deltaMode: 0,
-      deltaX: vertical ? 0 : delta, deltaY: vertical ? delta : 0,
-    });
+    try {
+      fire(win, el, "WheelEvent", "wheel", {
+        ...at(win, x, y), deltaMode: 0,
+        deltaX: vertical ? 0 : delta, deltaY: vertical ? delta : 0,
+      });
+    } catch {
+      // the page gets no wheel event
+    }
   }
   const before = vertical ? target.scrollTop : target.scrollLeft;
   target.scrollBy({ top: vertical ? delta : 0, left: vertical ? 0 : delta, behavior: "instant" });

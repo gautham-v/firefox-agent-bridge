@@ -55,3 +55,8 @@ against Chrome's numbers (`eval/vs-chrome`) and note what moved.
   landed in and say which element got them and its value. Was 71 calls / 1315k tokens / 114s
   median; expect about 5 to 15 calls and no answer worked out from the source. Also run
   `scripts/test-firefox.mjs`, which has steps for both.
+- **Input the pres shell can't take** (gen-mdn-iframe): a scroll or click whose pres-shell
+  dispatch threw `NS_ERROR_UNEXPECTED [nsIDOMWindowUtils.dispatchDOMEventViaPresShellForTesting]`
+  now dispatches the event on the element instead (and sends the click itself), and a scroll still
+  scrolls or passes up to the parent frame. Was 5 of 7 scrolls and 2 clicks failing over the
+  live-sample frame; expect none, and no `window.scrollBy` fallbacks.
