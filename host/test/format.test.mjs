@@ -19,6 +19,7 @@ test("firefox tool summaries never include typed text, form values, script sourc
     ["mcp__firefox__file_upload", { paths: ["/Users/me/secret.pdf", "/Users/me/b.png"], ref: "ref_2", tabId: 1 }, "Upload 2 file(s)"],
     ["mcp__firefox__get_page_text", { tabId: 1 }, "Read the page text"],
     ["mcp__firefox__tabs_context_mcp", {}, "List tabs"],
+    ["mcp__firefox__replay_steps", { path: "/Users/me/.claude/skills/renew-books/replay.json", inputs: { pin: "s3cret" } }, "Replay renew-books"],
   ];
   for (const [name, input, want] of cases) {
     const got = summarizeToolUse(name, input);
@@ -55,6 +56,7 @@ test("tool results only carry text when they failed, plus a few harmless one-lin
   assert.equal(summarizeToolResult("mcp__firefox__get_page_text", "the page's private text", false), "");
   assert.equal(summarizeToolResult("mcp__firefox__javascript_tool", "document.cookie value", false), "");
   assert.equal(summarizeToolResult("mcp__firefox__navigate", "Navigated to https://a.example/\nTitle: A", false), "Navigated to https://a.example/");
+  assert.equal(summarizeToolResult("mcp__firefox__replay_steps", 'Replay stopped at step 3 of 5: click button "Renew".\nPage: ...', false), 'Replay stopped at step 3 of 5: click button "Renew".');
   assert.equal(summarizeToolResult("mcp__firefox__computer", [{ type: "image", source: {} }], false), "Screenshot captured");
   assert.equal(summarizeToolResult("mcp__firefox__find", [{ type: "text", text: "Tab 3 not in this group\nmore" }], true), "Tab 3 not in this group");
   assert.equal(summarizeToolResult("Bash", "", true), "Failed");

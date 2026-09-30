@@ -45,7 +45,7 @@ const control = createControl({
 });
 
 function onRequest(msg) {
-  if (msg.type?.startsWith("chat.")) return chatFromHost(msg);
+  if (msg.type?.startsWith("chat.") || msg.type?.startsWith("teach.")) return chatFromHost(msg);
   if (msg.type === "client") return control.clientEvent(msg);
   if (msg.type !== "call") return;
   control.handleCall(msg, runTool, async (tabId) => (await browser.tabs.get(tabId)).url);
@@ -528,9 +528,156 @@ async function runTool(session, tool, args, client) {
       await requireTab(session, args.tabId);
       return [text(await browser.claudePage.upload(args.tabId, args.ref, args.paths ?? []))];
 
+    case "replay_steps":
+      return replaySteps(session, args, client);
+
     default:
       throw new Error(`Unknown tool ${tool}`);
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// replay_steps: runs a Teach recording's replay.json (docs/teach.md) without the model. Each
+// step's target is found again by role and name (the actor falls back to the selector and
+// nearby text), acted on, and its `expect` checked. The first step that doesn't match ends the
+// run with what was expected and a snapshot of the page, so the agent can take over there.
+
+const LOCATE_MS = 6000;
+const EXPECT_MS = 8000;
+const MAX_REPLAY_STEPS = 200;
+
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+const describeTarget = (t) => `${t?.role || "element"}${t?.name ? ` "${t.name}"` : ""}`;
+
+function stepLabel(step) {
+  if (step.click) return `click ${describeTarget(step.click)}`;
+  if (step.type) return `type into ${describeTarget(step.type)}`;
+  if (step.select) return `select in ${describeTarget(step.select)}`;
+  if (step.key) return `press ${step.key}`;
+  if (step.navigate) return `open ${hostOf(step.navigate) || "a page"}`;
+  return "an unknown step";
+}
+
+function expectedOf(step) {
+  const t = step.click ?? step.type ?? step.select;
+  if (!t) return stepLabel(step);
+  const also = [t.css && `selector ${t.css}`, t.near && `near "${t.near}"`].filter(Boolean);
+  return `${describeTarget(t)}${also.length ? ` (${also.join(", ")})` : ""}`;
+}
+
+// "{card_number}" becomes that input's value; names without one are collected in `missing`.
+const withInputs = (s, inputs, missing) =>
+  String(s ?? "").replace(/\{(\w+)\}/g, (m, name) => {
+    if (Object.hasOwn(inputs, name)) return String(inputs[name]);
+    missing.push(name);
+    return m;
+  });
+
+async function locateTarget(tabId, target) {
+  const deadline = Date.now() + LOCATE_MS;
+  for (;;) {
+    const found = await page(tabId, "locate", { target, frame: target.frame }).catch(() => null);
+    if (found?.ref) return found;
+    if (Date.now() > deadline) return null;
+    await sleep(250);
+  }
+}
+
+// After an action: a page load it started is waited out like navigate's.
+async function settle(tabId) {
+  await sleep(300);
+  if ((await browser.tabs.get(tabId)).status !== "complete") await waitForLoad(tabId);
+}
+
+async function expectMet(tabId, expect) {
+  const deadline = Date.now() + EXPECT_MS;
+  for (;;) {
+    const urlOk = !expect.url || String((await browser.tabs.get(tabId)).url).includes(expect.url);
+    const textOk = urlOk && (!expect.text || (await page(tabId, "contains", { text: expect.text }).catch(() => false)));
+    if (textOk) return true;
+    if (Date.now() > deadline) return false;
+    await sleep(300);
+  }
+}
+
+async function replayStopped(tabId, steps, i, expected, found) {
+  const step = steps[i];
+  const tab = await browser.tabs.get(tabId).catch(() => null);
+  const snapshot = await page(tabId, "readPage", { filter: "interactive", maxChars: 6000, frameScale: await frameScale(tabId) }).catch((e) => `(Couldn't read the page: ${e.message})`);
+  const lines = [
+    `Replay stopped at step ${i + 1} of ${steps.length}: ${stepLabel(step)}.`,
+    `Expected: ${expected}`,
+    `Found: ${found}`,
+    step.shot ? `Screenshot of this step when it was recorded: ${step.shot}` : null,
+    i ? `Steps 1-${i} ran.` : "No steps ran.",
+    tab ? `Tab ${tabId}: ${tab.url}\nTitle: ${tab.title}` : null,
+    "Finish the task from here with the other Firefox tools.",
+    "",
+    "Page (interactive elements):",
+    snapshot,
+  ];
+  return [text(lines.filter((l) => l != null).join("\n"))];
+}
+
+async function replaySteps(session, args, client) {
+  const replay = args.replay;
+  const steps = Array.isArray(replay?.steps) ? replay.steps : [];
+  if (!steps.length) throw new Error("replay_steps needs a replay.json with steps.");
+  if (steps.length > MAX_REPLAY_STEPS) throw new Error(`A replay can have at most ${MAX_REPLAY_STEPS} steps.`);
+  const inputs = args.inputs && typeof args.inputs === "object" ? args.inputs : {};
+  let tabId = args.tabId;
+  if (tabId == null) tabId = (await tabContext(session, true, client)).availableTabs[0].tabId;
+  await requireTab(session, tabId);
+  // It starts where the recording did, unless the tab is already on that site.
+  if (replay.start && hostOf((await browser.tabs.get(tabId)).url) !== hostOf(replay.start)) {
+    await browser.tabs.update(tabId, { url: replay.start });
+    await waitForLoad(tabId);
+  }
+  for (let i = 0; i < steps.length; i++) {
+    // Stop answers the call at once; this ends the run behind it.
+    if (control.isPaused(session)) throw new Error("The user stopped the replay.");
+    const step = steps[i] && typeof steps[i] === "object" ? steps[i] : {};
+    const missing = [];
+    const value = withInputs(step.text ?? step.value ?? "", inputs, missing);
+    const url = step.navigate ? withInputs(step.navigate, inputs, missing) : null;
+    if (missing.length) return replayStopped(tabId, steps, i, `a value for the input "${missing[0]}"`, "it wasn't passed to replay_steps.");
+    try {
+      if (url) {
+        await browser.tabs.update(tabId, { url });
+        await waitForLoad(tabId);
+      } else if (step.key) {
+        await page(tabId, "key", { keys: String(step.key) });
+        await settle(tabId);
+      } else {
+        const target = step.click ?? step.type ?? step.select;
+        if (!target || typeof target !== "object") return replayStopped(tabId, steps, i, "a click, type, select, key or navigate step", "a step this version can't run.");
+        const found = await locateTarget(tabId, target);
+        if (!found) return replayStopped(tabId, steps, i, expectedOf(step), `nothing like it on the page after ${LOCATE_MS / 1000}s.`);
+        if (found.file) return replayStopped(tabId, steps, i, expectedOf(step), "a file input; use file_upload for it.");
+        const at = { ref: found.ref, frame: target.frame };
+        if (step.click) await page(tabId, "click", at);
+        else if (step.type) await page(tabId, "fill", { ...at, text: value });
+        else await page(tabId, "formInput", { ...at, value });
+        await settle(tabId);
+      }
+    } catch (e) {
+      return replayStopped(tabId, steps, i, expectedOf(step), e.message);
+    }
+    if (step.expect && typeof step.expect === "object" && !(await expectMet(tabId, step.expect))) {
+      const want = [step.expect.text && `the page to show "${step.expect.text}"`, step.expect.url && `the URL to contain "${step.expect.url}"`].filter(Boolean).join(" and ");
+      return replayStopped(tabId, steps, i, `after this step, ${want}`, `not within ${EXPECT_MS / 1000}s.`);
+    }
+  }
+  const tab = await browser.tabs.get(tabId);
+  const checks = steps.filter((s) => s?.expect).length;
+  return [text(`Replayed all ${steps.length} steps${checks ? `; ${checks} check(s) passed` : ""}.\nTab ${tabId}: ${tab.url}\nTitle: ${tab.title}`)];
 }
 
 // Pages in session tabs open new tabs (target=_blank links, window.open). Those join the
@@ -835,6 +982,7 @@ function chatHostDisconnected() {
 
 function offlineReply({ type, requestId, engine, chatId }) {
   if (type === "chat.history") return { type, requestId, chats: [] };
+  if (type === "teach.save") return { type: "teach.saved", requestId, ok: false, error: HOST_DOWN };
   if (type === "chat.load") return { type: "chat.transcript", requestId, chatId, items: [], done: true };
   return { type, requestId, engine, available: false, hostDown: true, version: null, error: HOST_DOWN, skills: [], plugins: [], connectors: [], models: [], efforts: [] };
 }
@@ -956,6 +1104,114 @@ browser.tabs.onActivated.addListener(async ({ tabId }) => {
   for (const chat of chats.values()) if (sessions.get(chat.id)?.groupId === tab.groupId) markSeen(chat);
 });
 
+// ---- Teach: recording the user's own tab (docs/teach.md)
+
+// The experiment reports each click, typing, select and Enter the user makes in the tab; a page
+// load the user started (typed in the address bar, went back) is a step too, one a click or
+// Enter caused isn't. Each step gets a small screenshot, for the panel and for the agent when a
+// replay stops there.
+const TYPE_SETTLE_MS = 700; // a little over the actor's pause before it reports typing
+const CAUSED_MS = 3000;
+const MAX_RECORDED_STEPS = 50;
+const SHOT_WIDTH = 400;
+const KEPT_RECORDINGS = 6;
+
+// chat id -> { id, chatId, tabId, site, start, startedAt, steps, shots: Map(n -> data URL), stopped, drafted, lastInput }
+const recordings = new Map();
+const clipText = (s, n) => (typeof s === "string" ? s.slice(0, n) : undefined);
+
+const teachView = (rec) =>
+  rec ? { id: rec.id, site: rec.site, start: rec.start, startedAt: rec.startedAt, stopped: rec.stopped, drafted: rec.drafted, steps: rec.steps.map((s) => ({ ...s })), shots: Object.fromEntries(rec.shots) } : null;
+
+function pruneRecordings() {
+  const old = [...recordings.values()].filter((r) => r.stopped);
+  for (const r of old.slice(0, Math.max(0, recordings.size - KEPT_RECORDINGS))) recordings.delete(r.chatId);
+}
+
+async function stopRecording(rec) {
+  if (rec.stopped) return;
+  rec.stopped = true;
+  await browser.claudePage.record(rec.tabId, false).catch(() => {});
+}
+
+// What the page reported, reduced to known fields of bounded size.
+function cleanTarget(t) {
+  if (!t || typeof t !== "object") return undefined;
+  const out = { role: clipText(t.role, 40) ?? "", name: clipText(t.name, 150) ?? "" };
+  if (t.css) out.css = clipText(t.css, 300);
+  if (t.near) out.near = clipText(t.near, 150);
+  if (Array.isArray(t.frame) && t.frame.length) out.frame = t.frame.slice(0, 8).map((f) => ({ index: Number(f.index) || 0, url: clipText(f.url, 300) ?? "" }));
+  return out;
+}
+
+function cleanStep(raw) {
+  const action = raw?.action;
+  if (!["click", "type", "select", "key", "navigate"].includes(action)) return null;
+  const step = { action };
+  if (raw.target) step.target = cleanTarget(raw.target);
+  if (action === "type" && (raw.secret === "keychain" || raw.secret === "ask")) step.secret = raw.secret;
+  else if (typeof raw.value === "string") step.value = raw.value.slice(0, 2000);
+  if (action === "key") step.key = clipText(raw.key, 20);
+  if (typeof raw.field === "string") step.field = raw.field.slice(0, 20);
+  if (typeof raw.url === "string" && /^https?:/.test(raw.url)) step.url = raw.url.slice(0, 2000);
+  return step;
+}
+
+async function stepShot(tabId) {
+  try {
+    const tab = await browser.tabs.get(tabId);
+    return await browser.tabs.captureTab(tabId, { format: "jpeg", quality: 60, scale: Math.min(1, SHOT_WIDTH / (tab.width || SHOT_WIDTH)) });
+  } catch {
+    return null;
+  }
+}
+
+async function addStep(rec, raw) {
+  const step = cleanStep(raw);
+  if (!step || rec.stopped) return;
+  if (step.action !== "navigate") rec.lastInput = Date.now();
+  const last = rec.steps.at(-1);
+  // Typing is reported after each pause in it; the same field is still the same step.
+  if (step.action === "type" && last?.action === "type" && last.field && last.field === step.field) {
+    Object.assign(last, step);
+    if (step.secret) delete last.value;
+    return deliver(rec.chatId, { type: "teach.step", recordingId: rec.id, step: { ...last } });
+  }
+  if (rec.steps.length >= MAX_RECORDED_STEPS) return;
+  step.n = rec.steps.length + 1;
+  rec.steps.push(step);
+  deliver(rec.chatId, { type: "teach.step", recordingId: rec.id, step: { ...step } });
+  const shot = await stepShot(rec.tabId);
+  if (!shot) return;
+  rec.shots.set(step.n, shot);
+  deliver(rec.chatId, { type: "teach.step", recordingId: rec.id, step: { ...step }, shot });
+}
+
+const recordingIn = (tabId) => [...recordings.values()].find((r) => r.tabId === tabId && !r.stopped);
+
+browser.claudePage.onRecord?.addListener((tabId, step) => {
+  const rec = recordingIn(tabId);
+  if (rec) addStep(rec, step);
+});
+
+// A load that starts well after the user's last click or Enter is one they asked for. The click's
+// own step can arrive a moment after the load begins, so this looks again shortly.
+browser.tabs.onUpdated.addListener((tabId, change, tab) => {
+  if (!change.url || tab.status !== "loading" || !recordingIn(tabId)) return;
+  const at = Date.now();
+  setTimeout(() => {
+    const rec = recordingIn(tabId);
+    if (rec && at - rec.lastInput > CAUSED_MS && /^https?:/.test(change.url)) addStep(rec, { action: "navigate", url: change.url });
+  }, 300);
+});
+
+browser.tabs.onRemoved.addListener(async (tabId) => {
+  const rec = recordingIn(tabId);
+  if (!rec) return;
+  await stopRecording(rec);
+  deliver(rec.chatId, { type: "teach", recording: teachView(rec) });
+});
+
 // ---- Panels
 
 async function sendState(panel) {
@@ -975,6 +1231,7 @@ async function sendState(panel) {
     engine: chat.engine,
     model: chat.model,
     effort: chat.effort,
+    teach: teachView(recordings.get(chat.id)),
   });
   panel.ready = true;
 }
@@ -1005,7 +1262,8 @@ async function lastNormalWindowId() {
 // Runs one chat.send at a time per chat so two quick messages don't bind twice.
 async function sendToHost(chat, m) {
   if (!port) return emit(chat, { kind: "error", code: "spawn", message: HOST_DOWN });
-  await bindChat(chat).catch(() => {});
+  // A Teach turn (drafting a skill, trying it) doesn't take the user's tab; a try opens its own.
+  if (!m.teach) await bindChat(chat).catch(() => {});
   const tabs = (await groupTabs(chat).catch(() => [])).map((t) => ({ tabId: t.id, title: t.title, url: t.url, current: !!t.active }));
   const resume = chat.resume;
   chat.resume = false;
@@ -1030,10 +1288,16 @@ const panelCommands = {
     return showChat(panel, id ? chatFor(id, panel.windowId) : newChat(panel.windowId));
   },
 
-  "chat.new"(panel) {
+  async "chat.new"(panel) {
     const old = chats.get(panel.chatId);
+    // A recording that was never drafted ends with its chat.
+    const rec = recordings.get(old?.id);
+    if (rec && !rec.drafted) {
+      await stopRecording(rec);
+      recordings.delete(rec.chatId);
+    }
     // Already looking at an untouched chat.
-    if (old && !old.events.length && !sessions.has(old.id)) return sendState(panel);
+    if (old && !old.events.length && !sessions.has(old.id) && !rec) return sendState(panel);
     return showChat(panel, newChat(panel.windowId, old));
   },
 
@@ -1090,6 +1354,57 @@ const panelCommands = {
     if (groupId == null || tab?.groupId !== groupId) return;
     await browser.tabs.ungroup(tab.id);
     scheduleGroupPush(chat.id);
+  },
+
+  // Teach: records the tab the user is viewing, in a fresh chat unless this one is untouched.
+  async "teach.start"(panel) {
+    const [tab] = await browser.tabs.query({ active: true, windowId: panel.windowId });
+    let error = null;
+    if (!tab || !/^https?:/.test(tab.url ?? "")) error = "Open the page where the task starts, then try again.";
+    else if ((await sessionGroupIds()).has(tab.groupId)) error = "This tab is in an agent's tab group. Switch to one of your own tabs.";
+    if (error) return post(panel, { type: "teach", error });
+    let chat = chats.get(panel.chatId);
+    if (chat.events.length || sessions.has(chat.id) || recordings.has(chat.id)) chat = newChat(panel.windowId, chat);
+    for (const r of recordings.values()) if (r.tabId === tab.id) await stopRecording(r);
+    try {
+      await browser.claudePage.record(tab.id, true);
+    } catch {
+      return post(panel, { type: "teach", error: "Firefox couldn't record this tab. Restart Firefox so the bridge's experiment is up to date." });
+    }
+    recordings.set(chat.id, { id: crypto.randomUUID(), chatId: chat.id, tabId: tab.id, site: hostOf(tab.url), start: tab.url, startedAt: Date.now(), steps: [], shots: new Map(), stopped: false, drafted: false, lastInput: 0 });
+    pruneRecordings();
+    return showChat(panel, chat);
+  },
+
+  // Stop and draft: the last typing settles first. The panel that asked gets its request id back
+  // and sends the draft turn; other panels showing the chat just redraw.
+  async "teach.stop"(panel, m) {
+    const rec = recordings.get(panel.chatId);
+    if (!rec) return;
+    if (!rec.stopped) {
+      await sleep(TYPE_SETTLE_MS);
+      await stopRecording(rec);
+    }
+    if (m.draft) rec.drafted = true;
+    const recording = teachView(rec);
+    for (const p of panels) if (p.chatId === rec.chatId) post(p, { type: "teach", recording, ...(p === panel ? { requestId: m.requestId } : {}) });
+  },
+
+  async "teach.discard"(panel) {
+    const rec = recordings.get(panel.chatId);
+    if (!rec) return;
+    await stopRecording(rec);
+    recordings.delete(rec.chatId);
+    deliver(rec.chatId, { type: "teach", recording: null });
+  },
+
+  // Writes the drafted skill (or, for Try it once, just its replay.json in the chat folder). The
+  // panel sends the recording and the engine's draft; the step screenshots are added here.
+  "teach.save"(panel, m) {
+    const chat = chats.get(panel.chatId);
+    const rec = [...recordings.values()].find((r) => r.id === m.recording?.id);
+    const shots = Object.fromEntries([...(rec?.shots ?? [])].map(([n, url]) => [n, url.split(",")[1] ?? ""]));
+    ask(panel, { type: "teach.save", requestId: m.requestId, chatId: chat.id, engine: chat.engine ?? "claude", mode: m.mode === "try" ? "try" : "skill", draft: m.draft, recording: m.recording, replay: m.replay !== false, replace: m.replace === true, shots });
   },
 
   // Stop all agents paused every session and any new one, so resuming from the panel undoes all

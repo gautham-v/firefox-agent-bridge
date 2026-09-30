@@ -64,6 +64,22 @@
         ]
       },
       {
+        "name": "record",
+        "type": "function",
+        "async": true,
+        "description": "Start or stop recording the user's own clicks, typing, selects and Enter presses in a tab (Teach). Steps arrive on onRecord.",
+        "parameters": [
+          {
+            "name": "tabId",
+            "type": "integer"
+          },
+          {
+            "name": "recording",
+            "type": "boolean"
+          }
+        ]
+      },
+      {
         "name": "setActive",
         "type": "function",
         "async": true,
@@ -76,6 +92,23 @@
           {
             "name": "active",
             "type": "boolean"
+          }
+        ]
+      }
+    ],
+    "events": [
+      {
+        "name": "onRecord",
+        "type": "function",
+        "description": "A step recorded in a tab that is being recorded: {action, target, value | secret, key, field, url}.",
+        "parameters": [
+          {
+            "name": "tabId",
+            "type": "integer"
+          },
+          {
+            "name": "step",
+            "type": "any"
           }
         ]
       }

@@ -22,6 +22,8 @@ function pageOrigin(url) {
 }
 
 const len = (v) => (v == null ? 0 : String(v).length);
+// replay_steps' input values (a card number, a password from the Keychain) are never logged.
+const inputValues = (args) => (args.inputs && typeof args.inputs === "object" ? Object.values(args.inputs) : []);
 
 // What the log may keep about a call's arguments: never typed text, form values, script source
 // or file paths, only their sizes.
@@ -49,6 +51,9 @@ function summarizeArgs(tool, args) {
     case "file_upload":
       out.detail = `${Array.isArray(args.paths) ? args.paths.length : 0} file(s)`;
       break;
+    case "replay_steps":
+      out.detail = `${Array.isArray(args.replay?.steps) ? args.replay.steps.length : 0} step(s), ${inputValues(args).length} input(s)`;
+      break;
   }
   return out;
 }
@@ -59,7 +64,7 @@ function logError(tool, args, message) {
   let msg = String(message ?? "");
   if (tool === "javascript_tool") return msg.match(/^\s*(?:Uncaught\s+)?(\w*Error)\b/)?.[1] ?? "page script failed";
   const paths = Array.isArray(args.paths) ? args.paths : [];
-  for (const secret of [args.text, args.value, args.query, args.url, ...paths]) {
+  for (const secret of [args.text, args.value, args.query, args.url, ...paths, ...inputValues(args)]) {
     if (secret == null || secret === "") continue;
     for (const form of [JSON.stringify(secret), String(secret)]) msg = msg.split(form).join("[redacted]");
   }

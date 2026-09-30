@@ -1154,6 +1154,254 @@ async function upload(doc, { ref, files }) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Teach: recording what the user does in a tab, and finding a recorded target again on replay
+// (docs/teach.md). The user's trusted clicks, typing, selects and Enter presses reach
+// handleEvent below (api.js registers the events) in tabs the parent has listed in sharedData,
+// and each becomes a step sent to the parent actor. Nothing typed into a password or other
+// secret field leaves this process: the step only says where the value should come from.
+
+const RECORDING_KEY = "firefox-agent-bridge:recording";
+const TYPE_SETTLE_MS = 600;
+const TEXT_TYPES = new Set(["text", "search", "email", "url", "tel", "number", "password", "date", "time", "datetime-local", "month", "week"]);
+
+function isTextField(el) {
+  if (el.tagName === "TEXTAREA") return true;
+  if (el.tagName === "INPUT") return TEXT_TYPES.has(el.type);
+  return el.isContentEditable;
+}
+
+// "keychain" for a saved password, "ask" for what changes every time (one-time codes, card
+// security codes), null for an ordinary field.
+function secretKind(el) {
+  const auto = String(el.autocomplete ?? "").toLowerCase();
+  const hints = [el.name, el.id, el.getAttribute("aria-label"), el.placeholder, nameOf(el, roleOf(el))].filter(Boolean).join(" ");
+  if (/one-time-code|cc-/.test(auto) || /\b(otp|2fa|one.?time|verification code|security code|cvv|cvc|csc|ssn|social security)\b/i.test(hints)) return "ask";
+  if (el.type === "password" || /password/.test(auto) || /\b(password|passcode|passphrase|pin)\b/i.test(hints)) return "keychain";
+  return null;
+}
+
+// A selector that is likely to survive a reload: an id that doesn't look generated, a test or
+// form attribute, or tag and position under the nearest such ancestor.
+function cssPath(el) {
+  const quote = (v) => `"${v.replace(/["\\]/g, "\\$&")}"`;
+  const parts = [];
+  for (let node = el; node?.nodeType === 1 && parts.length < 5; node = node.parentElement) {
+    if (node.id && !/\d{3,}|[:.\s]/.test(node.id) && node.id.length < 60) {
+      parts.unshift(`#${node.ownerDocument.defaultView.CSS.escape(node.id)}`);
+      break;
+    }
+    let part = node.tagName.toLowerCase();
+    const attr = ["data-testid", "data-test-id", "name", "aria-label"].find((a) => node.getAttribute(a) && node.getAttribute(a).length < 80);
+    if (attr) part += `[${attr}=${quote(node.getAttribute(attr))}]`;
+    else if (node.parentElement) {
+      const same = Array.from(node.parentElement.children).filter((c) => c.tagName === node.tagName);
+      if (same.length > 1) part += `:nth-of-type(${same.indexOf(node) + 1})`;
+    }
+    parts.unshift(part);
+    if (node === node.ownerDocument.body) break;
+  }
+  return parts.join(" > ");
+}
+
+// Short text around an element, from the nearest ancestor that says more than the element does:
+// the row a Renew button sits in, the label beside an unnamed field.
+function nearText(el, name) {
+  for (let node = el.parentElement, i = 0; node && i < 4; node = node.parentElement, i++) {
+    const text = clean(node.textContent, 121);
+    if (text.length > 120) return "";
+    if (text && text !== name) return text;
+  }
+  return "";
+}
+
+// An element's accessible name, or for one with no role (a clickable div), its own text.
+const targetName = (el, role) => nameOf(el, role) || (role ? "" : clean(ownTextOf(el), 150));
+
+function targetOf(el) {
+  const role = roleOf(el);
+  const name = targetName(el, role);
+  const target = { role: role || el.tagName.toLowerCase(), name };
+  const css = cssPath(el);
+  if (css) target.css = css;
+  const near = nearText(el, name);
+  if (near) target.near = near;
+  return target;
+}
+
+// What a click was on: the nearest interactive ancestor or label, as clickedLabel reads it.
+function clickTarget(el) {
+  for (let node = el; node?.nodeType === 1; node = node.parentElement) {
+    if (isInteractive(node, roleOf(node)) || node.tagName === "LABEL") return node;
+  }
+  return el;
+}
+
+const composedTarget = (event) => {
+  const t = event.composedTarget ?? event.composedPath?.()[0] ?? event.target;
+  return t?.nodeType === 1 ? t : t?.parentElement ?? null;
+};
+
+function isRecording(actor) {
+  try {
+    const ids = Services.cpmm.sharedData.get(RECORDING_KEY);
+    return Array.isArray(ids) && ids.includes(actor.browsingContext.browserId);
+  } catch {
+    return false;
+  }
+}
+
+function recordStep(actor, step) {
+  try {
+    actor.sendAsyncMessage("record", { ...step, url: actor.document?.location?.href ?? "" });
+  } catch {
+    // the page is going away
+  }
+}
+
+// Typing is reported once the field has been quiet a moment, and again after each later pause;
+// every report carries the same field id, so it stays one step.
+const fieldIds = new WeakMap();
+let nextField = 1;
+
+function flushTyping(actor) {
+  const r = actor.rec;
+  if (!r?.typing) return;
+  clearTimeout(r.timer);
+  const el = r.typing;
+  r.typing = null;
+  if (!el.isConnected) return;
+  if (!fieldIds.has(el)) fieldIds.set(el, `f${nextField++}`);
+  const step = { action: "type", target: targetOf(el), field: fieldIds.get(el) };
+  const secret = secretKind(el);
+  if (secret) step.secret = secret;
+  else step.value = String(el.isContentEditable ? el.innerText : el.value).slice(0, 2000);
+  recordStep(actor, step);
+}
+
+function onRecordEvent(actor, event) {
+  const r = (actor.rec ??= { typing: null, timer: 0, label: null, enterAt: 0 });
+  const el = composedTarget(event);
+  switch (event.type) {
+    case "click": {
+      // A double click is one step; a label's click is followed by one on its control; Enter in
+      // a form's field clicks its submit button, and the Enter is already the step.
+      if (event.button !== 0 || event.detail > 1 || !el) return;
+      if (event.detail === 0 && Date.now() - (r.enterAt ?? 0) < 200) return;
+      const target = clickTarget(el);
+      if (r.label && r.label.control === target && Date.now() - r.label.at < 100) return;
+      if (target.closest?.("select")) return; // opening a select; its change is the step
+      // Focusing a field, directly or through its label; the typing is the step.
+      if (isTextField(target) || (target.tagName === "LABEL" && target.control && isTextField(target.control))) return;
+      flushTyping(actor);
+      r.label = target.tagName === "LABEL" ? { control: target.control, at: Date.now() } : null;
+      recordStep(actor, { action: "click", target: targetOf(target) });
+      return;
+    }
+    case "input":
+      if (!el || !isTextField(el)) return;
+      if (r.typing && r.typing !== el) flushTyping(actor);
+      r.typing = el;
+      clearTimeout(r.timer);
+      r.timer = setTimeout(() => flushTyping(actor), TYPE_SETTLE_MS);
+      return;
+    case "change":
+      if (el?.tagName === "SELECT") {
+        flushTyping(actor);
+        recordStep(actor, { action: "select", target: targetOf(el), value: clean(Array.from(el.selectedOptions).map((o) => o.textContent).join(", "), 200) });
+      } else if (el && el === r.typing) flushTyping(actor);
+      return;
+    case "keydown":
+      if (event.key !== "Enter" || event.isComposing || !el || el.tagName !== "INPUT" || !isTextField(el)) return;
+      flushTyping(actor);
+      r.enterAt = Date.now();
+      recordStep(actor, { action: "key", key: "Enter", target: targetOf(el) });
+      return;
+    case "pagehide":
+      flushTyping(actor);
+  }
+}
+
+// Replay: finds a recorded target on the page as it is now. Role and accessible name first, then
+// the CSS selector, then looser matches; among several, the one whose surroundings or selector
+// match the recording. Returns a ref for the click, fill and formInput ops.
+const norm = (s) => clean(s, 300).toLowerCase();
+
+function locate(doc, { target }) {
+  const want = { role: target?.role ?? "", name: norm(target?.name), css: target?.css ?? "", near: norm(target?.near) };
+  const els = [];
+  const walk = (node) => {
+    for (const child of renderedChildren(node)) {
+      if (child.nodeType !== 1 || SKIP_TAGS.has(child.tagName) || child.getAttribute("aria-hidden") === "true") continue;
+      els.push(child);
+      walk(child);
+    }
+  };
+  walk(doc.body ?? doc.documentElement);
+  const rendered = (el) => isRendered(el) || (el.tagName === "INPUT" && el.type === "file");
+  // Names are worked out only for elements that get that far, and each only once.
+  const roles = new Map();
+  const names = new Map();
+  const roleAt = (el) => {
+    if (!roles.has(el)) roles.set(el, roleOf(el) || el.tagName.toLowerCase());
+    return roles.get(el);
+  };
+  const nameAt = (el) => {
+    if (!names.has(el)) names.set(el, norm(targetName(el, roleOf(el))));
+    return names.get(el);
+  };
+  const nearOf = (el) => norm(nearText(el, targetName(el, roleOf(el))));
+  let bySelector = null;
+  try {
+    bySelector = want.css ? doc.querySelector(want.css) : null;
+  } catch {
+    // not a selector this page's engine accepts
+  }
+  if (bySelector && !rendered(bySelector)) bySelector = null;
+  const pick = (list) => {
+    if (!list.length) return null;
+    if (list.length === 1) return list[0];
+    return list.find((el) => want.near && nearOf(el) === want.near) ?? list.find((el) => el === bySelector) ?? list[0];
+  };
+  const loose = (a, b) => a.length >= 3 && b.length >= 3 && (a.includes(b) || b.includes(a));
+  const candidates = els.filter(rendered);
+  const tiers = [
+    ["role and name", () => want.name && candidates.filter((el) => roleAt(el) === want.role && nameAt(el) === want.name)],
+    ["selector", () => bySelector && (!want.name || roleAt(bySelector) === want.role) && [bySelector]],
+    ["role and a similar name", () => want.name && candidates.filter((el) => roleAt(el) === want.role && loose(nameAt(el), want.name))],
+    ["name", () => want.name && candidates.filter((el) => isInteractive(el, roleOf(el)) && nameAt(el) === want.name)],
+    ["selector", () => bySelector && [bySelector]],
+    ["nearby text", () => want.near && candidates.filter((el) => roleAt(el) === want.role && nearOf(el) === want.near)],
+  ];
+  for (const [how, list] of tiers) {
+    const el = pick(list() || []);
+    if (el) return { ref: refFor(el), how, file: el.tagName === "INPUT" && el.type === "file" };
+  }
+  return { missing: true };
+}
+
+// Replaces a field's contents by typing, as the user did: focus, select what is there, type.
+async function fill(doc, { ref, text }) {
+  const el = resolveRef(doc, ref);
+  const win = doc.defaultView;
+  let r = el.getBoundingClientRect();
+  if (r.top < 0 || r.bottom > win.innerHeight) {
+    el.scrollIntoView({ block: "center", behavior: "instant" });
+    r = el.getBoundingClientRect();
+  }
+  await moveCursor(doc, r.left + r.width / 2, r.top + r.height / 2);
+  el.focus();
+  if (el.isContentEditable) win.getSelection().selectAllChildren(el);
+  else el.select?.();
+  if (text) type(doc, { text: String(text) });
+  else press(win, textInputProcessor(win), "Delete");
+  return `Typed ${[...String(text ?? "")].length} character(s) into ${clickedLabel(el)}`;
+}
+
+function contains(doc, { text }) {
+  return (doc.body?.innerText ?? "").toLowerCase().includes(String(text ?? "").toLowerCase());
+}
+
+// ---------------------------------------------------------------------------------------------
 
 // Size of the rendered text, polled by navigate to wait out single-page-app loading.
 function textSize(doc) {
@@ -1190,6 +1438,9 @@ const OPS = {
   formInput,
   evaluate,
   upload,
+  locate,
+  fill,
+  contains,
 };
 
 export class ClaudePageChild extends JSWindowActorChild {
@@ -1199,5 +1450,12 @@ export class ClaudePageChild extends JSWindowActorChild {
     const doc = this.document;
     if (!doc) throw new Error("No document in this frame.");
     return op(doc, data ?? {});
+  }
+
+  // Teach recording: the events api.js registers for this actor, in every tab. Only the user's
+  // own input in a tab being recorded counts.
+  handleEvent(event) {
+    if (!event.isTrusted || !isRecording(this)) return;
+    onRecordEvent(this, event);
   }
 }

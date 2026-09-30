@@ -163,6 +163,28 @@ try {
     assert.deepEqual(reply.result, textResult("tabs: none"));
   });
 
+  await test("replay_steps reads the replay.json, resolves its screenshots, and sends Firefox the steps", async () => {
+    const dir = path.join(HOME, "skills/renew");
+    fs.mkdirSync(dir, { recursive: true });
+    const steps = [{ click: { role: "button", name: "Renew all" }, shot: "steps/1.jpg", expect: { text: "Renewed" } }];
+    fs.writeFileSync(path.join(dir, "replay.json"), JSON.stringify({ version: 1, site: "a.example", start: "https://a.example/", inputs: ["pin:keychain"], steps }));
+    const pCall = mcp.request("tools/call", { name: "replay_steps", arguments: { path: path.join(dir, "replay.json"), inputs: { pin: "1234" }, tabId: 4 } });
+    const call = await expectHost("replay call", isCall("replay_steps"));
+    assert.equal(call.args.path, undefined, "the path stays on this side");
+    assert.deepEqual(call.args.inputs, { pin: "1234" });
+    assert.equal(call.args.tabId, 4);
+    assert.equal(call.args.replay.steps[0].shot, path.join(dir, "steps/1.jpg"));
+    assert.equal(call.args.replay.start, "https://a.example/");
+    toHost({ id: call.id, result: textResult("Replayed all 1 steps") });
+    assert.deepEqual((await pCall).result, textResult("Replayed all 1 steps"));
+
+    const bad = await mcp.request("tools/call", { name: "replay_steps", arguments: { path: "relative/replay.json" } });
+    assert.equal(bad.result.isError, true);
+    assert.match(bad.result.content[0].text, /absolute path/);
+    const missing = await mcp.request("tools/call", { name: "replay_steps", arguments: { path: path.join(dir, "nope.json") } });
+    assert.match(missing.result.content[0].text, /Couldn't read .*nope\.json/);
+  });
+
   await test("malformed socket line is logged and ignored; host keeps serving", async () => {
     const c = rawClient();
     await c.ready;

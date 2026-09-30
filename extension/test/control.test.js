@@ -229,6 +229,18 @@ test("errors that echo a URL or file path are redacted", async () => {
   assert.match(json, /Illegal URL: \[redacted\]/);
 });
 
+test("replay_steps logs only how many steps and inputs, and cuts input values out of errors", async () => {
+  const secret = "hunter2-secret";
+  const { control } = setup();
+  const replay = { steps: [{ click: { role: "link", name: "Log in" } }, { type: { role: "textbox", name: "PIN" }, text: "{pin}" }] };
+  await control.handleCall(call(1, "s", undefined, "replay_steps", { tabId: 5, replay, inputs: { pin: secret } }), async () => {
+    throw new Error(`No option matching "${secret}"`);
+  });
+  const [entry] = control.snapshot().log;
+  assert.equal(entry.detail, "2 step(s), 1 input(s)");
+  assert.equal(entry.error, "No option matching [redacted]");
+});
+
 test("log is a ring buffer of 500", async () => {
   const { control } = setup();
   for (let i = 0; i < 510; i++) await control.handleCall(call(i), ok);

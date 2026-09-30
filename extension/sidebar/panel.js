@@ -77,6 +77,7 @@ const ICON_PATHS = {
   list: '<path d="M3 4.5h10M3 8h10M3 11.5h10"/>',
   lock: '<rect x="4" y="7" width="8" height="6.5" rx="1.2"/><path d="M5.8 7V5.3a2.2 2.2 0 0 1 4.4 0V7"/>',
   file: '<path d="M4 2.5h5l3 3v8H4z"/><path d="M9 2.5v3h3"/>',
+  record: '<circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2" fill="currentColor" stroke="none"/>',
 };
 const SVG_NS = "http://www.w3.org/2000/svg";
 const iconCache = new Map();
@@ -303,6 +304,7 @@ const FIREFOX_VERBS = {
   javascript_tool: ["Running script", "Ran script"],
   file_upload: ["Uploading file", "Uploaded file"],
   get_page_text: ["Reading text", "Read page text"],
+  replay_steps: ["Replaying steps", "Replayed steps"],
 };
 const COMPUTER_VERBS = {
   click: ["Clicking", "Clicked"],
@@ -390,6 +392,9 @@ const S = {
   ui: { menu: null, sheet: null, tray: false },
   windowTabs: [],
   pendingAdd: null, // a tab to add once the chat's group exists
+  rec: null, // the chat's Teach recording: {id, site, start, startedAt, stopped, drafted, steps, shots}
+  teachUi: new Map(), // draft key -> {replay, busy, exists, error} for its review card
+  teachSaved: {}, // draft key -> the folder it was saved to
 };
 
 let port = null;
@@ -398,6 +403,8 @@ let historyRequest = null;
 let transcriptRequest = null;
 let pendingTitle = null;
 let loadTimer = 0;
+let draftRequest = null; // the teach.stop whose reply sends the recording off to be drafted
+const teachRequests = new Map(); // teach.save request id -> {key, mode}
 
 const post = (cmd, extra = {}) => {
   try {
@@ -468,7 +475,7 @@ function applyEvent(ev, replay = false) {
       // that turn. Loaded history has no running turn to protect.
       if (replay) closeTurn(lastTurn(), now);
       const t = newTurn();
-      t.user = { text: ev.text ?? "", attachments: ev.attachments ?? [] };
+      t.user = { text: ev.text ?? "", attachments: ev.attachments ?? [], teach: parseTeach(ev.text) };
       t.queued = S.turns.some((x) => !x.done);
       t.t0 = t.queued ? null : now;
       S.turns.push(t);
@@ -605,6 +612,24 @@ function onMessage(m) {
       S.paused = !!m.paused;
       for (const t of S.turns) t.dirty = true;
       return render("head", "title", "body", "notices");
+    case "teach":
+      if (m.error) return toast(m.error, "warn");
+      S.rec = m.recording ?? null;
+      if (m.requestId && m.requestId === draftRequest) {
+        draftRequest = null;
+        if (S.rec?.steps.length) sendTeach(teachPrompt(S.rec));
+      }
+      return render();
+    case "teach.step": {
+      if (!S.rec || S.rec.id !== m.recordingId || !m.step) return;
+      const i = S.rec.steps.findIndex((s) => s.n === m.step.n);
+      if (i >= 0) S.rec.steps[i] = m.step;
+      else S.rec.steps.push(m.step);
+      if (m.shot) S.rec.shots[m.step.n] = m.shot;
+      return render("title", "body");
+    }
+    case "teach.saved":
+      return onTeachSaved(m);
   }
 }
 
@@ -619,6 +644,7 @@ function onState(s) {
   S.group = s.group ?? null;
   S.activeTab = s.activeTab ?? null;
   S.paused = !!s.paused;
+  S.rec = s.teach ?? null;
   if (s.engine) S.engine = s.engine;
   applyPrefs(S.engine);
   if (s.model != null) S.model = s.model;
@@ -702,18 +728,22 @@ function renderHead() {
 
 function chatTitle() {
   if (S.title) return S.title;
+  if (S.turns.find((t) => t.user)?.user.teach) return "New skill";
   const first = S.turns.find((t) => t.user)?.user.text;
   return first ? shortText(first.replace(/\s+/g, " "), 60) : "New chat";
 }
 
 function renderTitle() {
-  const chat = S.turns.length > 0 || S.loading;
+  const recording = recordingShown();
+  const chat = S.turns.length > 0 || S.loading || recording;
   $("title").parentElement.classList.toggle("chat", chat);
   let live = null;
-  if (S.paused) live = el("span", { class: "live p" }, icon("pause"), "Paused");
+  // Recording is the user acting, not the agent: ink with a red dot, never the agent's purple.
+  if (recording && !S.rec.stopped) live = el("span", { class: "live rec" }, el("span", { class: "rdot" }), el("span", { "data-since": String(S.rec.startedAt), text: `Recording ${clock(Date.now() - S.rec.startedAt)}` }));
+  else if (S.paused) live = el("span", { class: "live p" }, icon("pause"), "Paused");
   else if (pendingPermission()) live = el("span", { class: "live p" }, "Needs approval");
   else if (isRunning()) live = el("span", { class: "live" }, icon("pointer"), "Working");
-  const t = chat ? chatTitle() : "New chat";
+  const t = recording ? "New skill" : chat ? chatTitle() : "New chat";
   fill($("title"), el("span", { class: chat ? "t" : "t new", text: t, title: t }), live);
 }
 
@@ -870,10 +900,13 @@ function copyButton(text) {
 
 function renderTurn(t) {
   const node = el("div", { class: "turn" });
-  if (t.user) node.append(userBubble(t.user));
+  if (t.user) node.append(...(t.user.teach ? recordedBlock(t) : [userBubble(t.user)]));
   for (const b of t.blocks) {
     if (b.type === "text") {
-      if (b.text.trim()) node.append(el("div", { class: "am" }, ...markdown(b.text).childNodes));
+      // A skill drafted from a Teach recording shows as its review card, not as JSON.
+      const { prose, draft } = splitDraft(b.text);
+      if (prose.trim()) node.append(el("div", { class: "am" }, ...markdown(prose).childNodes));
+      if (draft) node.append(...reviewCard(draft, t));
     } else if (b.type === "steps") node.append(...stepsBlock(t));
     else if (b.type === "perm") node.append(permBlock(b) ?? "");
   }
@@ -881,17 +914,23 @@ function renderTurn(t) {
     const stopped = S.stopped[S.chatId] || /interrupt|abort|cancel/i.test(t.error);
     node.append(el("div", { class: "note" }, icon(stopped ? "pause" : "warn"), stopped ? "You stopped this task." : t.error));
   }
-  const answer = t.blocks.filter((b) => b.type === "text" && b.text.trim()).map((b) => b.text.trim()).join("\n\n");
+  const answer = t.blocks.filter((b) => b.type === "text").map((b) => splitDraft(b.text).prose.trim()).filter(Boolean).join("\n\n");
   if (t.done && answer) node.append(el("div", { class: "acts" }, copyButton(answer)));
   return node;
 }
 
 function renderBody() {
-  const has = S.turns.length > 0 || S.loading;
+  const recording = recordingShown();
+  const has = S.turns.length > 0 || S.loading || recording;
   $("scroll").hidden = !has;
   $("empty").hidden = has;
   if (!has) return renderEmpty();
   const msgs = $("msgs");
+  if (recording) {
+    msgs.replaceChildren(recordingView(S.rec));
+    for (const list of msgs.querySelectorAll(".steps .list")) list.scrollTop = list.scrollHeight;
+    return;
+  }
   const kids = S.turns.map((t) => {
     if (!t.el || t.dirty) {
       const fresh = renderTurn(t);
@@ -1081,6 +1120,7 @@ const effortLabel = (id) => EFFORT_LABELS[id] ?? (id ? id[0].toUpperCase() + id.
 function placeholder() {
   if (S.paused) return `Tell ${engine().short} what to do instead…`;
   if (isRunning()) return "Add to the task…";
+  if (lastTurn()?.blocks.some((b) => b.type === "text" && splitDraft(b.text).draft)) return "Ask for changes, e.g. “also email me the due dates”";
   if (!S.turns.length) {
     const { name } = activeSite();
     return `Ask ${engine().short} to do something${name ? ` in ${name}` : ""}…`;
@@ -1089,6 +1129,10 @@ function placeholder() {
 }
 
 function renderDock() {
+  // While recording, the panel is the recording's controls; there's nothing to send yet.
+  const recording = recordingShown();
+  $("composer").hidden = recording;
+  $("foot").hidden = recording;
   const down = engineDown() && !S.turns.length;
   $("composer").classList.toggle("dis", down);
   $("input").disabled = down;
@@ -1189,6 +1233,8 @@ function send() {
     text,
     attachments: attachments.map(({ name, mime, data }) => ({ name, mime, data })),
     resume: S.resumeNext,
+    // Asking for changes to a drafted skill doesn't take the user's tab either.
+    teach: S.turns.some((t) => t.user?.teach) || undefined,
   });
   S.resumeNext = false;
   S.unechoed = { text, attachments };
@@ -1272,10 +1318,10 @@ function openLink(url) {
   (browser.tabs?.create(opts) ?? Promise.reject()).catch(() => window.open(url, "_blank", "noopener"));
 }
 
-function toast(text) {
+function toast(text, iconName = "check") {
   const main = $("main");
   main.querySelector(".toast")?.remove();
-  const node = el("div", { class: "toast", role: "status" }, icon("check"), el("span", { text }));
+  const node = el("div", { class: "toast", role: "status" }, icon(iconName), el("span", { text }));
   main.append(node);
   setTimeout(() => node.remove(), TOAST_MS);
 }
@@ -1427,6 +1473,7 @@ function plusMenu() {
     mi("clip", "Add files or photos", { onclick: () => { closeMenu(false); $("file").click(); } }),
     mi("tab", "Add another tab", { right: icon("chevr"), onclick: go("tabs") }),
     sep(),
+    mi("record", `Teach ${engine().short} a task`, { disabled: isRunning() || recordingShown(), onclick: () => { closeMenu(false); post("teach.start"); } }),
     mi("skills", "Skills", { right: icon("chevr"), onclick: go("skills") }),
     mi("conn", "Connectors", { right: [bad ? el("span", { class: "warn-n", text: String(bad), style: "color:var(--warn)" }) : null, icon("chevr")], onclick: go("connectors") }),
     mi("plug", "Plugins", { right: icon("chevr"), onclick: go("plugins") }),
@@ -1615,13 +1662,256 @@ function fillHistory() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Teach by doing (docs/teach.md). "Teach Claude a task" records the user's own tab; the steps
+// arrive live from background.js. Stop and draft sends them to the engine as a message holding a
+// <teach-recording> block, which the chat shows as the recorded steps; the engine answers with a
+// ```skill-draft JSON block, shown as a review card. Save writes the skill through the host.
+
+const TEACH_BLOCK = /<teach-recording id="([\w-]{1,64})">\n([\s\S]*?)\n<\/teach-recording>/;
+const DRAFT_OPEN = "```skill-draft";
+const MAX_TEACH_JSON = 16_000; // a transcript keeps 20,000 characters of a message
+
+// Until the draft turn has echoed, the recording is what the panel shows.
+const recordingShown = () => !!S.rec && !S.turns.some((t) => t.user?.teach?.id === S.rec.id);
+
+function parseTeach(text) {
+  const m = TEACH_BLOCK.exec(text ?? "");
+  if (!m) return null;
+  let data = {};
+  try {
+    data = JSON.parse(m[2]);
+  } catch {
+    // clipped: the steps are lost, but the turn still reads as a recording
+  }
+  return { id: m[1], site: String(data.site ?? ""), start: String(data.start ?? ""), steps: Array.isArray(data.steps) ? data.steps : [] };
+}
+
+// The prose of an assistant message, and the skill draft in it once its block is complete. While
+// it streams, everything from the block on is held back.
+function splitDraft(text) {
+  const at = text.indexOf(DRAFT_OPEN);
+  if (at < 0) return { prose: text, draft: null };
+  const rest = text.slice(at + DRAFT_OPEN.length);
+  const end = rest.indexOf("\n```");
+  let draft = null;
+  try {
+    const d = end >= 0 ? JSON.parse(rest.slice(0, end)) : null;
+    if (d && typeof d === "object" && typeof d.name === "string") draft = d;
+  } catch {
+    // not JSON (yet)
+  }
+  return { prose: text.slice(0, at) + (end >= 0 ? rest.slice(end + 4) : ""), draft };
+}
+
+const TEACH_INSTRUCTIONS = [
+  "Teach: I did a task in Firefox for you to learn. Draft a reusable skill from my recording below.",
+  "",
+  'Its steps are numbered. Values I typed are included, except in password and other secret fields, which say "secret": "keychain" (a saved password) or "ask" (a one-time code or similar). Each target has a role and accessible name, a CSS selector and nearby text.',
+  "",
+  "Don't use any tools for this. Reply with a sentence or two for me, then one ```skill-draft code block holding JSON:",
+  '{"name": "kebab-case-name", "description": "what the skill does and when to use it, for its frontmatter", "trigger": "the short phrase I would say to run it", "inputs": [{"name": "snake_case", "step": 2, "from": "input", "about": "what it is"}], "checks": "how to tell it worked, in a few words", "notes": ["site notes worth remembering"], "steps": [{"from": 1}, {"from": 2, "input": "snake_case"}, {"from": 5, "expect": {"text": "text the page shows after this step"}}]}',
+  "",
+  'A typed value is an input when it would change from run to run ("from" is "input", or "keychain" / "ask" for a secret step); a value that is always the same isn\'t. Every secret step needs an input. List the steps to replay in order, by their recorded number, leaving out mis-clicks and detours. Give the last step an expect, and any other step whose effect matters; use {"url": "part of the URL"} when the page text wouldn\'t show it.',
+  "If I ask for changes, reply with a whole new skill-draft block.",
+  "",
+];
+
+function teachPrompt(rec) {
+  const steps = rec.steps.map(({ n, action, target, value, secret, key, url }) => ({ n, action, target, value, secret, key, url }));
+  let data = JSON.stringify({ site: rec.site, start: rec.start, steps });
+  // A long recording drops what the replay can do without: nearby text and each click's page.
+  if (data.length > MAX_TEACH_JSON) data = JSON.stringify({ site: rec.site, start: rec.start, steps: steps.map((s) => ({ ...s, url: s.action === "navigate" ? s.url : undefined, target: s.target && { ...s.target, near: undefined } })) });
+  return [...TEACH_INSTRUCTIONS, `<teach-recording id="${rec.id}">`, data, "</teach-recording>"].join("\n");
+}
+
+function tryPrompt(path) {
+  return `Try it once: call replay_steps with path ${JSON.stringify(path)} and the inputs it lists (ask me for any you don't have). If a step doesn't match, finish the task yourself from there, then tell me which step it was and why.`;
+}
+
+// A Teach turn (the draft, a try) goes to the engine without adopting the tab the user is on.
+function sendTeach(text) {
+  if (engineDown() || !S.chatId) return;
+  if (S.paused) {
+    post("resume");
+    S.paused = false;
+  }
+  post("chat.send", { chatId: S.chatId, engine: S.engine, model: S.model, effort: effortsFor().includes(S.effort) ? S.effort : "", text, attachments: [], resume: S.resumeNext, teach: true });
+  S.resumeNext = false;
+  S.error = null;
+  S.status = "starting";
+  S.stick = true;
+  render();
+}
+
+function stopAndDraft() {
+  draftRequest = `teach${++requestCount}`;
+  post("teach.stop", { requestId: draftRequest, draft: true });
+  render("body");
+}
+
+const recTarget = (t) => {
+  const label = t?.name || t?.near || "";
+  return `${t?.role || "element"}${label ? ` “${shortText(label, 60)}”` : ""}`;
+};
+// What a typed value is called until the draft names it: the field's name, in snake case.
+const inputGuess = (s) => (s.target?.name || s.target?.near || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 30) || "text";
+
+function recRow(s, shot) {
+  const words = {
+    click: ["Click", [recTarget(s.target)]],
+    type: ["Type", [`${recTarget(s.target)} → `, s.secret ? (s.secret === "keychain" ? "from Keychain" : "ask each time") : el("b", { text: inputGuess(s) })]],
+    select: ["Select", [`“${shortText(s.value ?? "", 40)}” in ${recTarget(s.target)}`]],
+    key: ["Press", [s.key ?? "Enter"]],
+    navigate: ["Go to", [shortText(String(s.url ?? "").replace(/^https?:\/\/(www\.)?/, ""), 80)]],
+  }[s.action] ?? ["Step", []];
+  return el(
+    "div",
+    { class: "step" },
+    el("span", { class: "num", text: String(s.n) }),
+    el("span", { class: "w", text: words[0] }),
+    el("span", { class: "d" }, words[1]),
+    shot ? el("img", { class: "thumb", src: shot, alt: "" }) : el("span", { class: "thumb" }),
+  );
+}
+
+function recStepsCard(rec, shots = {}) {
+  const rows = rec.steps.map((s) => recRow(s, shots[s.n]));
+  if (!rows.length) rows.push(el("div", { class: "step" }, el("span", { class: "d", text: "Waiting for your first step…" })));
+  return el(
+    "div",
+    { class: "steps" },
+    el("div", { class: "sh" }, fav({ url: rec.start }), el("span", { class: "st", text: rec.site || "This tab" }), el("span", { class: "n", text: plural(rec.steps.length, "step") })),
+    el("div", { class: "list" }, rows),
+  );
+}
+
+function recordingView(rec) {
+  const drafting = !!draftRequest || (rec.drafted && isRunning());
+  return el(
+    "div",
+    { class: "turn" },
+    el("div", { class: "note" }, icon("tab"), rec.stopped ? "Recording stopped." : "Do the task in this tab as you normally would. Values you type become inputs; passwords are never kept."),
+    recStepsCard(rec, rec.shots),
+    el(
+      "div",
+      { class: "bs" },
+      el("button", { class: "b solid", text: drafting ? "Drafting…" : rec.stopped ? "Draft skill" : "Stop and draft skill", disabled: drafting || !rec.steps.length || engineDown(), onclick: stopAndDraft }),
+      el("button", { class: "b", text: "Discard", disabled: drafting, onclick: () => post("teach.discard") }),
+    ),
+  );
+}
+
+// The recording as it was sent, in the chat: a row that opens to its steps.
+function recordedBlock(t) {
+  const rec = t.user.teach;
+  const shots = S.rec?.id === rec.id ? S.rec.shots : {};
+  const toggle = () => {
+    t.user.open = !t.user.open;
+    t.dirty = true;
+    render("body");
+  };
+  const row = el("button", { class: "used", "aria-expanded": String(!!t.user.open), onclick: toggle }, icon("record"), el("span", { text: [`Recorded ${plural(rec.steps.length, "step")}`, rec.site].filter(Boolean).join(" · ") }), icon("chevr"));
+  return t.user.open ? [row, recStepsCard(rec, shots)] : [row];
+}
+
+// The recording a draft was made from: the latest one sent at or before its turn.
+const recordingFor = (t) => S.turns.slice(0, S.turns.indexOf(t) + 1).findLast((x) => x.user?.teach)?.user.teach ?? null;
+
+function draftKey(draft) {
+  let h = 0;
+  for (const ch of JSON.stringify(draft)) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0;
+  return `${S.chatId}:${(h >>> 0).toString(36)}`;
+}
+
+const skillsHome = () => (S.engine === "codex" ? "~/.codex/skills/" : "~/.claude/skills/");
+
+function reviewCard(draft, t) {
+  const key = draftKey(draft);
+  if (!S.teachUi.has(key)) S.teachUi.set(key, { replay: true, busy: null, exists: false, error: null });
+  const ui = S.teachUi.get(key);
+  const saved = S.teachSaved[key];
+  const rec = recordingFor(t);
+  const secretOf = (i) => rec?.steps.find((s) => s.n === i.step)?.secret ?? (i.from === "keychain" || i.from === "ask" ? i.from : null);
+  const inputs = (Array.isArray(draft.inputs) ? draft.inputs : []).filter((i) => typeof i?.name === "string");
+  const chips = inputs.flatMap((i, n) => [n ? " · " : null, el("code", { text: i.name }), secretOf(i) ? ` (${secretOf(i) === "keychain" ? "Keychain" : "ask"})` : null]);
+  const k = (text) => el("span", { class: "k", text });
+  const toggle = () => {
+    ui.replay = !ui.replay;
+    t.dirty = true;
+    render("body");
+  };
+  const card = el(
+    "div",
+    { class: "card" },
+    el(
+      "div",
+      { class: "row2" },
+      k("Name"),
+      el("b", { text: draft.name }),
+      k("Trigger"),
+      el("span", { text: [typeof draft.trigger === "string" && draft.trigger ? `“${draft.trigger}”` : null, rec?.site].filter(Boolean).join(", ") || "—" }),
+      k("Inputs"),
+      el("span", {}, chips.length ? chips : "None"),
+      k("Checks"),
+      el("span", { text: typeof draft.checks === "string" && draft.checks ? draft.checks : "—" }),
+      k("Saves to"),
+      el("span", {}, el("code", { text: saved ? `${shortCwd(saved)}/` : `${skillsHome()}${draft.name}/` })),
+    ),
+    el("button", { class: "tog", role: "switch", "aria-checked": String(ui.replay), disabled: !!saved, onclick: toggle }, el("span", { class: "sw" }), `Replay without ${engine().short} when steps match`),
+  );
+  const busy = !!ui.busy || isRunning();
+  const buttons = el(
+    "div",
+    { class: "bs" },
+    saved
+      ? el("button", { class: "b", text: "Saved", disabled: true })
+      : el("button", { class: "b solid", text: ui.busy === "skill" ? "Saving…" : ui.exists ? "Replace skill" : "Save skill", disabled: busy || !rec, onclick: () => saveDraft(draft, t, "skill", ui.exists) }),
+    el("button", { class: "b", text: ui.busy === "try" ? "Starting…" : "Try it once", disabled: busy || !rec, onclick: () => saveDraft(draft, t, "try") }),
+    el("button", { class: "b", text: "Edit", disabled: busy, onclick: () => $("input").focus() }),
+  );
+  let status = null;
+  if (saved) status = el("div", { class: "note" }, icon("check"), `Saved to ${shortCwd(saved)}/`);
+  else if (ui.error) status = el("div", { class: "note" }, icon("warn"), ui.error);
+  return status ? [card, buttons, status] : [card, buttons];
+}
+
+function saveDraft(draft, t, mode, replace = false) {
+  const rec = recordingFor(t);
+  if (!rec) return;
+  const key = draftKey(draft);
+  const ui = S.teachUi.get(key);
+  Object.assign(ui, { busy: mode, error: null, exists: false });
+  const requestId = `teach${++requestCount}`;
+  teachRequests.set(requestId, { key, mode });
+  post("teach.save", { requestId, mode, draft, recording: rec, replay: ui.replay, replace });
+  t.dirty = true;
+  render("body");
+}
+
+function onTeachSaved(m) {
+  const r = teachRequests.get(m.requestId);
+  if (!r) return;
+  teachRequests.delete(m.requestId);
+  const ui = S.teachUi.get(r.key);
+  if (ui) ui.busy = null;
+  if (!m.ok) Object.assign(ui ?? {}, { error: m.error || "Couldn't save the skill.", exists: !!m.exists });
+  else if (r.mode === "skill") {
+    S.teachSaved[r.key] = m.dir;
+    saveTeachSaved();
+  } else sendTeach(tryPrompt(m.replayPath));
+  for (const t of S.turns) t.dirty = true;
+  render("body", "dock");
+}
+
+// ---------------------------------------------------------------------------------------------
 // Storage
 
 async function loadStored() {
   try {
-    const got = await browser.storage.local.get(["chatPrefs", "stoppedChats"]);
+    const got = await browser.storage.local.get(["chatPrefs", "stoppedChats", "teachSaved"]);
     S.prefs = got.chatPrefs ?? {};
     S.stopped = got.stoppedChats ?? {};
+    S.teachSaved = got.teachSaved ?? {};
     if (S.prefs.engine && ENGINES[S.prefs.engine]) S.engine = S.prefs.engine;
     applyPrefs(S.engine);
   } catch {
@@ -1632,6 +1922,12 @@ async function loadStored() {
 function savePrefs() {
   S.prefs = { ...S.prefs, engine: S.engine, [S.engine]: { model: S.model, effort: S.effort } };
   browser.storage.local.set({ chatPrefs: S.prefs }).catch(() => {});
+}
+
+function saveTeachSaved() {
+  const keys = Object.keys(S.teachSaved);
+  for (const k of keys.slice(0, Math.max(0, keys.length - 200))) delete S.teachSaved[k];
+  browser.storage.local.set({ teachSaved: S.teachSaved }).catch(() => {});
 }
 
 function saveStopped() {
@@ -1724,9 +2020,10 @@ function wire() {
     openLink(a.href);
   });
 
-  // The running step's clock.
+  // The running step's clock, and the recording's.
   setInterval(() => {
     for (const n of document.querySelectorAll(".tm[data-live]")) n.textContent = clock(Date.now() - Number(n.dataset.live));
+    for (const n of document.querySelectorAll("[data-since]")) n.textContent = `Recording ${clock(Date.now() - Number(n.dataset.since))}`;
   }, 1000);
 }
 

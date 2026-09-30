@@ -7,6 +7,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { createChat } from "./chat.mjs";
+import { createTeach } from "./teach.mjs";
 
 const DIR = path.join(os.homedir(), ".firefox-agent-bridge");
 const SOCKET = path.join(DIR, "bridge.sock");
@@ -19,6 +20,8 @@ const log = (...a) => fs.appendFileSync(LOG, `${new Date().toISOString()} ${a.jo
 
 // The sidebar chat: `chat.*` messages are handled by chat.mjs, which runs Claude Code and Codex.
 const chat = createChat({ send: (msg) => send(msg), log });
+// Teach: `teach.*` messages write a drafted skill to disk (teach.mjs).
+const teach = createTeach({ send: (msg) => send(msg), log });
 
 // Firefox closes the connection to the host (and this process ends with it) when one message
 // is over 1 MiB, so an oversize one is refused here instead. Returns whether it was sent.
@@ -62,7 +65,7 @@ const clients = new Map(); // client id -> { socket, info: {name, version, pid, 
 let nextClient = 1;
 
 function onExtensionMessage(msg) {
-  if (chat.handle(msg)) return;
+  if (chat.handle(msg) || teach.handle(msg)) return;
   if (msg.type === "hello") {
     log("extension connected, version", msg.version);
     return;

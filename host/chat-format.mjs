@@ -62,6 +62,9 @@ function summarizeFirefox(tool, a) {
       return "Open a new tab";
     case "tabs_close_mcp":
       return "Close a tab";
+    case "replay_steps":
+      // A skill's folder names it; input values are never shown.
+      return `Replay ${clip(path.basename(path.dirname(String(a.path ?? ""))) || "steps", 50)}`;
     default:
       return tool;
   }
@@ -136,7 +139,7 @@ export function summarizeToolResult(name, content, isError) {
   const first = text.split("\n").find((l) => l.trim()) ?? "";
   if (isError) return clip(first || "Failed", 120);
   if (parts.some((p) => p?.type === "image")) return /^mcp__firefox__computer$/.test(name) ? "Screenshot captured" : "Image";
-  if (/^mcp__firefox__(navigate|tabs_)/.test(name)) return clip(first, 100);
+  if (/^mcp__firefox__(navigate|tabs_|replay_steps)/.test(name)) return clip(first, 100);
   if (name === "Bash") return clip(first, 100);
   return "";
 }
