@@ -1360,7 +1360,8 @@ test("replay_steps runs every step by ref, types inputs, checks expect, and neve
   const r = await env.callTool("replay_steps", { tabId: 2, replay: REPLAY, inputs: { card: "1234", pin: "s3cret" } });
   assert.equal(r.result.isError, undefined, r.result.content[0].text);
   assert.match(r.result.content[0].text, /^Replayed all 5 steps; 1 check\(s\) passed/);
-  const acts = ops.filter(([op]) => ["click", "fill", "key"].includes(op));
+  // Every op also carries the redaction rules; that is covered in the redaction tests.
+  const acts = ops.filter(([op]) => ["click", "fill", "key"].includes(op)).map(([op, { redact, ...args }]) => [op, args]);
   assert.deepEqual(plain(acts), [
     ["click", { ref: "ref_1" }],
     ["fill", { ref: "ref_2", text: "1234" }],
