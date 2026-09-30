@@ -246,9 +246,11 @@ async function runOne(cell) {
   const m = summarize(events);
   const { state, errors: inspectErrors, tabsLeft } = await inspectAndClose(session, task);
   const answer = lastJson(m.final_text);
+  // The agent's tool calls, for tasks whose rules limit the tools (the hard tier's no-JS tasks).
+  const trace = events.filter((e) => e.type === "assistant" && !e.parent_tool_use_id).flatMap((e) => (e.message?.content ?? []).filter((b) => b.type === "tool_use").map((b) => ({ name: b.name, input: b.input })));
   let fields = {};
   try {
-    fields = task.check(answer, state);
+    fields = task.check(answer, state, trace);
   } catch (e) {
     inspectErrors.push(`check: ${e.message}`);
   }

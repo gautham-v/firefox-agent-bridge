@@ -1,30 +1,52 @@
 // Hard tier for the model x effort benchmark (models.mjs --tier hard). Round 1's six tasks
-// (models-tasks.mjs) were at ceiling for Sonnet, Opus and Fable at every effort, so these add what
-// they lacked: traps where the obvious reading is wrong, rules that must be read from a page
-// instead of remembered, exact aggregation over paginated data, precision timing, and precise
-// canvas work. Same shape as round 1: partial credit over named sub-goals, answer tasks checked
-// from the final JSON, state tasks checked in the tabs the agent leaves open.
+// (models-tasks.mjs) were at ceiling for Sonnet, Opus and Fable at every effort, and so was a
+// first draft of this tier (an aggregation trap, US/Moscow/Sydney DST, a simpler tie-break, a
+// books-to-TodoMVC compare, a UI Testing Playground gauntlet and a tldraw loop): Sonnet low
+// passed all six in 14-147s, mostly by writing JavaScript against the page (fetching every page,
+// or building the tldraw diagram through the editor's API). So this tier adds two kinds of
+// difficulty:
+// - Rules that must be read, with traps that punish skimming or remembering: 2026 tax law
+//   (changed in 2025), the 2026 World Cup tie-breakers (changed from 2022) applied through four
+//   levels, and time-zone history for places whose offsets or DST changed.
+// - Three tasks that forbid javascript_tool, so the page has to be read and driven like a user
+//   would: star ratings that exist only as icons, a canvas diagram with precise layout, and a
+//   gauntlet of widgets that resist naive input. Using javascript_tool on those scores 0 (the
+//   harness passes the agent's tool calls to check()).
+// Same shape as round 1 otherwise: partial credit over named sub-goals, answer tasks checked from
+// the final JSON, state tasks checked in the tabs the agent leaves open.
 //
 // Answer keys and how they were checked (2026-09-29):
-// - hockey-franchises: all 582 rows of scrapethissite.com/pages/forms fetched (per_page=100, 6
-//   pages) and summed by script; spot-checked in Firefox.
-// - shuttle-timezones: UTC launch times read from Wikipedia's List of Space Shuttle missions
-//   (the STS-128 row's date is the local date; its footnote says the UTC time is the next day);
-//   local times from Node's ICU tz database (tzdata 2026c) for America/Chicago, Europe/Moscow
-//   and Australia/Sydney.
-// - wc-tiebreak: the tie-breaking criteria in Wikipedia's 2026 FIFA World Cup article (head-to-head
-//   first, then re-applied to teams still level; fair-play deductions, one per player per match),
-//   applied by hand to invented results chosen so that the 2022 rules, or skipping the re-apply
-//   step, or counting a second yellow as yellow + red, each give a different answer.
-// - books-to-todo: every book of every category on books.toscrape.com fetched and averaged by
-//   script; the winner is decided only by the later pages (page 1 alone ranks Fiction first).
-// - uitp-timing: live state of the tabs left open (random values differ per load).
-// - tldraw-loop: tldraw's editor state in the tab left open.
+// - tax-2026: irs.gov's 2026 inflation-adjustment release (brackets, standard deduction) and its
+//   fact sheet on the 2025 law's new deductions (overtime premium only, tips, car-loan interest
+//   only for US final assembly); arithmetic by hand, below.
+// - wc-tiebreak: the tie-breaking criteria in Wikipedia's 2026 FIFA World Cup article (head-to-
+//   head first, re-applied to teams still level, then goal difference, goals, fair play with one
+//   deduction per player per match, FIFA ranking) and its third-place table (with the Ghana −3 /
+//   Ecuador −5 conduct-score note), applied by hand to invented results.
+// - shuttle-timezones: UTC launch times from Wikipedia's List of Space Shuttle missions (the
+//   STS-128 row's date is the local date; a footnote says the UTC time is the next day); local
+//   times from Node's ICU tz database (tzdata 2026c) for America/Caracas, Australia/Lord_Howe and
+//   Pacific/Apia.
+// - books-no-js: every book of every category on books.toscrape.com fetched and averaged by
+//   script; the TodoMVC inspector and checker run against a list built through the MCP client.
+// - uitp-no-js, tldraw-no-js: inspectors and checkers run against pages driven to the goal
+//   state through the MCP client.
 
 import { norm, num, toNumber } from "./lib/check.mjs";
-import { answerRules, get, safe, sameBag, sameList, score, stateRules } from "./models-tasks.mjs";
+import { answerRules, get, sameBag, sameList, score, stateRules } from "./models-tasks.mjs";
 
 export { score };
+
+const NO_JS = "Don't use javascript_tool at all in this task (a run that uses it scores 0); read and operate the pages with the other tools, as a user would.";
+
+// Wraps a check so that any javascript_tool call zeroes every sub-goal (and says so).
+const noJs = (check) =>
+  function (a, state, trace = []) {
+    const used = trace.some((c) => /javascript_tool$/.test(c.name));
+    const fields = check.call(this, a, state, trace);
+    if (!used) return { ...fields, no_javascript: true };
+    return { ...Object.fromEntries(Object.keys(fields).map((k) => [k, false])), no_javascript: false };
+  };
 
 // tldraw Editor via React's fiber tree; shapes with label text, fill, dash, bindings.
 const TLDRAW_JS = String.raw`(() => {
@@ -81,138 +103,7 @@ export function parseLocal(v) {
 }
 const sameLocal = (want) => (v) => parseLocal(v) === want;
 
-export const TASKS = [
-  // 1 ---------------------------------------------------------------------------------------
-  {
-    id: "hockey-franchises",
-    desc: "582 rows over 24 pages; group seasons by franchise across moves and renames. Traps: two different franchises played as the Winnipeg Jets; the Dallas franchise's 3 North Stars seasons decide the most-wins question; a lockout season is missing",
-    kind: "answer",
-    prompt: `On https://www.scrapethissite.com/pages/forms/ (Hockey Teams: NHL regular seasons from 1990 to 2011; the Year column is the year the season started), count by franchise: a club that moved to another city or changed its name is the same franchise before and after. Use what you know about NHL history only to decide which team names belong to the same franchise; take every number from the page.
-a) Total wins on this page for the franchise that played the 2011 season as the Winnipeg Jets.
-b) Total wins on this page for the franchise that played the 2011 season as the Phoenix Coyotes.
-c) Of the franchises that appear on this page under more than one team name, which one won the most games in total on the page? Name it by its 2011 team name, and give the total.
-d) The single season in which franchise (a) won the most games: the Year, and the team name it played under that season.
-e) Which years from 1990 to 2011 have no rows at all on the page?
-
-${answerRules('{"a_wins": 0, "b_wins": 0, "c_franchise": "", "c_wins": 0, "d_year": 0, "d_team": "", "e_missing_years": [0]}')}`,
-    key: { a_wins: 379, b_wins: 732, c_franchise: "Dallas Stars", c_wins: 847, d_year: 2006, d_team: "Atlanta Thrashers", e_missing_years: [2004] },
-    check(a) {
-      const missing = get(a, "e_missing_years");
-      return {
-        // Atlanta Thrashers 1999-2010 (342) + Winnipeg Jets 2011 (37); not the 1990-95 Jets.
-        a_jets_2011_franchise: num(379)(get(a, "a_wins")),
-        // Winnipeg Jets 1990-95 (175) + Phoenix Coyotes 1996-2011 (557).
-        b_coyotes_franchise: num(732)(get(a, "b_wins")),
-        // Minnesota North Stars (95) + Dallas Stars (752) = 847 beats Quebec + Colorado (824).
-        c_most_wins: /dallas/.test(norm(get(a, "c_franchise"))) && num(847)(get(a, "c_wins")),
-        d_best_season: num(2006)(get(a, "d_year")) && /atlanta|thrashers/.test(norm(get(a, "d_team"))),
-        e_missing: Array.isArray(missing) && missing.length === 1 && toNumber(missing[0]) === 2004,
-      };
-    },
-  },
-
-  // 2 ---------------------------------------------------------------------------------------
-  {
-    id: "shuttle-timezones",
-    desc: "UTC launch times from a long Wikipedia table converted to three cities' clocks with the DST rules of each year (US pre-2007, Moscow's old DST, Sydney's changing dates); one row's UTC time is on the next day (footnote)",
-    kind: "answer",
-    prompt: `Using Wikipedia's "List of Space Shuttle missions" (https://en.wikipedia.org/wiki/List_of_Space_Shuttle_missions), find the launch time in UTC of STS-83, STS-95, STS-123 and STS-128. For each launch, give the local date and time (24-hour, to the minute) it was in Houston (Mission Control), Moscow and Sydney, using the clock rules each city actually had on that date, including daylight saving time as it applied that year. Read the table and its notes carefully.
-Also give the time that elapsed between the launch of STS-83 and the launch of its reflight, STS-94, in days, hours and minutes (drop the seconds).
-Write each local time as "YYYY-MM-DD HH:MM".
-
-${answerRules('{"STS-83": {"houston": "", "moscow": "", "sydney": ""}, "STS-95": {"houston": "", "moscow": "", "sydney": ""}, "STS-123": {"houston": "", "moscow": "", "sydney": ""}, "STS-128": {"houston": "", "moscow": "", "sydney": ""}, "sts83_to_sts94": {"days": 0, "hours": 0, "minutes": 0}}')}`,
-    key: {
-      "STS-83": { houston: "1997-04-04 13:20", moscow: "1997-04-04 23:20", sydney: "1997-04-05 05:20" },
-      "STS-95": { houston: "1998-10-29 13:19", moscow: "1998-10-29 22:19", sydney: "1998-10-30 06:19" },
-      "STS-123": { houston: "2008-03-11 01:28", moscow: "2008-03-11 09:28", sydney: "2008-03-11 17:28" },
-      "STS-128": { houston: "2009-08-28 22:59", moscow: "2009-08-29 07:59", sydney: "2009-08-29 13:59" },
-      sts83_to_sts94: { days: 87, hours: 22, minutes: 41 },
-    },
-    check(a) {
-      const cities = (m) => {
-        const want = this.key[m];
-        const got = get(a, m) ?? {};
-        return ["houston", "moscow", "sydney"].every((c) => sameLocal(want[c])(get(got, c)));
-      };
-      const el = get(a, "sts83_to_sts94") ?? {};
-      return {
-        // 1997-04-04: US DST started 6 April (CST); Moscow on summer time since 30 March (+4);
-        // Sydney off summer time since 30 March (+10), so it is already 5 April there.
-        sts83: cities("STS-83"),
-        // 1998-10-29: US and Moscow back on standard time (25 October); Sydney on summer time (+11).
-        sts95: cities("STS-95"),
-        // 2008-03-11: US on DST since 9 March (2007 rule); Moscow standard (+3); Sydney DST until 6 April.
-        sts123: cities("STS-123"),
-        // Listed as 28 August 2009, 03:59 UTC, but a footnote says the UTC time is the next day.
-        sts128: cities("STS-128"),
-        elapsed: num(87)(get(el, "days")) && num(22)(get(el, "hours")) && num(41)(get(el, "minutes")),
-      };
-    },
-  },
-
-  // 3 ---------------------------------------------------------------------------------------
-  {
-    id: "wc-tiebreak",
-    desc: "Apply the 2026 World Cup tie-breaking rules, read from Wikipedia, to invented results: head-to-head first and re-applied to the teams still level (not 2022's goal difference first); fair-play points with one deduction per player per match",
-    kind: "answer",
-    prompt: `Wikipedia's article on the 2026 FIFA World Cup (https://en.wikipedia.org/wiki/2026_FIFA_World_Cup) lists the tie-breaking criteria used to rank teams in a group. Read them there and apply them exactly as written to these invented results (a win is 3 points, a draw 1).
-
-Group X:
-- Arden 2–1 Bexley
-- Bexley 3–0 Corwen
-- Corwen 2–0 Arden
-- Arden 5–0 Dunmore
-- Bexley 1–0 Dunmore
-- Corwen 1–0 Dunmore
-
-1) Rank Group X from first to fourth.
-
-2) In another group, Pellham and Quarry finished level on points. They drew 1–1 with each other, and they have the same goal difference and the same number of goals scored in all their group matches. Their disciplinary records over the group:
-- Pellham: match 1, one player booked (yellow card). Match 2, one player booked twice and sent off (second yellow card). Match 3, two different players each booked once.
-- Quarry: match 1, one player sent off with a straight red card. Match 2, one player booked. Match 3, one player booked.
-Pellham is 14th in the most recent FIFA Men's World Ranking and Quarry is 20th.
-Give each team's fair play (team conduct) score as defined on the page, and which of the two ranks higher.
-
-${answerRules('{"group_x_order": ["", "", "", ""], "pellham_fair_play": 0, "quarry_fair_play": 0, "higher_ranked": ""}')}`,
-    key: { group_x_order: ["Bexley", "Corwen", "Arden", "Dunmore"], pellham_fair_play: -6, quarry_fair_play: -6, higher_ranked: "Pellham" },
-    check(a) {
-      const order = (get(a, "group_x_order") ?? []).map((x) => norm(x));
-      const idx = (t) => order.indexOf(t);
-      return {
-        // Head-to-head among the three on 6 points: Bexley +2; Arden and Corwen both -1 with 2
-        // goals, so criteria a-c are re-applied to Arden v Corwen alone (Corwen won 2-0).
-        // The 2022 rules (overall goal difference first) give Arden, Bexley, Corwen.
-        group_order: sameList(order, ["bexley", "corwen", "arden", "dunmore"]),
-        bexley_first: order[0] === "bexley",
-        corwen_above_arden: idx("corwen") >= 0 && idx("arden") >= 0 && idx("corwen") < idx("arden"),
-        // -1 + -3 (second yellow is one deduction, not -1 and -3) + -2 = -6.
-        pellham_fair_play: num(-6)(get(a, "pellham_fair_play")),
-        quarry_fair_play: num(-6)(get(a, "quarry_fair_play")),
-        // Level on fair play too, so the FIFA ranking decides.
-        higher_ranked: norm(get(a, "higher_ranked")) === "pellham",
-      };
-    },
-  },
-
-  // 4 ---------------------------------------------------------------------------------------
-  {
-    id: "books-to-todo",
-    desc: "Compare three paginated categories in separate tabs (page 1 alone picks the wrong winner), then act on the winner in TodoMVC with full titles (list pages truncate them) and formatted prices; checked in the app's DOM",
-    kind: "state",
-    prompt: `Compare three categories of the practice bookstore https://books.toscrape.com, each in its own tab: Historical Fiction, Fiction and Fantasy. For each category, work out the average star rating over all of its books (every page of the category). The winner is the category with the highest average.
-
-Then, in the TodoMVC demo app at https://todomvc.com/examples/react/dist/, build a reading list from the winning category:
-1. Add one todo for every book in the winning category priced under £22.00, cheapest first. Title each todo exactly "<full book title> (£<price>)", for example "Some Book (Series #2) (£12.34)". Use each book's full title; the category pages shorten long titles.
-2. Mark as completed the todos for books that have a five-star rating.
-3. Switch the list to the Active filter.
-The app keeps its list only in the page, so do all of this in one tab and never reload it.
-
-${stateRules("Leave the TodoMVC tab open when you're done.", '{"winner": "", "average_rating": {"Historical Fiction": 0, "Fiction": 0, "Fantasy": 0}}')}`,
-    inspect: [
-      {
-        name: "app",
-        url: "todomvc\\.com/examples/react",
-        js: String.raw`(async () => {
+const TODO_JS = String.raw`(async () => {
   const hash = location.hash;
   const read = () => [...document.querySelectorAll(".todo-list li")].map((li) => ({ title: li.querySelector("label")?.textContent ?? li.textContent, completed: li.classList.contains("completed") }));
   const visible = read();
@@ -221,66 +112,197 @@ ${stateRules("Leave the TodoMVC tab open when you're done.", '{"winner": "", "av
   const all = read();
   location.hash = hash;
   return JSON.stringify({ hash, visible, all });
-})()`,
-      },
-    ],
-    // Historical Fiction 84/26 = 3.231, Fiction 207/65 = 3.185, Fantasy 148/48 = 3.083.
-    // Page 1 alone: Fiction 3.45, Historical Fiction 2.95, Fantasy 2.95.
+})()`;
+
+export const TASKS = [
+  // 1 ---------------------------------------------------------------------------------------
+  {
+    id: "tax-2026",
+    desc: "Two 2026 US federal returns from irs.gov's own pages: 2026 brackets and standard deduction (changed by the 2025 law), the new overtime deduction (premium only), tips deduction, and car-loan interest (US final assembly only)",
+    kind: "answer",
+    prompt: `Work out 2026 US federal taxable income and regular income tax for the two returns below, using the IRS's own pages on irs.gov for every amount and rule (a 2025 law changed several of them, so don't rely on memory). Compute the tax from the 2026 tax rate schedule (the brackets), not the tax table, before any credits. Both returns take the standard deduction. Ignore payroll and state taxes and credits; there is no other income, adjustment or deduction.
+
+1) Single filer, age 45. Form W-2 wages of $91,400. Those wages include $7,500 of overtime pay, all of it paid at time-and-a-half as the Fair Labor Standards Act requires, and $3,200 of cash tips she received as a restaurant server (an occupation on the IRS list of tipped occupations), reported on her W-2. She also had $600 of bank interest. In 2026 she paid $1,900 of interest on a loan she took out in 2026 to buy a new car for personal use, secured by the car; the car's final assembly was in Mexico.
+
+2) Married couple filing jointly, both age 40. Combined W-2 wages of $180,000. Their W-2s report $12,000 of qualified overtime compensation, which is already just the premium portion (the "half" of time-and-a-half). No tips. In 2026 they paid $3,100 of interest on a loan taken out in 2026 to buy a new pickup truck for personal use, secured by the truck, with final assembly in Michigan.
+
+${answerRules('{"single": {"taxable_income": 0, "tax": 0}, "joint": {"taxable_income": 0, "tax": 0}}')}`,
+    // Single: AGI 92,000 − standard 16,100 − overtime premium 2,500 (7,500 × 0.5/1.5) − tips 3,200
+    // (car: not US-assembled) = 70,200; tax 12,400 × 10% + 38,000 × 12% + 19,800 × 22% = 10,156.
+    // Joint: 180,000 − 32,200 − 12,000 − 3,100 = 132,700; tax 24,800 × 10% + 76,000 × 12% +
+    // 31,900 × 22% = 18,618. No phase-outs apply (MAGI under $150k single / $200k joint for cars).
+    key: { single: { taxable_income: 70200, tax: 10156 }, joint: { taxable_income: 132700, tax: 18618 } },
+    check(a) {
+      const s = get(a, "single") ?? {};
+      const j = get(a, "joint") ?? {};
+      return {
+        single_taxable_income: num(70200, 1)(get(s, "taxable_income")),
+        single_tax: num(10156, 1)(get(s, "tax")),
+        joint_taxable_income: num(132700, 1)(get(j, "taxable_income")),
+        joint_tax: num(18618, 1)(get(j, "tax")),
+      };
+    },
+  },
+
+  // 2 ---------------------------------------------------------------------------------------
+  {
+    id: "wc-tiebreak",
+    desc: "2026 World Cup tie-breakers read from Wikipedia and applied to invented results through four levels (head-to-head goals, re-apply, fair play with one deduction per player per match, FIFA ranking), then placing a team in the real third-place table using a footnote",
+    kind: "answer",
+    prompt: `Wikipedia's article on the 2026 FIFA World Cup (https://en.wikipedia.org/wiki/2026_FIFA_World_Cup) gives the criteria for ranking teams in a group, and a table ranking the twelve third-placed teams with its own rules and notes. Read them there and apply them exactly as written (a win is 3 points, a draw 1).
+
+Part 1. Invented Group X:
+- Corwen 2–2 Arden
+- Corwen 1–1 Bexley
+- Arden 1–1 Bexley
+- Corwen 1–0 Dunmore
+- Arden 1–0 Dunmore
+- Bexley 4–0 Dunmore
+Disciplinary records over the three matches:
+- Corwen: match 1, one player booked and later sent off for a second yellow card. Match 2, one player booked. Match 3, one player booked and later shown a straight red card.
+- Arden: match 1, two different players booked. Match 2, one player shown a straight red card. Match 3, three different players booked.
+- Bexley and Dunmore: no cards.
+Latest FIFA Men's World Ranking: Corwen 11th, Arden 16th, Bexley 40th, Dunmore 70th.
+Rank Group X from first to fourth, and give Corwen's and Arden's team conduct (fair play) scores.
+
+Part 2. Pellham, from another invented group, finished third with 1 win, 1 draw and 1 loss, 2 goals for and 2 against. Its cards: in one match a player was booked twice and sent off; in another match a different player was booked. If Pellham had been one of the twelve third-placed teams in the real 2026 tournament, at what position (1-13) would it have ranked in the article's table of third-placed teams, and which real team would that have pushed out of the eight places that advanced?
+
+${answerRules('{"group_x_order": ["", "", "", ""], "corwen_fair_play": 0, "arden_fair_play": 0, "pellham_position": 0, "pushed_out": ""}')}`,
+    key: { group_x_order: ["Corwen", "Arden", "Bexley", "Dunmore"], corwen_fair_play: -9, arden_fair_play: -9, pellham_position: 4, pushed_out: "Senegal" },
+    check(a) {
+      const order = (get(a, "group_x_order") ?? []).map((x) => norm(x));
+      const idx = (t) => order.indexOf(t);
+      return {
+        // All three of Corwen, Arden, Bexley have 5 points. Head-to-head among them: all 2 points
+        // and goal difference 0, but Bexley scored 2 goals to their 3, so Bexley is third. Corwen
+        // and Arden: re-applied to their 2-2 draw, still level; overall goal difference (+1) and
+        // goals (4) level; fair play -9 each; FIFA ranking puts Corwen first.
+        // 2022's rules (overall goal difference first) put Bexley (+4) first.
+        group_order: sameList(order, ["corwen", "arden", "bexley", "dunmore"]),
+        bexley_third: order[2] === "bexley",
+        corwen_above_arden: idx("corwen") >= 0 && idx("arden") >= 0 && idx("corwen") < idx("arden"),
+        // Corwen: -3 (second yellow is one deduction, not -1 and -3) + -1 + -5 (yellow and direct
+        // red) = -9. Arden: -2 + -4 + -3 = -9.
+        fair_play_scores: num(-9)(get(a, "corwen_fair_play")) && num(-9)(get(a, "arden_fair_play")),
+        // 4 points, GD 0, 2 goals ties Ghana (3rd) and Ecuador (4th); the table's note gives their
+        // conduct scores (-3, -5); Pellham's is -3 + -1 = -4, so it goes between them, 4th.
+        pellham_position: num(4)(get(a, "pellham_position")),
+        pushed_out: norm(get(a, "pushed_out")) === "senegal",
+      };
+    },
+  },
+
+  // 3 ---------------------------------------------------------------------------------------
+  {
+    id: "shuttle-timezones",
+    desc: "UTC launch times from a long Wikipedia table (one row's UTC time is on the next day, per a footnote) converted to three clocks whose rules changed: Caracas (UTC-4:30 in 2007-2016), Lord Howe Island (30-minute DST) and Samoa (DST only from 2010)",
+    kind: "answer",
+    prompt: `Using Wikipedia's "List of Space Shuttle missions" (https://en.wikipedia.org/wiki/List_of_Space_Shuttle_missions), find the launch time in UTC of STS-83, STS-123, STS-128 and STS-133. Read the table and its notes carefully.
+For each launch, give the local date and time (24-hour, to the minute) it was in Caracas (Venezuela), on Lord Howe Island (Australia) and in Apia (Samoa), using the clock rules each place actually had on that date, including its standard offset and any daylight saving time as it applied that year. Look up each place's time-zone history if you aren't sure of it.
+Also give the time that elapsed between the launch of STS-128 and the launch of STS-133, in days, hours and minutes (drop the seconds).
+Write each local time as "YYYY-MM-DD HH:MM".
+
+${answerRules('{"STS-83": {"caracas": "", "lord_howe": "", "apia": ""}, "STS-123": {"caracas": "", "lord_howe": "", "apia": ""}, "STS-128": {"caracas": "", "lord_howe": "", "apia": ""}, "STS-133": {"caracas": "", "lord_howe": "", "apia": ""}, "sts128_to_sts133": {"days": 0, "hours": 0, "minutes": 0}}')}`,
     key: {
-      winner: "Historical Fiction",
+      // 1997-04-04 19:20:32 UTC: Caracas -4; Lord Howe +10:30 (summer time ended 30 March); Apia -11.
+      "STS-83": { caracas: "1997-04-04 15:20", lord_howe: "1997-04-05 05:50", apia: "1997-04-04 08:20" },
+      // 2008-03-11 06:28:14 UTC: Caracas -4:30 (since 9 Dec 2007); Lord Howe +11 (summer time to 6 April); Apia -11.
+      "STS-123": { caracas: "2008-03-11 01:58", lord_howe: "2008-03-11 17:28", apia: "2008-03-10 19:28" },
+      // Listed as 28 August 2009 03:59:37 UTC, but the UTC time is the next day (footnote):
+      // 2009-08-29 03:59 UTC. Caracas -4:30; Lord Howe +10:30; Apia -11.
+      "STS-128": { caracas: "2009-08-28 23:29", lord_howe: "2009-08-29 14:29", apia: "2009-08-28 16:59" },
+      // 2011-02-24 21:53:24 UTC: Caracas -4:30; Lord Howe +11; Apia -10 (Samoa's first DST, from Sept 2010).
+      "STS-133": { caracas: "2011-02-24 17:23", lord_howe: "2011-02-25 08:53", apia: "2011-02-24 11:53" },
+      sts128_to_sts133: { days: 544, hours: 17, minutes: 53 },
+    },
+    check(a) {
+      const places = (m) => {
+        const want = this.key[m];
+        const got = get(a, m) ?? {};
+        return ["caracas", "lord_howe", "apia"].every((c) => sameLocal(want[c])(get(got, c) ?? get(got, c.replace("_", ""))));
+      };
+      const el = get(a, "sts128_to_sts133") ?? {};
+      return {
+        sts83: places("STS-83"),
+        sts123: places("STS-123"),
+        sts128: places("STS-128"),
+        sts133: places("STS-133"),
+        elapsed: num(544)(get(el, "days")) && num(17)(get(el, "hours")) && num(53)(get(el, "minutes")),
+      };
+    },
+  },
+
+  // 4 ---------------------------------------------------------------------------------------
+  {
+    id: "books-no-js",
+    desc: "No JavaScript: star ratings exist only as icons, so 55 books over 4 pages must be read visually to rank three categories; then full titles (list pages truncate them) and prices go into TodoMVC; checked in the app's DOM",
+    kind: "state",
+    prompt: `Compare three categories of the practice bookstore https://books.toscrape.com: Poetry, Humor and Historical Fiction. For each category, work out the average star rating (1-5) over all of its books, on every page of the category. The winner is the category with the highest average.
+
+Then, in the TodoMVC demo app at https://todomvc.com/examples/react/dist/, build a reading list from the winning category:
+1. Add one todo for every book in the winning category priced under £22.00, cheapest first. Title each todo exactly "<full book title> (£<price>)", for example "Some Book (Series #2) (£12.34)". Use each book's full title; the category pages shorten long titles.
+2. Mark as completed the todos for books that have a five-star rating.
+3. Switch the list to the Active filter.
+The app keeps its list only in the page, so do all of this in one tab and never reload it.
+${NO_JS}
+
+${stateRules("Leave the TodoMVC tab open when you're done.", '{"winner": "", "average_rating": {"Poetry": 0, "Humor": 0, "Historical Fiction": 0}}')}`,
+    inspect: [{ name: "app", url: "todomvc\\.com/examples/react", js: TODO_JS }],
+    // Poetry 67/19 = 3.526, Humor 34/10 = 3.400, Historical Fiction 84/26 = 3.231.
+    key: {
+      winner: "Poetry",
       todos: [
-        ["The Constant Princess (The Tudor Court #1)", 16.62, 3],
-        ["A Spy's Devotion (The Regency Spies of London #1)", 16.97, 5],
-        ["Lilac Girls", 17.28, 2],
-        ["Love, Lies and Spies", 20.55, 2],
-        ["Between Shades of Gray", 20.79, 5],
-        ["Voyager (Outlander #3)", 21.07, 5],
+        ["Poems That Make Grown Women Cry", 14.19, 4],
+        ["Untitled Collection: Sabbath Poems 2014", 14.27, 4],
+        ["The Collected Poems of W.B. Yeats (The Collected Works of W.B. Yeats #1)", 15.42, 5],
+        ["Booked", 17.49, 5],
+        ["Shakespeare's Sonnets", 20.66, 4],
       ],
     },
-    check(a, state) {
+    check: noJs(function (a, state) {
       const s = state?.app ?? {};
       const all = s.all ?? [];
       const titles = all.map((x) => x.title);
       const want = this.key.todos.map(([t, p]) => `${t} (£${p.toFixed(2)})`);
       const done = all.filter((x) => x.completed).map((x) => x.title);
       const avg = get(a, "average_rating") ?? {};
+      const bare = (t) => norm(t).replace(/ \d+\.\d\d$/, "");
       return {
-        winner: norm(get(a, "winner")) === "historical fiction",
-        averages: num(3.231, 0.011)(get(avg, "Historical Fiction")) && num(3.185, 0.011)(get(avg, "Fiction")) && num(3.083, 0.011)(get(avg, "Fantasy")),
-        right_books: sameBag(titles.map((t) => norm(t).replace(/ \d+\.\d\d$/, "")), this.key.todos.map(([t]) => norm(t))),
+        winner: norm(get(a, "winner")) === "poetry",
+        averages: num(3.526, 0.011)(get(avg, "Poetry")) && num(3.4, 0.011)(get(avg, "Humor")) && num(3.231, 0.011)(get(avg, "Historical Fiction")),
+        right_books: sameBag(titles.map(bare), this.key.todos.map(([t]) => norm(t))),
         exact_titles_in_order: titles.length === want.length && titles.every((t, i) => t.trim().replace(/[‘’]/g, "'").replace(/\s+/g, " ") === want[i]),
-        completed_five_star: sameBag(done.map((t) => norm(t).replace(/ \d+\.\d\d$/, "")), this.key.todos.filter((x) => x[2] === 5).map(([t]) => norm(t))),
+        completed_five_star: titles.length > 0 && sameBag(done.map(bare), this.key.todos.filter((x) => x[2] === 5).map(([t]) => norm(t))),
         active_filter: /^#\/active$/.test(s.hash ?? "") && (s.visible ?? []).length > 0 && s.visible.every((x) => !x.completed),
       };
-    },
+    }),
   },
 
   // 5 ---------------------------------------------------------------------------------------
   {
-    id: "uitp-timing",
-    desc: "UI Testing Playground: stop a randomly-paced progress bar at exactly 75%, wait out two 15 s loads, a button that renames only on real input+change, a link replaced on hover (exact click count), a field that clears itself while covered, and a table whose values change on reload",
+    id: "uitp-no-js",
+    desc: "No JavaScript: UI Testing Playground widgets that resist naive input: a 15 s load, a button renamed only by real input, a link replaced on hover (exact click count), a field that clears itself while covered, scroll-and-hover targets, nine fields of different types to clear, single and multi selects (one with non-breaking spaces), and a table whose values change on reload",
     kind: "state",
     prompt: `Work through these pages of UI Testing Playground (a public test-automation practice site). Use a separate tab for each page and leave every one of those tabs open.
-1. http://uitestingplayground.com/progressbar: click Start, then click Stop when the bar is at exactly 75%. Each Start picks a random speed, and at some speeds the bar moves a percent every few milliseconds. If you miss, you may Start again; only the final result counts. Use the page's buttons: don't change its variables or call its Start()/Stop() functions yourself.
-2. http://uitestingplayground.com/ajax: click the button and wait for the label that loads (it takes about 15 seconds). Report its text.
-3. http://uitestingplayground.com/clientdelay: the same, and report that label's text.
-4. http://uitestingplayground.com/textinput: make the blue button's name read exactly: Ship it 42
-5. http://uitestingplayground.com/mouseover: click the "Click me" link exactly 3 times, so the page says it was clicked 3 times.
-6. http://uitestingplayground.com/overlapped: enter Grace Hopper in the Name field so that it stays there.
-7. http://uitestingplayground.com/dynamictable: report the CPU value of the Chrome process from the table and the value in the yellow label. Don't reload this page (the values change on every load).
+1. http://uitestingplayground.com/ajax: click the button and wait for the label that loads (about 15 seconds). Report its text.
+2. http://uitestingplayground.com/textinput: make the blue button's name read exactly: Ship it 42
+3. http://uitestingplayground.com/mouseover: click the "Click me" link exactly 3 times, so the page says it was clicked 3 times.
+4. http://uitestingplayground.com/overlapped: enter Grace Hopper in the Name field so that it stays there.
+5. http://uitestingplayground.com/scrolltoclick: click all four target buttons.
+6. http://uitestingplayground.com/clearinput: clear every field, so the page reports that all fields are cleared.
+7. http://uitestingplayground.com/select: Programming Language: Python. City: Salt Lake City. Product Version: Release 3.0 (the final release, not the beta). Colors: exactly Red, Blue and Purple. Fruits: keep Apple and Grape, remove Cherry, and add Date.
+8. http://uitestingplayground.com/dynamictable: report the CPU value of the Chrome process from the table and the value in the yellow label. Don't reload this page (the values change on every load).
+${NO_JS}
 
-${stateRules("Leave the tabs from steps 1-7 open when you're done.", '{"ajax_label": "", "client_label": "", "chrome_cpu_table": "", "chrome_cpu_label": ""}')}`,
+${stateRules("Leave the tabs from steps 1-8 open when you're done.", '{"ajax_label": "", "chrome_cpu_table": "", "chrome_cpu_label": ""}')}`,
     inspect: [
-      {
-        name: "progress",
-        url: "uitestingplayground\\.com/progressbar",
-        js: `JSON.stringify({ ratio: typeof ratio === "number" ? ratio : null, started: typeof started === "boolean" ? started : null, result: document.querySelector("#result")?.textContent ?? null, bar: document.querySelector("#progressBar")?.getAttribute("aria-valuenow") ?? null })`,
-      },
       { name: "ajax", url: "uitestingplayground\\.com/ajax", js: `JSON.stringify({ labels: [...document.querySelectorAll("#content .bg-success")].map((p) => p.textContent.trim()) })` },
-      { name: "client", url: "uitestingplayground\\.com/clientdelay", js: `JSON.stringify({ labels: [...document.querySelectorAll("#content .bg-success")].map((p) => p.textContent.trim()) })` },
       { name: "textinput", url: "uitestingplayground\\.com/textinput", js: `JSON.stringify({ button: document.querySelector("#updatingButton")?.textContent ?? null })` },
       { name: "mouseover", url: "uitestingplayground\\.com/mouseover", js: `JSON.stringify({ count: document.querySelector("#clickCount")?.textContent ?? null })` },
       { name: "overlapped", url: "uitestingplayground\\.com/overlapped", js: `JSON.stringify({ name: document.querySelector("#name")?.value ?? null })` },
+      { name: "scroll", url: "uitestingplayground\\.com/scrolltoclick", js: `JSON.stringify({ clicked: [1, 2, 3, 4].map((i) => !!document.querySelector("#scrollTarget" + i)?.classList.contains("btn-success")), progress: document.querySelector("#progressText")?.textContent ?? null })` },
+      { name: "clear", url: "uitestingplayground\\.com/clearinput", js: `JSON.stringify({ remaining: [...document.querySelectorAll(".clear-target")].filter((f) => (f.tagName === "DIV" ? f.textContent : f.value).trim().length > 0).length, fields: document.querySelectorAll(".clear-target").length, status: document.querySelector("#opstatus")?.textContent ?? null })` },
+      { name: "select", url: "uitestingplayground\\.com/select", js: `JSON.stringify(Object.fromEntries([...document.querySelectorAll("select")].map((s) => [s.id, [...s.selectedOptions].map((o) => o.value)])))` },
       {
         name: "table",
         url: "uitestingplayground\\.com/dynamictable",
@@ -292,28 +314,28 @@ ${stateRules("Leave the tabs from steps 1-7 open when you're done.", '{"ajax_lab
 })()`,
       },
     ],
-    check(a, state) {
+    check: noJs(function (a, state) {
       const st = state ?? {};
-      const p = st.progress ?? {};
-      const stopped = p.started === false && /Result: -?\d+/.test(p.result ?? "");
+      const sel = st.select ?? {};
       const pct = (v) => String(v ?? "").match(/-?\d+(\.\d+)?\s*%/)?.[0].replace(/\s/g, "");
       return {
-        progress_within_1: stopped && Math.abs(p.ratio - 75) <= 1,
-        progress_exact_75: stopped && p.ratio === 75,
         ajax: (st.ajax?.labels ?? []).some((l) => /loaded with ajax/i.test(l)) && /data loaded with ajax get request/i.test(get(a, "ajax_label") ?? ""),
-        client_delay: (st.client?.labels ?? []).some((l) => /calculated on the client/i.test(l)) && /data calculated on the client side/i.test(get(a, "client_label") ?? ""),
         text_input: st.textinput?.button === "Ship it 42",
         mouseover_3: st.mouseover?.count === "3",
         overlapped_name: st.overlapped?.name === "Grace Hopper",
+        scroll_all_4: (st.scroll?.clicked ?? []).length === 4 && st.scroll.clicked.every(Boolean),
+        clear_all: st.clear?.fields > 0 && st.clear?.remaining === 0,
+        single_selects: sameList(sel.selectLanguage, ["py"]) && sameList(sel.selectCity, ["slc"]) && sameList(sel.selectProduct, ["v3.0"]),
+        multi_selects: sameBag(sel.selectColors, ["red", "blue", "purple"]) && sameBag(sel.selectFruits, ["apple", "date", "grape"]),
         table_cpu: st.table?.cpu != null && pct(get(a, "chrome_cpu_table")) === st.table.cpu && pct(get(a, "chrome_cpu_label")) === pct(st.table.label),
       };
-    },
+    }),
   },
 
   // 6 ---------------------------------------------------------------------------------------
   {
-    id: "tldraw-loop",
-    desc: "tldraw: a labeled three-box loop with equal sizes, exact bottom alignment, fill and dash styles, three bound arrows, an arrow label and a sticky note; checked from the editor's shapes, props and bindings",
+    id: "tldraw-no-js",
+    desc: "No JavaScript: a labeled three-box loop in tldraw drawn through its UI, with equal sizes, exact bottom alignment, fill and dash styles, three bound arrows, an arrow label and a sticky note; checked from the editor's shapes, props and bindings",
     kind: "state",
     prompt: `On the tldraw canvas at https://examples.tldraw.com/basic/full (an in-memory demo), draw a build-measure-learn loop:
 - three rectangles whose own labels (text typed into the shape, not separate text shapes) read Build, Measure and Learn;
@@ -323,10 +345,11 @@ ${stateRules("Leave the tabs from steps 1-7 open when you're done.", '{"ajax_lab
 - arrows whose ends are attached (bound) to the shapes: Build → Measure, Measure → Learn and Learn → Build, with the Learn → Build arrow labeled Ideas;
 - a sticky note with the text v2, placed to the right of Measure.
 Nothing else should be on the canvas. The canvas isn't saved, so work in one tab and never reload it.
+${NO_JS}
 
 ${stateRules("Leave that tab open on the canvas when you're done.", '{"shapes": 0, "arrows": 0}')}`,
     inspect: [{ name: "canvas", url: "examples\\.tldraw\\.com", js: TLDRAW_JS }],
-    check(a, state) {
+    check: noJs(function (a, state) {
       const shapes = state?.canvas?.shapes ?? [];
       const geo = shapes.filter((s) => s.type === "geo");
       const byText = (t) => geo.find((s) => norm(s.text) === t);
@@ -349,7 +372,7 @@ ${stateRules("Leave that tab open on the canvas when you're done.", '{"shapes": 
         sticky_note: notes.length === 1 && norm(notes[0].text) === "v2" && !!m && notes[0].x >= m.x + m.w - 5,
         nothing_else: shapes.length === 7 && geo.length === 3 && arrows.length === 3 && notes.length === 1,
       };
-    },
+    }),
   },
 ];
 

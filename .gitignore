@@ -10,3 +10,4 @@ eval/results/models-hard/logs/
 eval/results/models-hard/inflight/
 eval/results/models-hard/scheduler.lock
 eval/results/models-hard/smoke/
+eval/results/models-hard/smoke-v*/
