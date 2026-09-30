@@ -4,8 +4,11 @@
 // rebuilds the key from the site's public API at check time; the static key is kept for reference.
 //
 // arms: which non-baseline arms run this task (baseline runs every task).
+//
+// Prompts name "the Firefox browser tools"; promptFor() swaps in "Chrome" for Claude in Chrome
+// runs, so both browsers get the same prompt otherwise.
 
-import { checkFields, eqNorm, match, num, pyReq, sameSet } from "./lib/check.mjs";
+import { checkFields, eqNorm, match, norm, num, pyReq, sameSet } from "./lib/check.mjs";
 
 const RULES = [
   "Use only the Firefox browser tools. This is read-only: don't sign in, submit forms, buy or post anything.",
@@ -14,6 +17,19 @@ const RULES = [
 ].join("\n");
 
 const prompt = (body, shape) => `${body}\n\n${RULES}\n${shape}`;
+
+// General tasks may submit a form, but only to a test endpoint the task names.
+const GENERAL_RULES = [
+  "Use only the Firefox browser tools. Don't sign in, buy or post anything, and don't submit any form except where the task says to.",
+  "Close every tab you opened (tabs_close_mcp) before you finish.",
+  "End your reply with one line holding only a JSON object in exactly this shape:",
+].join("\n");
+const generalPrompt = (body, shape) => `${body}\n\n${GENERAL_RULES}\n${shape}`;
+
+export const promptFor = (task, browser = "firefox") =>
+  browser === "chrome" ? task.prompt.replaceAll("the Firefox browser tools", "the Chrome browser tools") : task.prompt;
+
+const str = (v) => String(v ?? "").trim();
 
 export const TASKS = [
   // ---- articles (strip) ----------------------------------------------------------------------
@@ -231,6 +247,149 @@ export const TASKS = [
       }
       return checkFields(a, checks);
     },
+  },
+
+  // ---- general browsing (browser comparison; baseline only) ----------------------------------
+  // Answer keys checked by hand on 2026-09-30 in Firefox (mcp__firefox__* tools); the iframe
+  // select was also tried in Chrome (mcp__claude-in-chrome__* tools).
+  {
+    id: "gen-wiki-chain",
+    kind: "general",
+    arms: [],
+    prompt: generalPrompt(
+      "Start at https://en.wikipedia.org/wiki/Firefox and move only by following links between Wikipedia articles (no search box, no typed URLs after the start page): open the article on Firefox's JavaScript engine, then the article on the person who wrote that engine, then the article on the university where that person earned his bachelor's degree. Report the engine, the person, the university, the year the university was established, and its athletics nickname.",
+      '{"engine": "", "person": "", "university": "", "established": 0, "nickname": ""}',
+    ),
+    key: { engine: "SpiderMonkey", person: "Brendan Eich", university: "Santa Clara University", established: 1851, nickname: "Broncos" },
+    check: (a) =>
+      checkFields(a, {
+        engine: match(/spidermonkey/i),
+        person: match(/brendan\s+eich/i),
+        university: match(/santa\s+clara\s+university/i),
+        established: num(1851),
+        nickname: match(/broncos?/i),
+      }),
+  },
+  {
+    id: "gen-pydocs-search",
+    kind: "general",
+    arms: [],
+    prompt: generalPrompt(
+      "Go to https://docs.python.org/3/ and use the site's own search to search for: array bisection. Open the top result. Report the module's name, the Python version in which its functions gained the key parameter (as a string, e.g. \"3.8\"), and the list that the grade() example on that page evaluates to.",
+      '{"module": "", "key_param_added_in": "", "grade_example_output": [""]}',
+    ),
+    key: { module: "bisect", key_param_added_in: "3.10", grade_example_output: ["F", "A", "C", "C", "B", "A", "A"] },
+    check: (a) =>
+      checkFields(a, {
+        module: (v) => norm(v) === "bisect",
+        key_param_added_in: (v) => /^(python\s*)?3\.10$/i.test(str(v)),
+        grade_example_output: (v) => JSON.stringify(Array.isArray(v) ? v.map(str) : typeof v === "string" ? v.match(/[A-F]/g) : null) === JSON.stringify(["F", "A", "C", "C", "B", "A", "A"]),
+      }),
+  },
+  {
+    id: "gen-elements-table",
+    kind: "general",
+    arms: [],
+    prompt: generalPrompt(
+      "On https://en.wikipedia.org/wiki/List_of_chemical_elements, use the main table to find, among the period 6 d-block elements, the one with the highest melting point and the one with the highest density. Give each one's symbol and the value exactly as the table lists it (melting point in K, density in g/cm3).",
+      '{"highest_melting": {"symbol": "", "melting_point_k": 0}, "highest_density": {"symbol": "", "density_g_cm3": 0}}',
+    ),
+    key: { highest_melting: { symbol: "W", melting_point_k: 3695 }, highest_density: { symbol: "Os", density_g_cm3: 22.59 } },
+    check: (a) =>
+      checkFields(a, {
+        "highest_melting|symbol": (v) => str(v) === "W",
+        "highest_melting|melting_point_k": num(3695),
+        "highest_density|symbol": (v) => str(v) === "Os",
+        "highest_density|density_g_cm3": num(22.59, 0.001),
+      }),
+  },
+  {
+    id: "gen-quotes-scroll",
+    kind: "general",
+    arms: [],
+    prompt: generalPrompt(
+      "https://quotes.toscrape.com/scroll loads more quotes as you scroll down. Load the whole list, then report how many quotes it has in total, how many of them are by J.K. Rowling, and who wrote the last quote in the list.",
+      '{"total_quotes": 0, "jk_rowling_quotes": 0, "last_quote_author": ""}',
+    ),
+    key: { total_quotes: 100, jk_rowling_quotes: 9, last_quote_author: "George R.R. Martin" },
+    check: (a) =>
+      checkFields(a, {
+        total_quotes: num(100),
+        jk_rowling_quotes: num(9),
+        last_quote_author: match(/george\s+r\.?\s*r\.?\s+martin/i),
+      }),
+  },
+  {
+    id: "gen-httpbin-form",
+    kind: "general",
+    arms: [],
+    prompt: generalPrompt(
+      "Fill in the test form at https://httpbin.org/forms/post (httpbin.org is a public test service; submitting this form is fine) with: customer name Eval Tester, telephone 555-0100, e-mail eval@example.com, pizza size Large, toppings Onion and Mushroom (nothing else), preferred delivery time 18:45, delivery instructions: Leave at door 42. Submit it and read the echoed response page. Report the \"form\" object exactly as echoed and the echoed Content-Length request header.",
+      '{"form": {"custname": "", "custtel": "", "custemail": "", "size": "", "topping": [""], "delivery": "", "comments": ""}, "content_length": 0}',
+    ),
+    key: {
+      form: { custname: "Eval Tester", custtel: "555-0100", custemail: "eval@example.com", size: "large", topping: ["onion", "mushroom"], delivery: "18:45", comments: "Leave at door 42" },
+      content_length: 151,
+    },
+    check: (a) =>
+      checkFields(a, {
+        "form|custname": (v) => str(v) === "Eval Tester",
+        "form|custtel": (v) => str(v) === "555-0100",
+        "form|custemail": (v) => str(v) === "eval@example.com",
+        "form|size": (v) => str(v) === "large",
+        "form|topping": (v) => Array.isArray(v) && JSON.stringify([...v].map(str).sort()) === JSON.stringify(["mushroom", "onion"]),
+        "form|delivery": (v) => str(v) === "18:45",
+        "form|comments": (v) => str(v) === "Leave at door 42",
+        content_length: num(151),
+      }),
+  },
+  {
+    id: "gen-mdn-iframe",
+    kind: "general",
+    arms: [],
+    prompt: generalPrompt(
+      "On https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/change_event, the \"<select> element\" example has a live Result that runs in an embedded frame from another origin. In that live Result on the MDN page, choose Sardine in the ice cream flavor dropdown. Report the exact text the example displays after your choice, and how many options the dropdown has (including the placeholder).",
+      '{"displayed_text": "", "option_count": 0}',
+    ),
+    key: { displayed_text: "You like sardine", option_count: 4 },
+    check: (a) =>
+      checkFields(a, {
+        displayed_text: (v) => norm(v) === "you like sardine",
+        option_count: num(4),
+      }),
+  },
+  {
+    id: "gen-apg-datepicker",
+    kind: "general",
+    arms: [],
+    prompt: generalPrompt(
+      "On https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/examples/datepicker-dialog/, use the example's \"Choose Date\" button and its calendar dialog (don't type into the date field) to pick the last Friday of February 2027. Report the value the Date field then shows, and the accessible name (aria-label) the button next to the field then has.",
+      '{"date_field_value": "", "button_label": ""}',
+    ),
+    key: { date_field_value: "2/26/2027", button_label: "Change Date, Friday February 26, 2027" },
+    check: (a) =>
+      checkFields(a, {
+        date_field_value: (v) => /^0?2\/26\/2027$/.test(str(v)),
+        button_label: match(/friday,?\s+february\s+26,?\s+2027/i),
+      }),
+  },
+  {
+    id: "gen-datatables-scroll",
+    kind: "general",
+    arms: [],
+    prompt: generalPrompt(
+      "https://datatables.net/extensions/scroller/examples/initialisation/simple.html shows a table that only renders the rows in view as you scroll it. Find the row with ID 1873 and report its first name, last name, ZIP / post code and country, plus the total number of entries in the table.",
+      '{"first_name": "", "last_name": "", "zip": "", "country": "", "total_entries": 0}',
+    ),
+    key: { first_name: "Ora", last_name: "Hays", zip: "B6F 9Z9", country: "Martinique", total_entries: 2500 },
+    check: (a) =>
+      checkFields(a, {
+        first_name: (v) => norm(v) === "ora",
+        last_name: (v) => norm(v) === "hays",
+        zip: (v) => str(v).replace(/\s+/g, "").toUpperCase() === "B6F9Z9",
+        country: (v) => norm(v) === "martinique",
+        total_entries: num(2500),
+      }),
   },
 ];
 
