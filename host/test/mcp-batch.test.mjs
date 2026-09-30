@@ -77,7 +77,7 @@ test("tools/list offers batch, and form_input takes fields without ref/value", a
   assert.ok(b);
   assert.ok(!b.inputSchema.properties.actions.items.properties.tool.enum.includes("batch"));
   const fi = tools.find((t) => t.name === "form_input");
-  assert.deepEqual(fi.inputSchema.required, ["tabId"]);
+  assert.equal(fi.inputSchema.required, undefined);
   assert.ok(fi.inputSchema.properties.fields);
   assert.match(tools.find((t) => t.name === "javascript_tool").description, /DOMParser/);
 });

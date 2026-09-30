@@ -20,7 +20,7 @@ const VERSION = "0.1.0";
 
 const tabId = (what = "Tab ID to act on") => ({
   type: "number",
-  description: `${what}. Must be a tab in the agent's tab group. Use tabs_context_mcp first if you don't have a valid tab ID.`,
+  description: `${what}. Must be a tab in the agent's tab group. If omitted, the tab this session last used is taken (or its only tab).`,
 });
 
 const TOOLS = [
@@ -89,7 +89,7 @@ const TOOLS = [
         scale: { type: "number", minimum: 0.1, maximum: 1, description: "Return the screenshot/zoom image at this fraction of full size to save tokens. Coordinates stay in the full-size frame." },
         save_to_disk: { type: "boolean", description: "Save the screenshot/zoom image to disk and return its path, for sharing with the user." },
       },
-      required: ["action", "tabId"],
+      required: ["action"],
     },
   },
   {
@@ -105,7 +105,6 @@ const TOOLS = [
         ref_id: { type: "string", description: "Read only this element's subtree." },
         max_chars: { type: "number", description: "Output cap (default 50000)." },
       },
-      required: ["tabId"],
     },
   },
   {
@@ -115,7 +114,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: { query: { type: "string", description: "What to look for." }, tabId: tabId() },
-      required: ["query", "tabId"],
+      required: ["query"],
     },
   },
   {
@@ -138,7 +137,6 @@ const TOOLS = [
         },
         tabId: tabId(),
       },
-      required: ["tabId"],
     },
   },
   {
@@ -152,7 +150,7 @@ const TOOLS = [
         text: { type: "string", description: "Code to run." },
         tabId: tabId(),
       },
-      required: ["action", "text", "tabId"],
+      required: ["action", "text"],
     },
   },
   {
@@ -166,13 +164,13 @@ const TOOLS = [
         ref: { type: "string", description: "Ref of the file input (or its label)." },
         tabId: tabId(),
       },
-      required: ["paths", "ref", "tabId"],
+      required: ["paths", "ref"],
     },
   },
   {
     name: "get_page_text",
     description: "The page's visible text as plain text (title and URL first). Good for reading job lists, articles and descriptions.",
-    inputSchema: { type: "object", properties: { tabId: tabId() }, required: ["tabId"] },
+    inputSchema: { type: "object", properties: { tabId: tabId() } },
   },
 ];
 
@@ -329,9 +327,75 @@ async function formInput(args) {
 
 const textOf = (r) => (r?.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
 
-function runTool(name, args) {
-  if (name === "form_input") return formInput(args);
-  return callOne(name, args);
+// ---- the session's current tab -------------------------------------------------------------
+// Models sometimes leave tabId out even when they have one. The server remembers the tab this
+// session last used or was handed (navigate, tabs_create_mcp and tabs_context_mcp results) and
+// fills it in, instead of failing and costing the model a turn.
+
+let lastTab = null;
+let knownTabs = null; // tab ids from the latest tab list, or null before one has been seen
+
+// The tab list JSON that tabs_context_mcp returns, and that tabs_create_mcp and navigate append.
+function tabListIn(text) {
+  const m = /(^|\n)\{/.exec(text);
+  if (!m) return null;
+  try {
+    const ids = JSON.parse(text.slice(m.index + m[1].length)).availableTabs?.map((t) => t.tabId);
+    return Array.isArray(ids) && ids.every(Number.isInteger) ? ids : null;
+  } catch {
+    return null;
+  }
+}
+
+function noteTabs(name, args, result) {
+  if (result.isError) return;
+  const text = textOf(result);
+  const list = tabListIn(text);
+  if (list) {
+    knownTabs = list;
+    if (!list.includes(lastTab)) lastTab = list.length === 1 ? list[0] : null;
+  }
+  if (name === "tabs_close_mcp") {
+    if (knownTabs) knownTabs = knownTabs.filter((id) => id !== args.tabId);
+    if (lastTab === args.tabId) lastTab = knownTabs?.length === 1 ? knownTabs[0] : null;
+    return;
+  }
+  const made = /^(?:Created tab|Tab) (\d+)\b/.exec(text);
+  if (made && (name === "tabs_create_mcp" || name === "navigate")) lastTab = Number(made[1]);
+  else if (Number.isInteger(args.tabId)) lastTab = args.tabId;
+}
+
+// Fills in a missing tabId: the last tab used, else the session's only tab. Returns the id, or an
+// error result when there is no single tab to pick.
+async function resolveTab() {
+  if (lastTab != null) return lastTab;
+  if (knownTabs?.length !== 1) {
+    const r = await callOne("tabs_context_mcp", {});
+    if (r.isError) return r;
+    noteTabs("tabs_context_mcp", {}, r);
+  }
+  if (lastTab != null) return lastTab;
+  if (!knownTabs?.length) return errorResult("tabId is required: this session has no tabs yet. Call navigate with a url (it opens one) or tabs_create_mcp.");
+  return errorResult(`tabId is required: this session has ${knownTabs.length} tabs (${knownTabs.join(", ")}). Pass the one to act on.`);
+}
+
+const NO_TAB = new Set(["tabs_context_mcp", "tabs_create_mcp"]);
+
+async function runTool(name, args) {
+  args = { ...args };
+  if (typeof args.tabId === "string" && /^\s*\d+\s*$/.test(args.tabId)) args.tabId = Number(args.tabId);
+  let filled = null;
+  // navigate to a URL without a tab already picks the group's first tab (creating it if needed).
+  const navigateNew = name === "navigate" && args.url !== "back" && args.url !== "forward";
+  if (args.tabId == null && !NO_TAB.has(name) && name !== "tabs_close_mcp" && !(navigateNew && lastTab == null)) {
+    const t = await resolveTab();
+    if (typeof t !== "number") return t;
+    args.tabId = filled = t;
+  }
+  const result = name === "form_input" ? await formInput(args) : await callOne(name, args);
+  noteTabs(name, args, result);
+  if (filled != null) result.content = [...(result.content ?? []), { type: "text", text: `(No tabId given; used tab ${filled}.)` }];
+  return result;
 }
 
 // batch: runs actions in order, each with its own timeout, stops at the first error. Text from
