@@ -590,11 +590,14 @@ tasks, four of them without JavaScript: 167 star ratings read as icons, 582 rows
 sudoku, a 13-shape tldraw grid; analysis in
 [eval/results/models-hard/analysis.md](eval/results/models-hard/analysis.md)) did separate them:
 Sonnet scored 0.935 / 0.930 / 0.994 at low / medium / high, Opus 0.98-0.99 and Fable 0.99-1.00.
-Effort bought score only for Sonnet, from medium to high, at the same cost. Sonnet 5.5 high is
-the sidebar chat's default (it matches Opus at every level for 0.7x its cost). Use Sonnet 5.5
-low for quick tasks and fan-out sub-agents ($0.114 a run on easy tasks, $0.30 on hard ones), and
-Fable 5.1 medium when a task must be right the first time (18 of 18 on the hard tier, fastest, about 3x
-Sonnet's cost). Skip Sonnet medium and Opus.
+Three of Sonnet's misses were a text box that never fired `change` after typing. Once that was
+fixed, a Sonnet rerun (54 runs) scored 0.891 / 0.991 / 0.970. So medium's low score in the first
+round was mostly noise. Over both rounds Sonnet passed 26, 29 and 32 of 36 at low, medium and
+high. Effort buys a little score for Sonnet and none for Opus or Fable. Sonnet 5.5 high is the
+sidebar chat's default (it matches Opus at every level for 0.7x its cost). Use Sonnet 5.5 low for
+quick tasks and fan-out sub-agents ($0.114 a run on easy tasks, $0.30 on hard ones), and Fable
+5.1 medium when a task must be right the first time (18 of 18 on the hard tier, fastest, about
+3x Sonnet's cost). Skip Opus.
 
 The same harness also compares these tools with Claude in Chrome; see
 [Compared with Claude in Chrome](#compared-with-claude-in-chrome).

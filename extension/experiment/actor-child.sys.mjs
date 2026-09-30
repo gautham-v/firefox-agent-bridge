@@ -5,6 +5,7 @@
 import { setTimeout, clearTimeout } from "resource://gre/modules/Timer.sys.mjs";
 import { barLabel, fieldKind, marker, markLabels, scrub, selectorKind, siteSelectors } from "resource://firefox-agent-bridge/redact.sys.mjs";
 import { focusEvents } from "resource://firefox-agent-bridge/focus.sys.mjs";
+import { rankFind } from "resource://firefox-agent-bridge/find-rank.sys.mjs";
 
 const INTERACTIVE_ROLES = new Set([
   "button", "link", "textbox", "searchbox", "combobox", "checkbox", "radio", "switch", "slider",
@@ -635,10 +636,8 @@ function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, fr
 // matches as { score, line } rather than text. `origin` is the top frame's viewport (its place
 // on screen and size), so a child frame's coordinates are given in the top frame's, which is what
 // screenshots and clicks use. Only the best FIND_MAX are described; the scores of the rest that
-// were close behind go along so the merged answer can say how many more there were.
-
-const FIND_MAX = 8;
-const FIND_KEEP = 0.5; // of the best score
+// were close behind go along so the merged answer can say how many more there were. Ranking,
+// one entry per element and the extra matches for a role the query names, is in find-rank.sys.mjs.
 
 const STOPWORDS = new Set(["the", "a", "an", "for", "on", "in", "of", "to", "with", "and", "or", "that", "this", "at", "by", "is", "it", "element", "page"]);
 
@@ -682,6 +681,8 @@ function findElements(doc, { query, frameScale = 1, origin, redact }) {
   const tokens = query.toLowerCase().split(/[^\p{L}\p{N}$]+/u).filter((t) => t && !STOPWORDS.has(t));
   const phrase = query.toLowerCase().trim();
   const scored = [];
+  // The query names this role ("button", "input").
+  const roleHit = (role) => tokens.some((t) => ROLE_WORDS[t]?.includes(role));
 
   const visit = (node) => {
     if (node.nodeType === 1) {
@@ -695,7 +696,7 @@ function findElements(doc, { query, frameScale = 1, origin, redact }) {
         let score = 0;
         for (const t of tokens) if (hay.includes(t)) score += 2;
         if (hay.includes(phrase)) score += 5;
-        if (score > 0) scored.push({ el, role: role ?? "text", score, rect: el.getBoundingClientRect(), text: clean(ownText, 150) });
+        if (score > 0) scored.push({ el, role: role ?? "text", score, rect: el.getBoundingClientRect(), text: clean(ownText, 150), roleHit: !!role && roleHit(role) });
       }
       if (interactive || (role && STRUCTURAL_ROLES.has(role) && role !== "paragraph")) {
         const fileInput = el.tagName === "INPUT" && el.type === "file";
@@ -726,7 +727,7 @@ function findElements(doc, { query, frameScale = 1, origin, redact }) {
             const r = el.getBoundingClientRect();
             const inView = r.bottom > 0 && r.right > 0 && r.top < view.height && r.left < view.width;
             if (inView) score += 0.5;
-            scored.push({ el, role, score, rect: r, interactive });
+            scored.push({ el, role, score, rect: r, interactive, roleHit: roleHit(role) });
           }
         }
       }
@@ -740,16 +741,13 @@ function findElements(doc, { query, frameScale = 1, origin, redact }) {
   // Text inside a matched button or link is the same target twice.
   const targets = scored.filter((m) => m.interactive).map((m) => m.el);
   const kept = scored.filter((m) => m.role !== "text" || !targets.some((t) => t !== m.el && t.contains(m.el)));
-  kept.sort((a, b) => b.score - a.score);
-  const best = kept.length ? kept[0].score : 0;
-  const close = kept.filter((m) => m.score >= Math.max(1, best * FIND_KEEP));
-  const top = close.slice(0, FIND_MAX);
+  const { sent, rest } = rankFind(kept);
   // Where this frame's viewport sits in the top frame's, in CSS pixels.
   const dx = child && origin ? win.mozInnerScreenX - origin.x : 0;
   const dy = child && origin ? win.mozInnerScreenY - origin.y : 0;
   const inTop = (x, y) => !child || !origin || (x >= 0 && y >= 0 && x < origin.width && y < origin.height);
   const where = child ? ` (in frame ${doc.location?.host || "about:blank"})` : "";
-  const matches = top.map(({ el, role, rect, text, score }) => {
+  const matches = sent.map(({ el, role, rect, text, score, roleHit: hit }) => {
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
     const cx = Math.round((x + dx) * frameScale);
@@ -757,9 +755,10 @@ function findElements(doc, { query, frameScale = 1, origin, redact }) {
     const onScreen = rect.bottom > 0 && rect.right > 0 && rect.top < view.height && rect.left < view.width && inTop(x + dx, y + dy);
     const at = !(rect.width || rect.height) ? " (not rendered)" : onScreen ? ` at (${cx}, ${cy})` : " (off-screen)";
     const name = red.mask(el) && !isField(el) ? "" : text ?? nameOf(el, role);
-    return { score, line: red.scrub(`${describe(el, role, name, red)}${at}${where}`) };
+    const line = red.scrub(`${describe(el, role, name, red)}${at}${where}`);
+    return hit ? { score, line, roleHit: true } : { score, line };
   });
-  return { matches, rest: close.slice(FIND_MAX).map((m) => m.score), masked: red.masked() };
+  return { matches, rest, masked: red.masked() };
 }
 
 // Text directly inside an element (not in child elements), for elements like spans and divs

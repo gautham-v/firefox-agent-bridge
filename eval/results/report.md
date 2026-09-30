@@ -1,6 +1,6 @@
 # Eval report
 
-Generated 2026-09-30T05:51:49.973Z from `results/runs.jsonl` (48 runs).
+Generated 2026-09-30T08:59:39.423Z from `results/runs.jsonl` (48 runs).
 
 Tokens are summed over every model in a run (sub-agents included). "Input tokens (incl. cache)" is input + cache writes + cache reads. Spread is [min–max]. Tool result chars is the text the tools returned into the context.
 
@@ -518,3 +518,94 @@ By tool: calls per run, and mean ms per call. A call issued in the same message 
 | form_input | 0.13 | 0.13 | 24 | 34 |
 | left_click | 0.10 | 0.06 | 0 | 1 |
 | screenshot | 0.04 | 0.00 | 63 | – |
+
+## Re-measure 2: the re-measure's fixes, after another restart (baseline arm)
+
+Sources: Firefox after is `results/browsers-after.jsonl` (the first re-measure); Firefox after-2 is `results/browsers-after-2.jsonl`, the same 16 tasks, model and prompt, once Firefox had restarted with main at c1ad4bb. It loads what the first re-measure's traces led to: find's header names `computer left_click`, scroll_to on a frame ref reports screenshot coordinates, tabs_context_mcp and navigate say "Created tab N ... close it", javascript_tool says to fetch pages rather than the site's API, computer's description says it has no separate screenshot or click tools, and typing fires change on Tab or a click away in background tabs. Chrome is the rows in `results/browsers.jsonl`, not run again.
+
+| metric | firefox after | firefox after-2 | chrome | firefox after-2 / firefox after (medians) |
+| --- | --- | --- | --- | --- |
+| runs | 48 | 48 | 48 | |
+| success | 100% (48/48) | 100% (48/48) | 98% (47/48) | |
+| wall time (s) | 16.6 [7.6–47.7] | 14.9 [7.3–30.8] | 25.5 [10.2–211.0] | 0.90 |
+| tool calls | 6 [3–17] | 6 [4–16] | 7 [3–67] | 1.00 |
+| screenshot/zoom actions | 0 [0–3] | 0 [0–4] | 0 [0–25] | – |
+| turns | 7 [4–18] | 7 [5–17] | 8 [4–68] | 1.00 |
+| input tokens (incl. cache) | 55k [27k–197k] | 56k [44k–106k] | 119k [48k–1146k] | 1.02 |
+| uncached input tokens | 8.5k [3.8k–20k] | 8.0k [3.8k–14k] | 11k [5.9k–47k] | 0.94 |
+| output tokens | 1.1k [510–4.0k] | 1.1k [484–2.3k] | 1.5k [548–11k] | 1.00 |
+| tool result KB (text + images) | 13.6 [0.3–212.6] | 13.1 [0.5–262.4] | 22.0 [1.3–1275.0] | 0.96 |
+| cost (USD) | 0.060 [0.030–0.150] | 0.058 [0.030–0.076] | 0.080 [0.041–0.514] | 0.97 |
+| total wall time, all runs (min) | 14.3 | 12.2 | 30.9 | |
+| total tool calls, all runs | 351 | 361 | 505 | |
+| total cost, all runs (USD) | 2.88 | 2.63 | 5.02 | |
+
+Median [min–max] per run.
+
+Per task: median wall s / tool calls / input tokens, and success.
+
+| task | firefox after | firefox after-2 | chrome |
+| --- | --- | --- | --- |
+| art-ars-dragon | 10.4s / 4 / 45k (3/3) | 8.6s / 4 / 45k (3/3) | 12.2s / 4 / 72k (3/3) |
+| art-ars-firefox | 9.1s / 4 / 51k (3/3) | 7.4s / 4 / 51k (3/3) | 12.3s / 4 / 79k (3/3) |
+| art-guardian-tang | 10.9s / 4 / 55k (3/3) | 9.8s / 4 / 55k (3/3) | 12.9s / 4 / 83k (3/3) |
+| data-hn-readability | 23.8s / 6 / 111k (3/3) | 14.7s / 6 / 56k (3/3) | 36.7s / 11 / 203k (3/3) |
+| data-crates-html | 13.8s / 6 / 49k (3/3) | 14.1s / 6 / 49k (3/3) | 20.5s / 8 / 87k (3/3) |
+| data-ashby-ramp | 11.4s / 4 / 55k (3/3) | 10.8s / 4 / 55k (3/3) | 15.9s / 4 / 100k (3/3) |
+| cmp-pypi | 26.7s / 5 / 59k (3/3) | 17.3s / 6 / 64k (3/3) | 29.4s / 6 / 121k (3/3) |
+| cmp-npm | 23.9s / 6 / 58k (3/3) | 23.5s / 13 / 86k (3/3) | 48.2s / 8 / 191k (3/3) |
+| gen-wiki-chain | 20.3s / 13 / 152k (3/3) | 15.2s / 11 / 88k (3/3) | 35.7s / 13 / 176k (3/3) |
+| gen-pydocs-search | 17.8s / 13 / 85k (3/3) | 15.4s / 11 / 86k (3/3) | 30.0s / 18 / 198k (3/3) |
+| gen-elements-table | 10.3s / 4 / 45k (3/3) | 11.0s / 4 / 47k (3/3) | 12.7s / 4 / 65k (3/3) |
+| gen-quotes-scroll | 25.9s / 4 / 43k (3/3) | 23.3s / 4 / 44k (3/3) | 55.7s / 8 / 135k (3/3) |
+| gen-httpbin-form | 13.8s / 9 / 69k (3/3) | 12.5s / 8 / 59k (3/3) | 23.1s / 8 / 122k (3/3) |
+| gen-mdn-iframe | 18.0s / 9 / 72k (3/3) | 16.1s / 12 / 89k (3/3) | 99.3s / 41 / 675k (2/3) |
+| gen-apg-datepicker | 23.6s / 16 / 99k (3/3) | 20.1s / 16 / 90k (3/3) | 31.2s / 17 / 153k (3/3) |
+| gen-datatables-scroll | 17.6s / 6 / 54k (3/3) | 16.4s / 6 / 63k (3/3) | 25.1s / 7 / 116k (3/3) |
+
+### What each fix was meant to change
+
+| check | firefox after | firefox after-2 |
+| --- | --- | --- |
+| calls to a tool not offered, right after a find (find calls) | 5 (20) | 2 (21) |
+| calls to tools not offered, all | left_click 5, screenshot 2 | left_click 2, javascript_tool_placeholder 1, screenshot 2 |
+| computer scroll_to on a frame ref: the center it reported | (227, 10) x3 | (227, -63) x3 |
+| runs that never closed their tab | 5 of 48 | 0 of 48 |
+| results that start "Created tab N" | 0 | 48 |
+| javascript_tool fetches of an API or JSON in data tasks | 7 | 0 |
+| data-hn-readability input tokens, median [min–max] | 111k [56k–197k] | 56k [56k–65k] |
+
+### Per call
+
+| per call | firefox after | firefox after-2 | chrome |
+| --- | --- | --- | --- |
+| computer left_click ms, median [min–max] | 123 [108–235] (38 clicks) | 122 [112–142] (39 clicks) | 161 [135–477] (57 clicks) |
+| find result bytes, median [min–max] | 438 [195–778] (20 calls) | 611 [211–878] (21 calls) | 438 [192–627] (15 calls) |
+| computer scroll actions (errors) | 0 (0) | 0 (0) | 9 (0) |
+| get_page_text mean ms, issued alone | 15 (11 of 37) | 11 (7 of 39) | not recorded |
+| find mean ms, issued alone | 54 (7 of 20) | 47 (6 of 21) | not recorded |
+| NS_ERROR_UNEXPECTED results | 0 | 0 | ≥0 |
+| tool errors, all calls | 13 | 11 | 20 |
+| calls to tools not offered | left_click 5, screenshot 2 | left_click 2, javascript_tool_placeholder 1, screenshot 2 | computer 1 |
+
+NS_ERROR_UNEXPECTED: a count from the traces' result text where the trace has it; "≥n" counts the error samples a row keeps (at most 5 per run), so it's a lower bound.
+
+By tool: calls per run, and mean ms per call. A call issued in the same message as a navigate waits for it, so its ms includes the page load; the after runs did that more often (navigate then get_page_text or find in one turn), which is why those two look slower per call here and not in the issued-alone rows above.
+
+| tool | firefox after calls | firefox after-2 calls | chrome calls | firefox after ms | firefox after-2 ms | chrome ms |
+| --- | --- | --- | --- | --- | --- | --- |
+| computer | 1.50 | 1.50 | 4.08 | 153 | 84 | 1411 |
+| navigate | 1.17 | 1.44 | 1.13 | 2108 | 2026 | 2986 |
+| javascript_tool | 0.96 | 0.90 | 1.73 | 1408 | 1556 | 3707 |
+| tabs_context_mcp | 1.00 | 1.00 | 1.02 | 62 | 45 | 1937 |
+| tabs_close_mcp | 0.90 | 1.00 | 0.90 | 102 | 21 | 141 |
+| get_page_text | 0.77 | 0.81 | 0.71 | 1184 | 1278 | 3661 |
+| find | 0.42 | 0.44 | 0.31 | 1100 | 968 | 3135 |
+| read_page | 0.19 | 0.19 | 0.15 | 487 | 457 | 1423 |
+| browser_batch | 0.00 | 0.00 | 0.48 | – | – | 11233 |
+| form_input | 0.13 | 0.13 | 0.00 | 24 | 27 | – |
+| batch | 0.15 | 0.02 | 0.00 | 6984 | 7023 | – |
+| left_click | 0.10 | 0.04 | 0.00 | 0 | 1 | – |
+| screenshot | 0.04 | 0.04 | 0.00 | 63 | 28 | – |
+| javascript_tool_placeholder | 0.00 | 0.02 | 0.00 | – | 1869 | – |
+| read_network_requests | 0.00 | 0.00 | 0.02 | – | – | 400 |

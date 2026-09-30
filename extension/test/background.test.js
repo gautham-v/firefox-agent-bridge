@@ -1779,6 +1779,31 @@ test("find shows the best 8 and says how many close matches it left out, its fra
   assert.equal(lines.at(-1), "(+3 more, refine the query)");
 });
 
+test("find shows a line once, and keeps the elements with a role the query names", async () => {
+  // uitestingplayground.com/textinput: find "button" matched a label and list items that say
+  // "button" above the button itself, whose name had changed to "Renamed".
+  const prose = Array.from({ length: 9 }, (_, i) => ({ score: 7, line: `listitem "Press the button ${i}" [ref_${i + 10}]` }));
+  const env = await framesEnv({
+    finds: [
+      {
+        matches: [{ score: 7, line: 'heading "Text Input" [ref_1] at (50, 60)' }, { score: 7, line: 'heading "Text Input" [ref_1] at (50, 60)' }, ...prose, { score: 4, line: 'button "Renamed" [ref_3] at (90, 200)', roleHit: true }],
+        rest: [],
+        masked: null,
+      },
+    ],
+  });
+  const lines = (await env.callTool("find", { tabId: 2, query: "button" })).result.content[0].text.split("\n");
+  assert.equal(lines.filter((l) => l.startsWith('heading "Text Input"')).length, 1);
+  assert.equal(lines[8], 'button "Renamed" [ref_3] at (90, 200)', "the button takes the last of the 8 places");
+  assert.match(lines[0], /^Found 8 for "button"/);
+  assert.equal(lines.at(-1), "(+3 more, refine the query)");
+
+  // A shown match with the role already: nothing is pushed out for the others.
+  const hit = await framesEnv({ finds: [{ matches: [{ score: 9, line: 'button "Go" [ref_1]', roleHit: true }, { score: 8, line: 'text "go on" [ref_2]' }, { score: 2, line: 'button "Back" [ref_3]', roleHit: true }], rest: [], masked: null }] });
+  const out = (await hit.callTool("find", { tabId: 2, query: "go button" })).result.content[0].text;
+  assert.ok(!out.includes("Back"));
+});
+
 test("find clips long names and hrefs but not refs or coordinates", async () => {
   const long = "Walnut Writing Desk with Two Drawers, Solid Hardwood, Natural FinishFree shipping · In stock · Ships in 2 days";
   const href = "https://shop.example.com/furniture/results/?keywords=writing+desk&origin=SearchResults&itemId=4439342156";
@@ -1794,7 +1819,7 @@ test("find clips long names and hrefs but not refs or coordinates", async () => 
 
 // Real find answers from earlier sessions (extension/test/fixtures/find-recorded.json), as the
 // actor would now answer them: the same lines, best first, 8 at most with the score of each left
-// out behind (every line counts as close, which is the most it could keep).
+// out behind (every line counts as close, which is the most it could keep), each line once.
 test("find answers recorded from real pages come out at a fraction of the size, refs and coordinates intact", async (t) => {
   const recorded = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "find-recorded.json"), "utf8"));
   let before = 0;
@@ -1804,7 +1829,8 @@ test("find answers recorded from real pages come out at a fraction of the size, 
     const env = await framesEnv({ finds: [{ matches: lines.slice(0, 8).map((line, i) => ({ score: 100 - i, line })), rest: lines.slice(8).map((_, i) => 92 - i), masked: null }] });
     const out = (await env.callTool("find", { tabId: 2, query })).result.content[0].text;
     const got = out.split("\n");
-    const shown = lines.slice(0, 8);
+    // A line recorded twice (the "discography" answer has its heading twice) is shown once.
+    const shown = [...new Set(lines.slice(0, 8))];
     assert.equal(got.length - 1 - (lines.length > 8 ? 1 : 0), shown.length, query);
     shown.forEach((l, i) => {
       assert.equal(got[1 + i].match(/\[ref_\d+(@f\d+)?\]/)?.[0], l.match(/\[ref_\d+(@f\d+)?\]/)?.[0], `${query}: ref ${i}`);
