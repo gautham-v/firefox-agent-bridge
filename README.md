@@ -596,6 +596,7 @@ The same harness also compares these tools with Claude in Chrome; see
 - [The chat panel's protocol and engine handling](docs/chat-panel.md)
 - [Teach: the recording, replay.json and replay_steps](docs/teach.md)
 - [What WebDriver BiDi would need to cover this bridge](docs/bidi-gap-map.md)
+- [Manual tests to run in Firefox after a change](docs/manual-tests.md)
 
 ## License
 
