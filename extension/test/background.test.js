@@ -973,6 +973,18 @@ test("Ask about this page puts the current tab in the group", async () => {
   assert.deepEqual(env.sentToHost("chat.send")[0].context.tabs.map((t) => t.tabId), [1]);
 });
 
+test("a tab Teach is recording isn't taken by a chat; the chat gets a blank tab", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await a.send("teach.start");
+  const s = (await omniType(env, "summarize"))[0];
+  await env.browser.omnibox.onInputEntered.fire(s.content, "currentTab");
+  await wait(50);
+  assert.equal(env.browser.tabsMap.get(1).groupId, -1, "the recorded tab stays the user's");
+  assert.equal(env.sentToHost("chat.send")[0].context.tabs.length, 1);
+  assert.notEqual(env.sentToHost("chat.send")[0].context.tabs[0].tabId, 1);
+});
+
 test("an omnibox task that finishes unseen notifies once and the click shows its group", async () => {
   const env = await load();
   const { browser } = env;

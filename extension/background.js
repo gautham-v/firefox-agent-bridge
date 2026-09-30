@@ -1118,7 +1118,8 @@ async function bindChat(chat) {
   if ((await sessionGroupId(chat.id)) != null) return;
   const client = ENGINE_NAMES[chat.engine] ?? "Claude";
   const [tab] = chat.windowId != null ? await browser.tabs.query({ active: true, windowId: chat.windowId }) : [];
-  if (tab && !(await sessionGroupIds()).has(tab.groupId)) {
+  // A tab Teach is recording stays the user's: the agent's input there would be recorded as theirs.
+  if (tab && !recordingIn(tab.id) && !(await sessionGroupIds()).has(tab.groupId)) {
     try {
       await startGroup(chat.id, client, tab.id, tab.windowId);
       return;
