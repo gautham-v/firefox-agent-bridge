@@ -115,6 +115,21 @@
         ]
       },
       {
+        "name": "keepRendering",
+        "type": "function",
+        "async": true,
+        "description": "Keep the windows holding these tabs rendering while they're occluded (another macOS Space, covered, minimized), and stop keeping any other window that this kept before.",
+        "parameters": [
+          {
+            "name": "tabIds",
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          }
+        ]
+      },
+      {
         "name": "record",
         "type": "function",
         "async": true,

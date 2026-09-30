@@ -452,14 +452,16 @@ function clearMask(doc) {
 }
 
 function drawMask(doc, red) {
-  const win = doc.defaultView;
+  // With the viewport's size unknown, every field is covered rather than none.
+  const size = viewSize(doc.defaultView);
+  const view = { width: size.width || Infinity, height: size.height || Infinity };
   const els = red.elements().filter((el) => isRendered(el));
   // A masked element inside another one is already covered.
   const outer = els.filter((el) => !els.some((o) => o !== el && o.contains(el)));
   const bars = [];
   for (const el of outer) {
     const r = el.getBoundingClientRect();
-    if (!r.width || !r.height || r.bottom <= 0 || r.right <= 0 || r.top >= win.innerHeight || r.left >= win.innerWidth) continue;
+    if (!r.width || !r.height || r.bottom <= 0 || r.right <= 0 || r.top >= view.height || r.left >= view.width) continue;
     bars.push({ el, r });
   }
   if (!bars.length) return 0;
@@ -571,10 +573,11 @@ function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, fr
 
   const root = refId ? resolveRef(doc, refId) : doc.body ?? doc.documentElement;
   const win = doc.defaultView;
+  const view = viewSize(win);
   const header = [
     `Page: ${doc.title}`,
     `URL: ${doc.location?.href}`,
-    `Viewport (screenshot frame): ${Math.round(win.innerWidth * frameScale)}x${Math.round(win.innerHeight * frameScale)}; page scrolled ${Math.round(win.scrollY * frameScale)} of ${Math.round(doc.documentElement.scrollHeight * frameScale)} tall`,
+    `Viewport (screenshot frame): ${Math.round(view.width * frameScale)}x${Math.round(view.height * frameScale)}; page scrolled ${Math.round(win.scrollY * frameScale)} of ${Math.round(doc.documentElement.scrollHeight * frameScale)} tall`,
     "",
   ];
   walk(root, 0, depth, false);
@@ -625,6 +628,7 @@ function findElements(doc, { query, frameScale = 1, redact }) {
   const tokens = query.toLowerCase().split(/[^\p{L}\p{N}$]+/u).filter((t) => t && !STOPWORDS.has(t));
   const phrase = query.toLowerCase().trim();
   const win = doc.defaultView;
+  const view = viewSize(win);
   const scored = [];
 
   const visit = (node) => {
@@ -668,7 +672,7 @@ function findElements(doc, { query, frameScale = 1, redact }) {
           if (score > 0) {
             if (interactive) score += 1;
             const r = el.getBoundingClientRect();
-            const inView = r.bottom > 0 && r.right > 0 && r.top < win.innerHeight && r.left < win.innerWidth;
+            const inView = r.bottom > 0 && r.right > 0 && r.top < view.height && r.left < view.width;
             if (inView) score += 0.5;
             scored.push({ el, role, score, rect: r });
           }
@@ -688,7 +692,7 @@ function findElements(doc, { query, frameScale = 1, redact }) {
   const lines = matches.map(({ el, role, rect, text }) => {
     const cx = Math.round((rect.left + rect.width / 2) * frameScale);
     const cy = Math.round((rect.top + rect.height / 2) * frameScale);
-    const onScreen = rect.bottom > 0 && rect.right > 0 && rect.top < win.innerHeight && rect.left < win.innerWidth;
+    const onScreen = rect.bottom > 0 && rect.right > 0 && rect.top < view.height && rect.left < view.width;
     const where = !(rect.width || rect.height) ? " (not rendered)" : onScreen ? ` at (${cx}, ${cy})` : " (off-screen; click by ref, or scroll_to first)";
     const name = red.mask(el) && !isField(el) ? "" : text ?? nameOf(el, role);
     return `${describe(el, role, name, red)}${where}`;
@@ -790,7 +794,8 @@ function pointTarget(doc, { x, y, ref }) {
   if (ref) {
     const el = resolveRef(doc, ref);
     let r = el.getBoundingClientRect();
-    if (r.top < 0 || r.left < 0 || r.bottom > win.innerHeight || r.right > win.innerWidth) {
+    const view = viewSize(win);
+    if (r.top < 0 || r.left < 0 || r.bottom > view.height || r.right > view.width) {
       el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
       r = el.getBoundingClientRect();
     }
@@ -1047,8 +1052,9 @@ function scrollableAncestor(win, el, vertical) {
 function scroll(doc, args) {
   const { direction = "down", amount = 3 } = args;
   const win = doc.defaultView;
-  const x = args.x ?? win.innerWidth / 2;
-  const y = args.y ?? win.innerHeight / 2;
+  const view = viewSize(win);
+  const x = args.x ?? view.width / 2;
+  const y = args.y ?? view.height / 2;
   const el = deepElementFromPoint(doc, x, y);
   const descent = args.x == null || args.noDescend ? null : frameDescent(el, x, y);
   if (descent) return descent;
@@ -1569,7 +1575,8 @@ function pickTarget(hit) {
   const within = (node) => node && node !== doc.body && node !== doc.documentElement;
   const fit = (node) => {
     const r = node.getBoundingClientRect();
-    return r.width * r.height > win.innerWidth * win.innerHeight * 0.6 ? hit : node;
+    const view = viewSize(win);
+    return r.width * r.height > view.width * view.height * 0.6 ? hit : node;
   };
   for (let node = hit; within(node); node = up(node)) {
     if (isInteractive(node, roleOf(node))) return fit(node);
@@ -1640,6 +1647,7 @@ function pick(actor, doc, p, x, y) {
   if (!hit || FRAME_TAGS.has(hit.tagName) || hit === doc.body || hit === doc.documentElement) return;
   const el = pickTarget(hit);
   const win = doc.defaultView;
+  const view = viewSize(win);
   const role = pickRole(el);
   const r = el.getBoundingClientRect();
   const x0 = Math.max(0, r.left);
@@ -1652,7 +1660,7 @@ function pick(actor, doc, p, x, y) {
     role,
     name: pickName(el, role),
     text: visibleText(el),
-    rect: { x: x0, y: y0, width: Math.max(0, Math.min(win.innerWidth, r.right) - x0), height: Math.max(0, Math.min(win.innerHeight, r.bottom) - y0) },
+    rect: { x: x0, y: y0, width: Math.max(0, Math.min(view.width, r.right) - x0), height: Math.max(0, Math.min(view.height, r.bottom) - y0) },
     frame: { x: win.mozInnerScreenX, y: win.mozInnerScreenY },
     url: doc.location?.href ?? "",
     title: doc.title,
@@ -2031,7 +2039,7 @@ async function fill(doc, { ref, text }) {
   const el = resolveRef(doc, ref);
   const win = doc.defaultView;
   let r = el.getBoundingClientRect();
-  if (r.top < 0 || r.bottom > win.innerHeight) {
+  if (r.top < 0 || r.bottom > viewSize(win).height) {
     el.scrollIntoView({ block: "center", behavior: "instant" });
     r = el.getBoundingClientRect();
   }
@@ -2055,11 +2063,21 @@ function textSize(doc) {
   return (doc.body?.innerText ?? "").length;
 }
 
+// The viewport's size in CSS pixels. innerWidth/innerHeight have read 0x0 in a session tab while
+// Firefox's window was occluded (on another macOS Space), likely a size the page hadn't taken yet
+// because it wasn't getting refresh ticks. The scrolling element's client size (the viewport
+// less scrollbars) stands in; 0 when neither knows, and background then asks the tab and the
+// captured image.
+function viewSize(win) {
+  const doc = win.document;
+  const root = doc?.scrollingElement ?? doc?.documentElement;
+  return { width: win.innerWidth || root?.clientWidth || 0, height: win.innerHeight || root?.clientHeight || 0 };
+}
+
 function viewport(doc) {
   const win = doc.defaultView;
   return {
-    width: win.innerWidth,
-    height: win.innerHeight,
+    ...viewSize(win),
     dpr: win.devicePixelRatio,
     scrollX: win.scrollX,
     scrollY: win.scrollY,

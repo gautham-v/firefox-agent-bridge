@@ -150,7 +150,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 async function load(opts) {
   const browser = mockBrowser(opts);
   const matchMedia = () => ({ matches: !!opts?.dark, addEventListener: () => {} });
-  const ctx = vm.createContext({ browser, console, setTimeout, clearTimeout, URL, Date, Promise, matchMedia, crypto: webcrypto });
+  const ctx = vm.createContext({ browser, console, setTimeout, clearTimeout, URL, Date, Promise, matchMedia, crypto: webcrypto, atob });
   for (const f of ["control.js", "background.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "..", f), "utf8"), ctx, { filename: f });
   await wait(20);
   const replies = () => browser.native.sent.filter((m) => m.result);
@@ -1483,4 +1483,115 @@ test("replay_steps stops at the first mismatch with the step, what was expected,
   assert.match(out, /Screenshot of this step when it was recorded: \/skills\/x\/steps\/3\.jpg/);
   assert.match(out, /Steps 1-2 ran\./);
   assert.match(out, /Page \(interactive elements\):\nlink "Home" \[ref_9\]/);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Firefox's window occluded (on another macOS Space): the page can answer a 0x0 viewport, and
+// pages stop getting animation frames unless the window is kept rendering.
+
+const pngOf = (width, height) => {
+  const b = Buffer.alloc(33);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).copy(b);
+  b.write("IHDR", 12);
+  b.writeUInt32BE(width, 16);
+  b.writeUInt32BE(height, 20);
+  return `data:image/png;base64,${b.toString("base64")}`;
+};
+
+// SOI, a JFIF header, a quantization table, then the start of frame, as Firefox's encoder writes them.
+const jpegOf = (width, height) => {
+  const app0 = Buffer.concat([Buffer.from([0xff, 0xe0, 0, 16]), Buffer.from("JFIF\0"), Buffer.alloc(9)]);
+  const dqt = Buffer.concat([Buffer.from([0xff, 0xdb, 0, 67]), Buffer.alloc(65)]);
+  const sof = Buffer.from([0xff, 0xc0, 0, 17, 8, height >> 8, height & 255, width >> 8, width & 255, 3, ...Buffer.alloc(9)]);
+  return `data:image/jpeg;base64,${Buffer.concat([Buffer.from([0xff, 0xd8]), app0, dqt, sof]).toString("base64")}`;
+};
+
+test("a capture's pixel size is read from its PNG or JPEG header", async () => {
+  const { ctx } = await load();
+  assert.deepEqual(plain(ctx.imageSize(pngOf(1422, 809))), { width: 1422, height: 809 });
+  assert.deepEqual(plain(ctx.imageSize(jpegOf(1568, 892))), { width: 1568, height: 892 });
+  assert.equal(ctx.imageSize("data:image/jpeg;base64,AAAA"), null);
+  assert.equal(ctx.imageSize("not a data url"), null);
+  assert.equal(ctx.imageSize(pngOf(0, 0)), null);
+});
+
+// A session tab (id 2) whose page answers `viewport` as given, at `zoom`, whose captures are as
+// Firefox makes them: `real` CSS pixels times the scale asked for times the zoom.
+async function occludedEnv({ viewport, real, zoom = 1, tabSize }) {
+  const env = await load();
+  await env.callTool("tabs_create_mcp");
+  Object.assign(env.browser.tabsMap.get(2), tabSize ?? {});
+  const calls = [];
+  const scales = [];
+  env.browser.claudePage.call = async (tabId, op, args) => {
+    calls.push([op, plain(args)]);
+    if (op === "viewport") return { ...viewport, dpr: 2 * zoom, scrollX: 0, scrollY: 0, title: "Board", url: "https://app.example/" };
+    return op === "textSize" ? 10 : "done";
+  };
+  env.browser.tabs.getZoom = async () => zoom;
+  env.browser.tabs.captureTab = async (tabId, { scale }) => {
+    scales.push(scale);
+    return jpegOf(Math.round(real.width * scale * zoom), Math.round(real.height * scale * zoom));
+  };
+  return { ...env, calls, scales };
+}
+
+const fit = (w, h) => Math.min(1, 1568 / Math.max(w, h), Math.sqrt(1_150_000 / (w * h)));
+
+test("a page answering a 0x0 viewport gets the tab's size, and clicks map through it", async () => {
+  const env = await occludedEnv({ viewport: { width: 0, height: 0 }, real: { width: 1422, height: 809 }, tabSize: { width: 1422, height: 809 } });
+  const r = await env.callTool("computer", { action: "screenshot", tabId: 2 });
+  assert.equal(r.result.content[0].type, "image");
+  const s = fit(1422, 809);
+  assert.match(r.result.content[1].text, /^Screenshot of tab 2 \(1422x809\)\./);
+  assert.deepEqual(env.scales, [s], "one capture, at the size the tab says");
+
+  const half = await env.callTool("computer", { action: "screenshot", tabId: 2, scale: 0.5 });
+  assert.match(half.result.content[1].text, /coordinates still use the full 1422x809 frame/);
+
+  await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [711, 400] });
+  const click = env.calls.find(([op]) => op === "click")[1];
+  assert.ok(Math.abs(click.x - 711 / s) < 1e-9 && Math.abs(click.y - 400 / s) < 1e-9);
+});
+
+test("with no size known anywhere, the screenshot measures its own capture, zoom divided out", async () => {
+  const env = await occludedEnv({ viewport: { width: 0, height: 0 }, real: { width: 2000, height: 1250 }, zoom: 1.5 });
+  const r = await env.callTool("computer", { action: "screenshot", tabId: 2 });
+  const s = fit(2000, 1250);
+  assert.deepEqual(env.scales, [1 / 1.5, s / 1.5], "measured at one pixel per CSS pixel, then taken at the fitted size");
+  assert.match(r.result.content[1].text, new RegExp(`^Screenshot of tab 2 \\(${Math.round(2000 * s)}x${Math.round(1250 * s)}\\)\\.`));
+  assert.doesNotMatch(r.result.content[1].text, /\b0x0\b/);
+
+  await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [100, 100] });
+  const click = env.calls.find(([op]) => op === "click")[1];
+  assert.ok(Math.abs(click.x - 100 / s) < 1e-9, "screenshot pixels map to CSS pixels at any zoom");
+});
+
+test("a zoomed tab is captured with the zoom divided out, so the image matches the frame it reports", async () => {
+  const env = await occludedEnv({ viewport: { width: 1000, height: 800 }, real: { width: 1000, height: 800 }, zoom: 2 });
+  const r = await env.callTool("computer", { action: "screenshot", tabId: 2 });
+  assert.deepEqual(env.scales, [0.5]);
+  assert.match(r.result.content[1].text, /^Screenshot of tab 2 \(1000x800\)\./);
+  await env.callTool("computer", { action: "zoom", tabId: 2, region: [0, 0, 100, 100] });
+  assert.equal(env.scales.at(-1), (2 * 2 * 2) / 2, "zoom's scale is divided by the tab's zoom too");
+});
+
+test("a stale viewport from the page loses to the size of the image it gave", async () => {
+  const env = await occludedEnv({ viewport: { width: 800, height: 600 }, real: { width: 1422, height: 809 } });
+  const r = await env.callTool("computer", { action: "screenshot", tabId: 2 });
+  assert.match(r.result.content[1].text, /^Screenshot of tab 2 \(1422x809\)\./);
+});
+
+test("windows holding a live session's tabs are kept rendering, and let go when the session is gone", async () => {
+  const env = await load();
+  const kept = [];
+  env.browser.claudePage.keepRendering = async (tabIds) => kept.push(plain(tabIds));
+  await clientEvent(env, "connected", { id: 1, name: "claude-code", pid: 9, cwd: "/p" });
+  await env.callTool("tabs_create_mcp", {}, "s1", { id: 1, name: "claude-code" });
+  await env.callTool("tabs_create_mcp", {}, "s1", { id: 1, name: "claude-code" });
+  await wait(120);
+  assert.deepEqual(kept.at(-1), [2, 3], "the session's tabs, not the user's tab 1");
+  await clientEvent(env, "disconnected", { id: 1 });
+  await wait(120);
+  assert.deepEqual(kept.at(-1), [], "a disconnected session keeps nothing rendering");
 });
