@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Composites one Firefox take and one Chrome take from race.mjs into the race video: each
 // browser window cropped out of its screen recording, both aligned to t=0 = the agent process
-// starting, scaled to one height, side by side (Claude in Chrome left), a label and a running timer over
-// each, the timer stopping when that side's result arrives, a "done in 12.4s" badge from then on,
-// and the faster side's last frame held until the slower one finishes.
+// starting, scaled to one height, side by side (Claude in Chrome left), a label bar over each with a
+// running timer and a race line (both lines on one scale), the timer stopping and turning green
+// when that side's result arrives, the winner marked "1.6× faster" once both are done, and the
+// faster side's last frame held until the slower one finishes.
 //
 //   node eval/demo/compose.mjs --dir <race dir> [--firefox <sidecar.json>] [--chrome <sidecar.json>]
 //        [--out race.mp4] [--social-out race-social.mp4] [--hold close|result] [--tail 3]
@@ -15,8 +16,8 @@
 // unless --out says otherwise.
 //
 // ffmpeg here has no drawtext (no libfreetype), so text is drawn with ImageMagick (`magick`) into
-// PNGs and overlaid: one static layer, one timer frame per tenth of a second (an image sequence
-// at 10 fps whose last frame stays up), and a badge per side.
+// PNGs and overlaid: one static layer (the caption) and one label frame per tenth of a second per
+// side (an image sequence at 10 fps whose last frame stays up).
 //
 // --hold close (default) freezes each side's picture at its first tabs_close_mcp call, since the
 // prompt makes the agent close its tab before answering and the window would otherwise end on
@@ -26,7 +27,7 @@ import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { STYLE, cropBox, filterGraph, layout, medianTake, sideTiming, tenths } from "./lib.mjs";
+import { STYLE, cropBox, filterGraph, labelState, layout, medianTake, sideTiming, tenths } from "./lib.mjs";
 
 const argv = process.argv.slice(2);
 const opt = (name, dflt) => {
@@ -50,7 +51,12 @@ if (!["close", "result"].includes(HOLD)) throw new Error("--hold is close or res
 const LABELS = { firefox: "Firefox Agent Bridge", chrome: "Claude in Chrome" };
 const MODEL_NAMES = { "claude-sonnet-5-5": "Sonnet 5.5", "claude-opus-5-5": "Opus 5.5", "claude-fable-5-1": "Fable 5.1", "claude-haiku-4-5-20251001": "Haiku 4.5" };
 const cap1 = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
-const COLORS = { canvas: "#161618", strip: "rgba(0,0,0,0.55)", text: "#F5F5F7", muted: "#A1A1A6", badge: "rgba(12,12,14,0.78)" };
+// Labels: flat near-black bars with hairline edges and square corners; a timer cell on the right
+// that turns green when that side is done; a race line along the bottom.
+const COLORS = {
+  canvas: "#161618", bar: "#0E0F11", hairline: "rgba(255,255,255,0.14)", text: "#F4F4F2", dim: "rgba(244,244,242,0.7)",
+  muted: "rgba(244,244,242,0.6)", done: "#1F9D62", doneLine: "#3FCF8E", win: "#5FE0A0",
+};
 
 const firstFile = (...files) => files.find((f) => f && fs.existsSync(f));
 const FONT = firstFile(opt("font"), path.join(os.homedir(), "Library/Fonts/Archivo[wdth,wght].ttf"), path.join(os.homedir(), "Library/Fonts/Inter-Medium.ttf"), path.join(os.homedir(), "Library/Fonts/InterVariable.ttf"), "/Library/Fonts/Inter-Medium.ttf", "/System/Library/Fonts/SFNS.ttf", "/System/Library/Fonts/Helvetica.ttc");
@@ -82,7 +88,7 @@ const takes = [pick("chrome"), pick("firefox")]; // Claude in Chrome left, Firef
 if (takes[0].task !== takes[1].task) throw new Error(`the takes are of different tasks: ${takes[0].task}, ${takes[1].task}`);
 const outDir = DIR ?? path.dirname(takes[0]._file);
 const modelName = MODEL_NAMES[String(takes[0].model).replace(/\[.*\]$/, "")] ?? takes[0].model;
-const CAPTION = opt("caption") ?? [modelName + (takes[0].effort ? ` ${cap1(takes[0].effort)}` : ""), "same task and prompt", "one take each", ...(SPEED > 1 ? [`played at ${SPEED}x`] : [])].join(" · ");
+const CAPTION = opt("caption") ?? [modelName + (takes[0].effort ? ` ${cap1(takes[0].effort)}` : ""), "same prompt", "one take each", ...(SPEED > 1 ? [`${SPEED}× speed`] : [])].join(" · ");
 const OUT = path.resolve(opt("out", path.join(outDir, `race-${takes[0].task}${LAYOUT === "stack" ? "-vertical" : ""}.mp4`)));
 const SOCIAL = path.resolve(opt("social-out", OUT.replace(/\.mp4$/, "") + "-social.mp4"));
 
@@ -124,50 +130,71 @@ async function pool(jobs, n = Math.max(2, os.cpus().length - 2)) {
 }
 const sizeOf = (file) => execFileSync("magick", ["identify", "-format", "%w %h", file], { encoding: "utf8" }).trim().split(" ").map(Number);
 
+// The caption, in a bar like the labels.
 const staticArgs = ["-size", `${W}x${H}`, "xc:none"];
-sides.forEach((s, i) => {
-  const p = lay.panes[i];
-  const stripTop = p.y - STYLE.stripGap - STYLE.stripH;
-  staticArgs.push("-fill", COLORS.strip, "-draw", `roundrectangle ${p.x},${stripTop} ${p.x + p.w - 1},${stripTop + STYLE.stripH - 1} 10,10`);
-  // Drawn centered in a strip-high box, as the timers are, so both sit on one line.
-  staticArgs.push("(", "-size", `${Math.round(p.w / 2)}x${STYLE.stripH}`, "xc:none", "-font", FONT, "-pointsize", "28", "-fill", COLORS.text, "-gravity", "West", "-annotate", "+20+0", LABELS[s.sc.browser], ")");
-  staticArgs.push("-gravity", "NorthWest", "-geometry", `+${p.x}+${stripTop}`, "-composite");
-});
-if (BACKGROUND) {
-  // On a painting the caption needs its own dark pill to stay readable.
+{
   const capText = path.join(TMP, "caption.png");
-  await magick(["-background", "none", "-fill", COLORS.text, "-font", FONT, "-pointsize", "24", `label:${CAPTION}`, capText]);
+  await magick(["-background", "none", "-fill", COLORS.text, "-font", MONO, "-pointsize", "24", `label:${CAPTION}`, capText]);
   const [cw, ch] = sizeOf(capText);
-  const pw = cw + 44, ph = ch + 18;
-  staticArgs.push("-fill", COLORS.strip, "-draw", `roundrectangle ${(W - pw) / 2},${H - 22 - ph} ${(W + pw) / 2 - 1},${H - 23} ${ph / 2},${ph / 2}`);
-  staticArgs.push(capText, "-gravity", "South", "-geometry", "+0+31", "-composite");
-} else staticArgs.push("-font", FONT, "-pointsize", "24", "-fill", COLORS.muted, "-gravity", "South", "-annotate", "+0+26", CAPTION);
+  const bw = cw + 48, bh = ch + 18, bx = Math.round((W - bw) / 2), by = H - 20 - bh;
+  staticArgs.push("-fill", COLORS.bar, "-stroke", COLORS.hairline, "-strokewidth", "1", "-draw", `rectangle ${bx},${by} ${bx + bw - 1},${by + bh - 1}`, "-stroke", "none");
+  staticArgs.push(capText, "-gravity", "NorthWest", "-geometry", `+${bx + 24}+${by + 9}`, "-composite");
+}
 staticArgs.push(path.join(TMP, "static.png"));
 await magick(staticArgs);
 
-const TIMER = { w: 200, h: STYLE.stripH };
+// One label frame per tenth of a second per side, through the slower side's finish: name, timer
+// (big digits, a smaller "s", on one baseline), "done" or the winner's "1.6× faster", and the
+// race line. Frames that look the same are drawn once and copied.
+const LABEL = { h: STYLE.stripH, cell: 220, pad: 22, name: 38, digits: 48, digitKern: -2, unit: 34, chip: 20, line: 5 };
+const measure = async (font, size, text) => {
+  const f = path.join(TMP, `m-${size}-${text.length}.png`);
+  await magick(["-background", "none", "-font", font, "-pointsize", String(size), `label:${text}`, f]);
+  return sizeOf(f)[0];
+};
+const digitW = (await measure(MONO, LABEL.digits, "0".repeat(20))) / 20;
+const unitW = (await measure(MONO, LABEL.unit, "s".repeat(20))) / 20;
+const baseline = Math.round(LABEL.h / 2 + LABEL.digits * 0.36);
+function labelArgs(name, w, st, file) {
+  const a = ["-size", `${w}x${LABEL.h}`, `xc:${COLORS.bar}`];
+  a.push("-fill", "none", "-stroke", COLORS.hairline, "-strokewidth", "1", "-draw", `rectangle 0,0 ${w - 1},${LABEL.h - 1}`, "-stroke", "none");
+  const cx = w - LABEL.cell;
+  if (st.done) a.push("-fill", COLORS.done, "-draw", `rectangle ${cx},0 ${w - 1},${LABEL.h - 1}`);
+  else a.push("-fill", COLORS.hairline, "-draw", `rectangle ${cx},1 ${cx},${LABEL.h - 2}`);
+  a.push("-font", FONT, "-pointsize", String(LABEL.name), "-fill", COLORS.text, "-gravity", "West", "-annotate", `+${LABEL.pad}+0`, name);
+  const chip = st.faster ? [`${st.faster} FASTER`, COLORS.win] : st.done ? ["DONE", COLORS.muted] : null;
+  if (chip) a.push("-font", MONO, "-pointsize", String(LABEL.chip), "-kerning", "1.6", "-fill", chip[1], "-gravity", "East", "-annotate", `+${LABEL.cell + 18}+0`, chip[0], "-kerning", "0");
+  const ux = w - LABEL.pad - unitW;
+  const dx = ux - 3 - st.timer.length * digitW - (st.timer.length - 1) * LABEL.digitKern;
+  a.push("+gravity", "-font", MONO, "-pointsize", String(LABEL.digits), "-kerning", String(LABEL.digitKern), "-fill", st.done ? "#FFFFFF" : COLORS.text, "-annotate", `+${Math.round(dx)}+${baseline}`, st.timer, "-kerning", "0");
+  a.push("-pointsize", String(LABEL.unit), "-fill", st.done ? "rgba(255,255,255,0.85)" : COLORS.dim, "-annotate", `+${Math.round(ux)}+${baseline}`, "s");
+  const len = Math.round(st.line * w);
+  if (len > 0) a.push("-fill", st.done ? COLORS.doneLine : COLORS.text, "-draw", `rectangle 0,${LABEL.h - LABEL.line} ${len - 1},${LABEL.h - 1}`);
+  a.push(file);
+  return a;
+}
+const doneAll = Math.max(...sides.map((s) => s.timing.done));
 const jobs = [];
+const copies = [];
 sides.forEach((s, i) => {
-  const frames = Math.floor(s.timing.done * 10 + 1e-6) + 1;
-  s.timerPattern = path.join(TMP, `timer${i}-%05d.png`);
-  s.timerSize = TIMER;
-  for (let k = 0; k < frames; k++)
-    jobs.push(() =>
-      magick(["-size", `${TIMER.w}x${TIMER.h}`, "xc:none", "-font", MONO, "-pointsize", "28", "-fill", COLORS.text, "-gravity", "East", "-annotate", "+20+0", `${tenths(k / 10)}s`, path.join(TMP, `timer${i}-${String(k).padStart(5, "0")}.png`)]),
-    );
+  const w = lay.panes[i].w;
+  const rivalDone = sides[1 - i].timing.done;
+  const frames = Math.floor(doneAll * 10 + 1e-6) + 1;
+  s.labelPattern = path.join(TMP, `label${i}-%05d.png`);
+  const drawn = new Map();
+  for (let k = 0; k < frames; k++) {
+    const st = labelState(k / 10, { done: s.timing.done, doneAll, rivalDone });
+    const file = path.join(TMP, `label${i}-${String(k).padStart(5, "0")}.png`);
+    const key = JSON.stringify(st);
+    if (drawn.has(key)) copies.push([drawn.get(key), file]);
+    else {
+      drawn.set(key, file);
+      jobs.push(() => magick(labelArgs(LABELS[s.sc.browser], w, st, file)));
+    }
+  }
 });
 await pool(jobs);
-
-for (const [i, s] of sides.entries()) {
-  const text = path.join(TMP, `badge-text${i}.png`);
-  await magick(["-background", "none", "-fill", COLORS.text, "-font", FONT, "-pointsize", "28", `label:done in ${tenths(s.timing.done)}s`, text]);
-  const [tw, th] = sizeOf(text);
-  const bw = tw + 48;
-  const bh = th + 22;
-  s.badge = path.join(TMP, `badge${i}.png`);
-  await magick(["-size", `${bw}x${bh}`, "xc:none", "-fill", COLORS.badge, "-draw", `roundrectangle 0,0 ${bw - 1},${bh - 1} ${bh / 2},${bh / 2}`, text, "-gravity", "center", "-composite", s.badge]);
-  s.badgeSize = { w: bw, h: bh };
-}
+for (const [from, to] of copies) fs.copyFileSync(from, to);
 
 // ---- render ----------------------------------------------------------------------------------
 
@@ -181,7 +208,7 @@ if (BACKGROUND) {
   canvasInput = ["-loop", "1", "-framerate", String(FPS), "-t", total.toFixed(3), "-i", bg];
 }
 const inputs = [...canvasInput, "-loop", "1", "-framerate", String(FPS), "-i", path.join(TMP, "static.png")];
-for (const s of sides) inputs.push("-i", s.video, "-framerate", "10", "-i", s.timerPattern, "-loop", "1", "-framerate", String(FPS), "-i", s.badge);
+for (const s of sides) inputs.push("-i", s.video, "-framerate", "10", "-i", s.labelPattern);
 
 const ffmpeg = (args) => {
   const r = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", ...args], { stdio: "inherit" });

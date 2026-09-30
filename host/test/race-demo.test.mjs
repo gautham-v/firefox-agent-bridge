@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cropBox, filterGraph, firstFrameAt, layout, medianTake, parseNdjson, pickWindow, recordingIdOf, runTimes, sideTiming, tenths } from "../../eval/demo/lib.mjs";
+import { cropBox, filterGraph, firstFrameAt, labelState, layout, medianTake, parseNdjson, pickWindow, recordingIdOf, runTimes, sideTiming, tenths } from "../../eval/demo/lib.mjs";
 import { browserClaudeArgs, firefoxMcpConfig } from "../../eval/lib/claude-args.mjs";
 import { taskById } from "../../eval/tasks.mjs";
 
@@ -100,9 +100,9 @@ test("layout: equal heights, side by side, inside the frame below the header and
   assert.ok(wide.panes[1].x + wide.panes[1].w <= 1920 - 48 && wide.h < 1080 - 104 - 72);
 });
 
-test("filtergraph: each side is trimmed from its offset, cropped, frozen from holdFrom, its timer held, its badge shown from done", () => {
+test("filtergraph: each side is trimmed from its offset, cropped, frozen from holdFrom, and its label bar held", () => {
   const lay = layout({ w: 2536, h: 2798 }, { w: 2520, h: 2760 });
-  const side = (offset, done, holdFrom, crop) => ({ timing: { offset, done, holdFrom }, crop, timerSize: { w: 200, h: 56 }, badgeSize: { w: 240, h: 60 } });
+  const side = (offset, done, holdFrom, crop) => ({ timing: { offset, done, holdFrom }, crop });
   const g = filterGraph({
     sides: [side(2, 12.46, 11.8, { x: 16, y: 66, w: 2536, h: 2798 }), side(-0.5, 21.73, 21, { x: 2568, y: 80, w: 2520, h: 2760 })],
     lay,
@@ -111,11 +111,29 @@ test("filtergraph: each side is trimmed from its offset, cropped, frozen from ho
   assert.match(g, /\[2:v\]trim=start=2\.000:end=13\.800,setpts=PTS-STARTPTS,crop=2536:2798:16:66,/);
   assert.match(g, /tpad=stop_mode=clone:stop_duration=13\.930,trim=duration=24\.730\[p0\]/);
   // A video that started after the agent is padded with its first frame instead.
-  assert.match(g, /\[5:v\]tpad=start_mode=clone:start_duration=0\.500,trim=start=0\.000:end=21\.000,/);
-  assert.match(g, /\[3:v\]overlay=\d+:\d+:eof_action=repeat/);
-  assert.match(g, /\[4:v\]overlay=\d+:\d+:enable='gte\(t,12\.460\)'/);
-  assert.match(g, /\[7:v\]overlay=\d+:\d+:enable='gte\(t,21\.730\)'/);
+  assert.match(g, /\[4:v\]tpad=start_mode=clone:start_duration=0\.500,trim=start=0\.000:end=21\.000,/);
+  // The label bar sits over its pane's left edge, above the pane.
+  assert.ok(g.includes(`[3:v]overlay=${lay.panes[0].x}:${lay.panes[0].y - 88}:eof_action=repeat`));
+  assert.ok(g.includes(`[5:v]overlay=${lay.panes[1].x}:${lay.panes[1].y - 88}:eof_action=repeat`));
+  assert.doesNotMatch(g, /enable=/);
   assert.match(g, /format=yuv420p\[out\]$/);
+});
+
+test("labelState: the timer runs to done and turns done on that tenth; lines share one scale; the winner gets its margin once both finish", () => {
+  const ff = { done: 44.03, doneAll: 72.5, rivalDone: 72.5 };
+  const ch = { done: 72.5, doneAll: 72.5, rivalDone: 44.03 };
+  assert.deepEqual(labelState(20, ff), { timer: "20.0", done: false, line: 20 / 72.5, faster: null });
+  assert.deepEqual(labelState(43.9, ff), { timer: "43.9", done: false, line: 43.9 / 72.5, faster: null });
+  const at44 = labelState(44, ff);
+  assert.equal(at44.timer, "44.0");
+  assert.equal(at44.done, true);
+  assert.equal(labelState(60, ff).timer, "44.0");
+  assert.equal(labelState(60, ff).line, 44.03 / 72.5);
+  assert.equal(labelState(60, ff).faster, null);
+  assert.equal(labelState(72.5, ff).faster, "1.6×");
+  assert.equal(labelState(72.5, ch).faster, null);
+  assert.equal(labelState(72.5, ch).line, 1);
+  assert.equal(labelState(72.4, ch).done, false);
 });
 
 test("race.mjs runs what run.mjs runs: same flags, and the prompt names each browser's tools", () => {

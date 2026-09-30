@@ -72,9 +72,12 @@ A side-by-side recording of one task in both browsers, for showing the gap rathe
 `demo/race.mjs` runs takes exactly as `run.mjs` does (same prompt, model and flags, through
 `lib/claude-args.mjs`) while Cap records the whole screen, one take at a time, Firefox's first.
 `demo/compose.mjs` crops each browser window out of its recording, starts both at the agent
-process starting, and stacks them (Firefox left) with a label, a timer that stops when that
-side's answer arrives, a "done in 12.4s" badge, and the faster side's last frame held until the
-slower one finishes. Output: 1920x1080 h264 (yuv420p, faststart, no audio) and a 1200x676 cut for
+process starting, and puts them side by side (Claude in Chrome left) under black label bars: a
+big timer that stops and turns green when that side's answer arrives, a race line along each bar
+on one shared scale, "1.6× faster" on the winner once both finish, and the faster side's last
+frame held until the slower one finishes. `--background` puts an image behind the windows,
+`--speed` plays it faster (the timers keep real seconds), and `--font` takes a static font file
+(ImageMagick draws a variable font at its default weight, 600 for Archivo). Output: 1920x1080 h264 (yuv420p, faststart, no audio) and a 1200x676 cut for
 social (yuv420p needs an even height). ffmpeg here has no drawtext, so the text is drawn with
 ImageMagick (`magick`) and overlaid.
 

@@ -145,18 +145,31 @@ export function layout(a, b, { width = 1920, height = 1080, top = 104, bottom = 
   return { h, y, panes: [{ x: x1, y, w: wa, h }, { x: x1 + wa + gap, y, w: wb, h }] };
 }
 
-// Header strip above each pane (label left, timer right) and the badge's distance from the
-// pane's bottom edge, in output pixels.
-export const STYLE = { stripH: 56, stripGap: 10, badgeMargin: 28 };
+// The label bar above each pane (name left, timer right, race line along its bottom), in output
+// pixels: its height and its gap to the pane.
+export const STYLE = { stripH: 80, stripGap: 8 };
 
-// The ffmpeg filtergraph. Inputs: 0 = canvas, 1 = static overlay (strips, labels, caption), then
-// per side (left, right): raw video, timer frames (10 a second; the last one stays up, frozen, by
-// eof_action=repeat), done badge (shown from that side's done time). Each side's picture holds
-// its last frame from holdFrom to the end.
+// What one side's label shows at race time t (seconds, one frame per tenth): the timer, whether
+// that side is done, the race line's length as a share of the slowest side's time (both lines on
+// one scale), and, once both are done, the winner's "1.6x faster". Uses the same tenths as the
+// timer, so the finish shows on the frame whose timer reads the final time.
+export function labelState(t, { done, doneAll, rivalDone }) {
+  const k = Math.floor(t * 10 + 1e-6);
+  const finished = k >= Math.floor(done * 10 + 1e-6);
+  const shown = finished ? done : k / 10;
+  const last = Math.max(doneAll, 1e-6);
+  const allDone = k >= Math.floor(last * 10 + 1e-6);
+  const faster = allDone && rivalDone > done ? `${(Math.floor((rivalDone / done) * 10 + 1e-6) / 10).toFixed(1)}×` : null;
+  return { timer: tenths(shown), done: finished, line: Math.min(1, shown / last), faster };
+}
+
+// The ffmpeg filtergraph. Inputs: 0 = canvas, 1 = static overlay (the caption), then per side
+// (left, right): raw video, label frames (10 a second; the last one stays up, frozen, by
+// eof_action=repeat). Each side's picture holds its last frame from holdFrom to the end.
 export function filterGraph({ sides, lay, total, fps = 30, style = STYLE }) {
   const parts = [];
   sides.forEach((s, i) => {
-    const v = 2 + i * 3;
+    const v = 2 + i * 2;
     const { crop, timing } = s;
     const pane = lay.panes[i];
     const pre = timing.offset < 0 ? `tpad=start_mode=clone:start_duration=${(-timing.offset).toFixed(3)},` : "";
@@ -170,15 +183,11 @@ export function filterGraph({ sides, lay, total, fps = 30, style = STYLE }) {
   parts.push("[0:v][1:v]overlay=0:0[b0]");
   let n = 0;
   sides.forEach((s, i) => {
-    const v = 2 + i * 3;
+    const v = 2 + i * 2;
     const pane = lay.panes[i];
     parts.push(`[b${n}][p${i}]overlay=${pane.x}:${pane.y}[b${n + 1}]`);
     n++;
-    parts.push(`[b${n}][${v + 1}:v]overlay=${pane.x + pane.w - s.timerSize.w}:${pane.y - style.stripGap - style.stripH}:eof_action=repeat[b${n + 1}]`);
-    n++;
-    parts.push(
-      `[b${n}][${v + 2}:v]overlay=${pane.x + Math.round((pane.w - s.badgeSize.w) / 2)}:${pane.y + pane.h - s.badgeSize.h - style.badgeMargin}:enable='gte(t,${s.timing.done.toFixed(3)})'[b${n + 1}]`,
-    );
+    parts.push(`[b${n}][${v + 1}:v]overlay=${pane.x}:${pane.y - style.stripGap - style.stripH}:eof_action=repeat[b${n + 1}]`);
     n++;
   });
   parts.push(`[b${n}]format=yuv420p[out]`);
