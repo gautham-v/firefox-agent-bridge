@@ -328,7 +328,7 @@ load: how many other runs of this benchmark, other eval processes and other harn
 
 Round 1 was at ceiling: Sonnet, Opus and Fable passed all 162 runs at every effort. `--tier hard`
 runs six harder tasks (`models-tasks-hard.mjs`) on the 9 Sonnet/Opus/Fable configs (no Haiku)
-into `results/models-hard/`. Four tasks forbid `javascript_tool` (a run that calls it, even
+into `results/models-hard/`. Five tasks forbid `javascript_tool` (a run that calls it, even
 inside `batch`, scores 0; the harness passes each run's tool calls to `check()`), because drafts
 without that rule were solved through the page's own JavaScript and stayed at ceiling.
 

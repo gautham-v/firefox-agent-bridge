@@ -2,7 +2,7 @@
 
 162 runs: 9 configs (Sonnet 5.5, Opus 5.5 and Fable 5.1 at low, medium and high effort), 6 tasks, 3 rounds, concurrency 3. There were no timeouts, infra errors or rate limits, and no run overlapped another eval. Cost is the CLI's list-price `total_cost_usd`, not what the subscription bills: $108.52 for the matrix plus $19.75 for 38 smoke runs, $128.27 in total.
 
-The tasks are in `eval/models-tasks-hard.mjs`. Three are ordinary: a rules task (2026 World Cup tie-breakers, read from Wikipedia) and two exact-reading tasks. Four forbid `javascript_tool`, and a run that uses it scores 0. Two earlier drafts were at ceiling in smoke runs (see "How the tier was made hard").
+The tasks are in `eval/models-tasks-hard.mjs`. Three are ordinary: a rules task (2026 World Cup tie-breakers, read from Wikipedia) and two exact-reading tasks. Five forbid `javascript_tool` (all but the World Cup tie-break), and a run that uses it scores 0. Two earlier drafts were at ceiling in smoke runs (see "How the tier was made hard").
 
 ## Headline
 - **The hard tier separates the models, but only a little.** Mean score (passes of 18):

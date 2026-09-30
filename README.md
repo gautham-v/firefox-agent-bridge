@@ -26,7 +26,10 @@ Unofficial. Not affiliated with Anthropic, OpenAI or Mozilla.
 - Page scripts run without being blocked by the page's CSP. File inputs are filled directly,
   without opening a native picker.
 - On the same 16 tasks as [Claude in Chrome](#compared-with-claude-in-chrome), it was faster
-  on all 16 (16.6s against 25.5s a run) and used less than half the input tokens.
+  and cheaper on all 16 (14.9s against 25.5s a run) and used less than half the input tokens.
+
+How it was built and measured, including about 1,200 eval runs against Claude in Chrome and four
+Claude models: [My Firefox browser agent is 1.7x faster than Claude in Chrome](https://gauthamv.com/writing/firefox-browser-agent-vs-claude-in-chrome/).
 - Password, card and one-time-code fields are [redacted](#redaction) before a screenshot or page
   read leaves Firefox. The agent can still fill them.
 
@@ -37,23 +40,23 @@ same model (Sonnet 5.5) and the same prompt. The tasks covered reading articles,
 from lists, comparing five package pages, following links, site search, infinite scroll, forms, a
 date picker, a virtualized table and a dropdown inside an embedded frame.
 
-The Firefox numbers below are from a rerun after the fixes listed under "Where Chrome was ahead"
-had loaded in Firefox. Chrome's are from the first run, with the same tasks, model and prompt.
+The Firefox numbers below are from the latest rerun, after the fixes listed under "Where Chrome
+was ahead" had loaded in Firefox. Chrome's are from the first run, with the same tasks, model and prompt.
 Its extension hasn't changed since, so it wasn't run again.
 
 | median per run | Firefox Agent Bridge (rerun) | Claude in Chrome (first run) |
 | --- | --- | --- |
 | tasks passed | 48 / 48 | 47 / 48 |
-| wall time | 16.6s | 25.5s |
+| wall time | 14.9s | 25.5s |
 | tool calls | 6 | 7 |
-| input tokens | 55k | 119k |
-| cost | $0.060 | $0.080 |
+| input tokens | 56k | 119k |
+| cost | $0.058 | $0.080 |
 | time per click (`left_click`) | 0.12s | 0.16s |
 
-- **Faster on all 16 tasks and cheaper on 15.** Tool calls return sooner, and each turn starts
+- **Faster and cheaper on all 16 tasks.** Tool calls return sooner, and each turn starts
   from fewer tokens: on the article tasks both made the same 4 calls and got the same text back,
-  yet Chrome read 72–83k input tokens against 45–55k. The one task where Chrome was cheaper was
-  the Wikipedia link chain ($0.093 against $0.102).
+  yet Chrome read 72–83k input tokens against 45–55k. The Wikipedia link chain, the one task
+  where Chrome was cheaper in the first rerun ($0.093 against $0.102), is now $0.054.
 - **Where Chrome was ahead in the first run,** and what the rerun measured:
   - **Repeated actions** such as five package pages or a form took about twice as many calls,
     because Chrome has `browser_batch`. The bridge now has a [`batch`](#tools) tool and
@@ -611,8 +614,8 @@ on Sonnet 5.5, Opus 5.5 and Fable 5.1 at low, medium and high effort (180 runs; 
 [eval/results/models/analysis.md](eval/results/models/analysis.md)). Sonnet, Opus and Fable passed
 every run at every level, so effort bought no score; high only added cost and steps. Haiku 4.5
 failed 8 of 18 runs, was 4x slower and still cost 3x Sonnet low. A harder tier (162 runs, 6
-tasks, four of them without JavaScript: 167 star ratings read as icons, 582 rows counted, an Evil
-sudoku, a 13-shape tldraw grid; analysis in
+tasks, five of them without JavaScript: 167 star ratings read as icons, 582 rows counted, an Evil
+sudoku, a 13-shape tldraw grid, tricky UI widgets; analysis in
 [eval/results/models-hard/analysis.md](eval/results/models-hard/analysis.md)) did separate them:
 Sonnet scored 0.935 / 0.930 / 0.994 at low / medium / high, Opus 0.98-0.99 and Fable 0.99-1.00.
 Three of Sonnet's misses were a text box that never fired `change` after typing. Once that was
@@ -646,6 +649,7 @@ The same harness also compares these tools with Claude in Chrome; see
 - [Teach: the recording, replay.json and replay_steps](docs/teach.md)
 - [What WebDriver BiDi would need to cover this bridge](docs/bidi-gap-map.md)
 - [Manual tests to run in Firefox after a change](docs/manual-tests.md)
+- [My Firefox browser agent is 1.7x faster than Claude in Chrome](https://gauthamv.com/writing/firefox-browser-agent-vs-claude-in-chrome/), the story behind the evals
 
 ## License
 
