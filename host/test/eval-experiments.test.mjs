@@ -21,8 +21,8 @@ test("each --experiments is an arm, labeled by its flags unless --arm-label name
     { flags: ["waitForLoad"], label: "waitForLoad" },
   ]);
   assert.deepEqual(armEnv(arms[1]), { FIREFOX_BRIDGE_EXPERIMENTS: "waitForLoad" });
-  const named = parseArms(["--experiments", "waitForLoad", "--arm-label", "baseline", "--experiments", "none", "--arm-label", "kept"]);
-  assert.deepEqual(named.map((a) => a.label), ["baseline", "kept"]);
+  const named = parseArms(["--experiments", "waitForLoad", "--arm-label", "before", "--experiments", "none", "--arm-label", "kept"]);
+  assert.deepEqual(named.map((a) => a.label), ["before", "kept"]);
 });
 
 test("unknown flags, a label count that doesn't match and duplicate labels are refused", () => {

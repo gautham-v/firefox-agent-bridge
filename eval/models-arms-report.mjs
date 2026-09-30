@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Compares experiment arms (models.mjs --experiments) with the reference arm ("none", else
-// "baseline"), per effort and over all, and reads each run's stream to check that a flag did what
+// "before"), per effort and over all, and reads each run's stream to check that a flag did what
 // it should.
 //
 //   node eval/models-arms-report.mjs [--in eval/results/models-hard/arms/runs.jsonl] [--prefix arms-]

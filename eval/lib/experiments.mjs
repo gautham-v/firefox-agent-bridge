@@ -40,9 +40,9 @@ export const armEnv = (arm) => (arm.flags.length ? { FIREFOX_BRIDGE_EXPERIMENTS:
 // experiments existed, and runs without --experiments).
 export const armOf = (r) => r.arm_label ?? (r.experiments?.length ? r.experiments.join("+") : "none");
 
-// Sorts arm names so the reference arm comes first: "none" (no flags), else "baseline" (an arm
-// that turns kept changes back off, e.g. --experiments waitForLoad --arm-label baseline).
-const refRank = (a) => (a === "none" ? 0 : a === "baseline" ? 1 : 2);
+// Sorts arm names so the reference arm comes first: "none" (no flags), else "before" (an arm
+// that turns kept changes back off, e.g. --experiments waitForLoad --arm-label before).
+const refRank = (a) => (a === "none" ? 0 : a === "before" ? 1 : 2);
 export const refFirst = (a, b) => refRank(a) - refRank(b);
 
 // Safe in file names.

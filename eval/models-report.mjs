@@ -11,7 +11,7 @@
 //
 // When the rows come from more than one experiment arm (models.mjs --experiments), every config is
 // split by arm ("claude-sonnet-5-5/low · batchHint"), and an "Experiment arms" section compares
-// each arm with the reference arm: "none" if there is one, else "baseline", else the first.
+// each arm with the reference arm: "none" if there is one, else "before", else the first.
 // --by-arm splits even when there is one arm.
 
 import fs from "node:fs";

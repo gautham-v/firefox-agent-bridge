@@ -19,7 +19,7 @@ const BAND = 0.1; // a task's median "moved" when it changed by more than this
 
 const rows = fs.readFileSync(IN, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 const arms = [...new Set(rows.map(armOf))].sort(refFirst);
-const REF = arms[0]; // "none", else "baseline"
+const REF = arms[0]; // "none", else "before"
 const RUNS = Math.max(...rows.map((r) => r.run));
 const tasks = [...new Set(rows.map((r) => r.task))];
 const of = (arm, task) => rows.filter((r) => armOf(r) === arm && (!task || r.task === task));
