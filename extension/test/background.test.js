@@ -1287,6 +1287,12 @@ test("Teach records the viewed tab: numbered steps with a shot, one step per fie
   const shot = steps.find((m) => m.shot && m.step.n === 1).shot;
   assert.match(Buffer.from(shot.split(",")[1], "base64").toString(), /shot of 1 at 0.5/, "400px wide from an 800px tab");
 
+  // An Alt+click in the recorded tab attaches nothing and doesn't group the user's tab.
+  await env.browser.claudePage.onPick.fire(1, { ref: "ref_1", role: "button", name: "x", text: "", rect: { x: 0, y: 0, width: 10, height: 10 }, frame: { x: 0, y: 0 } });
+  await wait(50);
+  assert.equal(a.of("pick").length, 0);
+  assert.equal(env.browser.tabsMap.get(1).groupId, -1);
+
   // A load that follows a click is the click's; one long after is its own step.
   env.browser.tabsMap.get(1).status = "loading";
   await env.browser.tabs.onUpdated.fire(1, { url: "https://user.example/account" }, { ...env.browser.tabsMap.get(1) });

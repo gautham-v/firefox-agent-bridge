@@ -1717,6 +1717,10 @@ async function onPick(tabId, pick) {
   const shown = [...panels].filter((p) => p.windowId === tab?.windowId && p.ready);
   const chat = chats.get(shown[0]?.chatId);
   if (!chat) return;
+  // While the panel shows a Teach recording there's no composer to attach to, and the pick would
+  // put the user's recorded tab in the chat's group, where Try it once would then replay.
+  const rec = recordings.get(chat.id);
+  if (rec && !rec.drafted) return;
   // The page reported the element's name and text without the redaction rules; they're read
   // again with them, and left out if that fails.
   const safe = await page(tabId, "pickInfo", { ref: pick.ref }).catch(() => null);
