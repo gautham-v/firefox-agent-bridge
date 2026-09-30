@@ -354,12 +354,18 @@ async function requireTab(session, tabId) {
   return tab;
 }
 
-async function tabContext(session, createIfEmpty, client) {
-  let tabs = await sessionTabs(session);
-  if (!tabs.length && createIfEmpty) {
-    await createSessionTab(session, client);
-    tabs = await sessionTabs(session);
-  }
+// Opens the session's first tab if it has none, and answers that tab (null when it had one). A
+// model that didn't call tabs_create_mcp believes it opened nothing, so every result that follows
+// this says it did (createdNote), or the tab is left open when the run ends.
+async function firstTab(session, client) {
+  if ((await sessionTabs(session)).length) return null;
+  return createSessionTab(session, client);
+}
+
+const createdNote = (tab) => `Created tab ${tab.id} for this session; close it with tabs_close_mcp when done.`;
+
+async function tabContext(session) {
+  const tabs = await sessionTabs(session);
   const s = sessions.get(session);
   return {
     availableTabs: tabs.map((t) => ({ tabId: t.id, title: t.title, url: t.url, ...(t.active ? { userIsViewing: true } : {}) })),
@@ -675,9 +681,15 @@ const page = (tabId, op, args) => browser.claudePage.call(tabId, op, { ...args, 
 // get refs (ref_3@f12) that click and form_input act on in place. Frames at one level are read
 // at once; all of them share the one max_chars.
 const FRAME_LINE = / frame=f(\d+)$/;
+const FRAME_OF_REF = /@f(\d+)$/; // a ref made in a child frame (ref_3@f12)
 
 async function readPageAll(tabId, args) {
   const maxChars = args.maxChars ?? 50000;
+  // Read by a ref in a child frame, the header says where that frame sits in the screenshot.
+  if (FRAME_OF_REF.test(args.refId ?? "")) {
+    const vp = await page(tabId, "viewport", {});
+    args = { ...args, origin: { x: vp.screenX, y: vp.screenY } };
+  }
   const top = await page(tabId, "readPage", args);
   if (typeof top !== "object" || top === null || !top.frames?.length) return top;
   let budget = maxChars - top.text.length;
@@ -767,9 +779,40 @@ async function findAll(tabId, query) {
   const shown = close.slice(0, FIND_MAX);
   // Behind the shown ones: the rest of the close matches here, and each frame's own that it left out.
   const more = close.length - shown.length + answered.reduce((n, f) => n + (f.rest ?? []).filter((s) => s >= floor).length, 0);
-  const out = `Found ${shown.length} for "${query}" (screenshot coordinates; click by ref if off-screen):\n${shown.map((m) => clipFindLine(m.line)).join("\n")}${more ? `\n(+${more} more, refine the query)` : ""}`;
+  const out = `Found ${shown.length} for "${query}" (screenshot coordinates; if off-screen, computer left_click its ref):\n${shown.map((m) => clipFindLine(m.line)).join("\n")}${more ? `\n(+${more} more, refine the query)` : ""}`;
   const masked = answered.reduce((m, f) => addMasked(m, f.masked), null);
   return masked ? { text: out, masked } : out;
+}
+
+// scroll_to. The actor answers the element's center in its frame's viewport; a child frame's is
+// moved into the top frame's viewport, which screenshots and clicks use, by where each viewport
+// sits on screen (as find does). Scrolling the page around a frame in another process lands after
+// the frame has answered, so the frame's place is read again until it holds still.
+const SCROLL_SETTLE_MS = 50;
+const SCROLL_SETTLE_TRIES = 6;
+
+async function scrollToRef(tabId, ref) {
+  const got = await page(tabId, "scrollTo", { ref });
+  if (typeof got === "string") return got; // an actor from before the restart words it itself
+  let { x, y } = got;
+  let after = "";
+  if (got.frame) {
+    const frameId = Number(FRAME_OF_REF.exec(ref)?.[1]);
+    let at = got.frame;
+    for (let i = 0; i < SCROLL_SETTLE_TRIES; i++) {
+      await sleep(SCROLL_SETTLE_MS);
+      const again = await page(tabId, "viewport", { frameId }).catch(() => null);
+      if (!again || (again.screenX === at.screenX && again.screenY === at.screenY)) break;
+      at = again;
+    }
+    const top = await page(tabId, "viewport", {});
+    x += at.screenX - top.screenX;
+    y += at.screenY - top.screenY;
+    after = ` (in frame ${got.frame.host})`;
+    if (x < 0 || y < 0 || x >= top.width || y >= top.height) after += ", outside the page's viewport; take a screenshot to see where it is";
+  }
+  const scale = await frameScale(tabId);
+  return `Scrolled ${ref} into view; its center is now at (${Math.round(x * scale)}, ${Math.round(y * scale)})${after}`;
 }
 
 async function computer(session, args) {
@@ -815,7 +858,7 @@ async function computer(session, args) {
       return [text(await page(tabId, "scroll", { ...(await toCss(tabId, args.coordinate)), direction: args.scroll_direction ?? "down", amount: args.scroll_amount ?? 3 }))];
     case "scroll_to":
       if (!args.ref) throw new Error("scroll_to needs a ref.");
-      return [text(await page(tabId, "scrollTo", { ref: args.ref, frameScale: await frameScale(tabId) }))];
+      return [text(await scrollToRef(tabId, args.ref))];
     case "wait": {
       const seconds = Math.min(Math.max(args.duration ?? 1, 0), 10);
       await sleep(seconds * 1000);
@@ -830,8 +873,11 @@ async function runTool(session, tool, args, client) {
   // A tab the session already had (a chat's adopted tab) is watched before the call acts in it.
   if (devtoolsSessions.has(session)) await syncDevtools();
   switch (tool) {
-    case "tabs_context_mcp":
-      return [text(JSON.stringify(await tabContext(session, args.createIfEmpty, client), null, 2))];
+    case "tabs_context_mcp": {
+      const created = args.createIfEmpty ? await firstTab(session, client) : null;
+      // The note goes first: the MCP server reads the tab list from the JSON that ends the text.
+      return [text((created ? createdNote(created) + "\n" : "") + JSON.stringify(await tabContext(session), null, 2))];
+    }
 
     case "tabs_create_mcp": {
       const tab = await createSessionTab(session, client);
@@ -847,11 +893,13 @@ async function runTool(session, tool, args, client) {
 
     case "navigate": {
       let { tabId, url } = args;
-      let context = null;
+      let listTabs = false;
+      let created = null;
       if (tabId == null) {
         if (url === "back" || url === "forward") throw new Error("tabId is required for back/forward.");
-        context = await tabContext(session, true, client);
-        tabId = context.availableTabs[0].tabId;
+        created = await firstTab(session, client);
+        tabId = (await tabContext(session)).availableTabs[0].tabId;
+        listTabs = true;
       }
       await requireTab(session, tabId);
       if (url === "back") await browser.tabs.goBack(tabId);
@@ -862,7 +910,8 @@ async function runTool(session, tool, args, client) {
       }
       const tab = await waitForLoad(tabId);
       let out = `Tab ${tabId}: ${tab.url}\nTitle: ${tab.title}${tab.status !== "complete" ? "\n(still loading after 30s)" : ""}`;
-      if (context) out += `\n\nThis session's tabs:\n${JSON.stringify(await tabContext(session), null, 2)}`;
+      if (created) out += `\n${createdNote(created)}`;
+      if (listTabs) out += `\n\nThis session's tabs:\n${JSON.stringify(await tabContext(session), null, 2)}`;
       return [text(out)];
     }
 
@@ -1075,7 +1124,10 @@ async function replaySteps(session, args, client) {
   if (steps.length > MAX_REPLAY_STEPS) throw new Error(`A replay can have at most ${MAX_REPLAY_STEPS} steps.`);
   const inputs = args.inputs && typeof args.inputs === "object" ? args.inputs : {};
   let tabId = args.tabId;
-  if (tabId == null) tabId = (await tabContext(session, true, client)).availableTabs[0].tabId;
+  if (tabId == null) {
+    await firstTab(session, client);
+    tabId = (await tabContext(session)).availableTabs[0].tabId;
+  }
   await requireTab(session, tabId);
   // It starts where the recording did, unless the tab is already on that site.
   if (replay.start && hostOf((await browser.tabs.get(tabId)).url) !== hostOf(replay.start)) {

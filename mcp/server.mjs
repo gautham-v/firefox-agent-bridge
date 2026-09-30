@@ -142,7 +142,7 @@ const TOOLS = [
   {
     name: "javascript_tool",
     description:
-      "Run JavaScript against the page's window and DOM (page CSP does not block it). REPL semantics: the last expression's value is returned, and top-level await works. Write the expression, not `return`. To read several pages on the same site, fetch() them in one call and parse each with DOMParser instead of navigating to each one.",
+      "Run JavaScript against the page's window and DOM (page CSP does not block it). REPL semantics: the last expression's value is returned, and top-level await works. Write the expression, not `return`. To read several pages on the same site, fetch() them in one call and parse each with DOMParser instead of navigating to each one. Fetch the pages you would have navigated to, not the site's API.",
     inputSchema: {
       type: "object",
       properties: {

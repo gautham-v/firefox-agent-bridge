@@ -532,7 +532,7 @@ function maskRects(doc, { redact }) {
 // line of its own ending in frame=f<id>, and its id goes in `frames`: background.js then reads
 // that frame too (with `inner`, which leaves out the header) and puts its tree under the line.
 
-function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, frameScale = 1, redact, inner = false } = {}) {
+function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, frameScale = 1, redact, inner = false, origin } = {}) {
   const interactiveOnly = filter === "interactive";
   const red = redactor(doc, redact);
   const lines = [];
@@ -605,10 +605,17 @@ function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, fr
   const root = refId ? resolveRef(doc, refId) : doc.body ?? doc.documentElement;
   const win = doc.defaultView;
   const view = viewSize(win);
+  const px = (n) => Math.round(n * frameScale);
+  // Read by a ref in a child frame, the viewport is that frame's, a part of the screenshot:
+  // `origin` (the top frame's viewport on screen) says where.
+  const child = !!win.browsingContext.parent;
+  const place = child && origin ? ` at (${px(win.mozInnerScreenX - origin.x)}, ${px(win.mozInnerScreenY - origin.y)}) in the screenshot` : "";
   const header = [
-    `Page: ${doc.title}`,
+    `${child ? "Frame" : "Page"}: ${doc.title}`,
     `URL: ${doc.location?.href}`,
-    `Viewport (screenshot frame): ${Math.round(view.width * frameScale)}x${Math.round(view.height * frameScale)}; page scrolled ${Math.round(win.scrollY * frameScale)} of ${Math.round(doc.documentElement.scrollHeight * frameScale)} tall`,
+    child
+      ? `Frame viewport (a part of the page, not the whole screenshot): ${px(view.width)}x${px(view.height)}${place}; frame scrolled ${px(win.scrollY)} of ${px(doc.documentElement.scrollHeight)} tall`
+      : `Viewport (screenshot frame): ${px(view.width)}x${px(view.height)}; page scrolled ${px(win.scrollY)} of ${px(doc.documentElement.scrollHeight)} tall`,
     "",
   ];
   walk(root, 0, depth, false);
@@ -1172,11 +1179,16 @@ function scroll(doc, args) {
   return text;
 }
 
-function scrollTo(doc, { ref, frameScale = 1 }) {
+// Answers the element's center in this frame's viewport, in CSS pixels. In a child frame it also
+// answers where the frame's viewport sits on screen, so background.js can give the center in the
+// top frame's viewport (screenshot coordinates), as find does.
+function scrollTo(doc, { ref }) {
   const el = resolveRef(doc, ref);
   el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
   const r = el.getBoundingClientRect();
-  return `Scrolled ${ref} into view; its center is now at (${Math.round((r.left + r.width / 2) * frameScale)}, ${Math.round((r.top + r.height / 2) * frameScale)})`;
+  const win = doc.defaultView;
+  const frame = win.browsingContext.parent ? { host: doc.location?.host || "about:blank", screenX: win.mozInnerScreenX, screenY: win.mozInnerScreenY } : null;
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2, frame };
 }
 
 // ---------------------------------------------------------------------------------------------
