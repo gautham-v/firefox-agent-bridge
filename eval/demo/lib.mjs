@@ -117,9 +117,24 @@ export function sideTiming(sc, { hold = "close" } = {}) {
   };
 }
 
-// Two panes scaled to one height, side by side and centered, between a header row (labels,
-// timers) and a caption row.
-export function layout(a, b, { width = 1920, height = 1080, top = 104, bottom = 72, side = 48, gap = 40 } = {}) {
+// Two panes, each under a header strip (label left, timer right), above a caption row.
+// "side": scaled to one height, side by side and centered (16:9 for the blog and README).
+// "stack": one above the other, full width (4:5 for phones), the first pane on top.
+// Each pane is { x, y, w, h }; y is the top of the picture, the strip sits above it.
+export function layout(a, b, { width = 1920, height = 1080, top = 104, bottom = 72, side = 48, gap = 40, mode = "side", strip = 66 } = {}) {
+  if (mode === "stack") {
+    const availH = height - top - bottom - strip - gap;
+    const maxW = width - 2 * side;
+    const h = evenDown(Math.min(availH / 2, maxW * (a.h / a.w), maxW * (b.h / b.w)));
+    const wa = even((a.w * h) / a.h);
+    const wb = even((b.w * h) / b.h);
+    const y0 = evenDown(top + (availH - 2 * h) / 2);
+    const panes = [
+      { x: evenDown((width - wa) / 2), y: y0, w: wa, h },
+      { x: evenDown((width - wb) / 2), y: y0 + h + gap + strip, w: wb, h },
+    ];
+    return { h, y: y0, panes };
+  }
   const availH = height - top - bottom;
   const availW = width - 2 * side - gap;
   const h = evenDown(Math.min(availH, availW / (a.w / a.h + b.w / b.h)));
@@ -127,7 +142,7 @@ export function layout(a, b, { width = 1920, height = 1080, top = 104, bottom = 
   const wb = even((b.w * h) / b.h);
   const x1 = evenDown((width - (wa + gap + wb)) / 2);
   const y = evenDown(top + (availH - h) / 2);
-  return { h, y, panes: [{ x: x1, w: wa }, { x: x1 + wa + gap, w: wb }] };
+  return { h, y, panes: [{ x: x1, y, w: wa, h }, { x: x1 + wa + gap, y, w: wb, h }] };
 }
 
 // Header strip above each pane (label left, timer right) and the badge's distance from the
@@ -148,7 +163,7 @@ export function filterGraph({ sides, lay, total, fps = 30, style = STYLE }) {
     const start = Math.max(0, timing.offset);
     parts.push(
       `[${v}:v]${pre}trim=start=${start.toFixed(3)}:end=${(start + timing.holdFrom).toFixed(3)},setpts=PTS-STARTPTS,` +
-        `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y},scale=${pane.w}:${lay.h}:flags=lanczos,setsar=1,fps=${fps},` +
+        `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y},scale=${pane.w}:${pane.h}:flags=lanczos,setsar=1,fps=${fps},` +
         `tpad=stop_mode=clone:stop_duration=${(total - timing.holdFrom + 1).toFixed(3)},trim=duration=${total.toFixed(3)}[p${i}]`,
     );
   });
@@ -157,12 +172,12 @@ export function filterGraph({ sides, lay, total, fps = 30, style = STYLE }) {
   sides.forEach((s, i) => {
     const v = 2 + i * 3;
     const pane = lay.panes[i];
-    parts.push(`[b${n}][p${i}]overlay=${pane.x}:${lay.y}[b${n + 1}]`);
+    parts.push(`[b${n}][p${i}]overlay=${pane.x}:${pane.y}[b${n + 1}]`);
     n++;
-    parts.push(`[b${n}][${v + 1}:v]overlay=${pane.x + pane.w - s.timerSize.w}:${lay.y - style.stripGap - style.stripH}:eof_action=repeat[b${n + 1}]`);
+    parts.push(`[b${n}][${v + 1}:v]overlay=${pane.x + pane.w - s.timerSize.w}:${pane.y - style.stripGap - style.stripH}:eof_action=repeat[b${n + 1}]`);
     n++;
     parts.push(
-      `[b${n}][${v + 2}:v]overlay=${pane.x + Math.round((pane.w - s.badgeSize.w) / 2)}:${lay.y + lay.h - s.badgeSize.h - style.badgeMargin}:enable='gte(t,${s.timing.done.toFixed(3)})'[b${n + 1}]`,
+      `[b${n}][${v + 2}:v]overlay=${pane.x + Math.round((pane.w - s.badgeSize.w) / 2)}:${pane.y + pane.h - s.badgeSize.h - style.badgeMargin}:enable='gte(t,${s.timing.done.toFixed(3)})'[b${n + 1}]`,
     );
     n++;
   });

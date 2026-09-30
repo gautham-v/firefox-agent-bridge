@@ -35,8 +35,10 @@ const opt = (name, dflt) => {
 };
 const flag = (name) => argv.includes(`--${name}`);
 
-const W = 1920;
-const H = 1080;
+const LAYOUT = opt("layout", "side"); // side: 1920x1080 side by side; stack: 1080x1350, one above the other, for phones
+if (!["side", "stack"].includes(LAYOUT)) throw new Error("--layout is side or stack");
+const W = LAYOUT === "stack" ? 1080 : 1920;
+const H = LAYOUT === "stack" ? 1350 : 1080;
 const FPS = 30;
 const BACKGROUND = opt("background") ? path.resolve(opt("background").replace(/^~(?=\/)/, os.homedir())) : null; // an image behind the panes, cropped to fill
 if (BACKGROUND && !fs.existsSync(BACKGROUND)) throw new Error(`--background ${BACKGROUND} not found`);
@@ -81,7 +83,7 @@ if (takes[0].task !== takes[1].task) throw new Error(`the takes are of different
 const outDir = DIR ?? path.dirname(takes[0]._file);
 const modelName = MODEL_NAMES[String(takes[0].model).replace(/\[.*\]$/, "")] ?? takes[0].model;
 const CAPTION = opt("caption") ?? [modelName + (takes[0].effort ? ` ${cap1(takes[0].effort)}` : ""), "same task and prompt", "one take each", ...(SPEED > 1 ? [`played at ${SPEED}x`] : [])].join(" · ");
-const OUT = path.resolve(opt("out", path.join(outDir, `race-${takes[0].task}.mp4`)));
+const OUT = path.resolve(opt("out", path.join(outDir, `race-${takes[0].task}${LAYOUT === "stack" ? "-vertical" : ""}.mp4`)));
 const SOCIAL = path.resolve(opt("social-out", OUT.replace(/\.mp4$/, "") + "-social.mp4"));
 
 // ---- geometry and timing ---------------------------------------------------------------------
@@ -102,7 +104,7 @@ const sides = takes.map((sc) => {
   return { sc, video, v, crop, timing };
 });
 const total = Math.max(...sides.map((s) => s.timing.done)) + TAIL;
-const lay = layout({ w: sides[0].crop.w, h: sides[0].crop.h }, { w: sides[1].crop.w, h: sides[1].crop.h }, { width: W, height: H });
+const lay = layout({ w: sides[0].crop.w, h: sides[0].crop.h }, { w: sides[1].crop.w, h: sides[1].crop.h }, { width: W, height: H, mode: LAYOUT, strip: STYLE.stripH + STYLE.stripGap, ...(LAYOUT === "stack" ? { top: 90, side: 40, gap: 28 } : {}) });
 
 // ---- overlays --------------------------------------------------------------------------------
 
@@ -122,10 +124,10 @@ async function pool(jobs, n = Math.max(2, os.cpus().length - 2)) {
 }
 const sizeOf = (file) => execFileSync("magick", ["identify", "-format", "%w %h", file], { encoding: "utf8" }).trim().split(" ").map(Number);
 
-const stripTop = lay.y - STYLE.stripGap - STYLE.stripH;
 const staticArgs = ["-size", `${W}x${H}`, "xc:none"];
 sides.forEach((s, i) => {
   const p = lay.panes[i];
+  const stripTop = p.y - STYLE.stripGap - STYLE.stripH;
   staticArgs.push("-fill", COLORS.strip, "-draw", `roundrectangle ${p.x},${stripTop} ${p.x + p.w - 1},${stripTop + STYLE.stripH - 1} 10,10`);
   // Drawn centered in a strip-high box, as the timers are, so both sit on one line.
   staticArgs.push("(", "-size", `${Math.round(p.w / 2)}x${STYLE.stripH}`, "xc:none", "-font", FONT, "-pointsize", "28", "-fill", COLORS.text, "-gravity", "West", "-annotate", "+20+0", LABELS[s.sc.browser], ")");
@@ -189,7 +191,7 @@ const X264 = (maxrate) => ["-c:v", "libx264", "-preset", "slow", "-crf", "22", "
 const REAL = SPEED > 1 ? path.join(TMP, "real-time.mp4") : OUT;
 await ffmpeg([...inputs, "-/filter_complex", graphFile, "-map", "[out]", "-t", total.toFixed(3), "-r", String(FPS), ...(SPEED > 1 ? ["-c:v", "libx264", "-preset", "fast", "-crf", "16", "-pix_fmt", "yuv420p", "-an"] : X264("1.8M")), REAL]);
 if (SPEED > 1) await ffmpeg(["-i", REAL, "-vf", `setpts=PTS/${SPEED}`, "-r", String(FPS), ...X264("2.4M"), OUT]);
-await ffmpeg(["-i", OUT, "-vf", "scale=1200:-2:flags=lanczos", "-r", String(FPS), ...X264("1.1M"), SOCIAL]);
+if (LAYOUT === "side") await ffmpeg(["-i", OUT, "-vf", "scale=1200:-2:flags=lanczos", "-r", String(FPS), ...X264("1.1M"), SOCIAL]);
 
 const mb = (f) => (fs.statSync(f).size / 1e6).toFixed(1);
 console.log(
@@ -197,8 +199,7 @@ console.log(
     {
       out: OUT,
       out_mb: Number(mb(OUT)),
-      social: SOCIAL,
-      social_mb: Number(mb(SOCIAL)),
+      ...(LAYOUT === "side" ? { social: SOCIAL, social_mb: Number(mb(SOCIAL)) } : {}),
       seconds: Number((total / SPEED).toFixed(1)),
       speed: SPEED,
       hold: HOLD,
@@ -210,7 +211,7 @@ console.log(
         video_offset_s: Number(s.timing.offset.toFixed(3)),
         picture_holds_from_s: Number(s.timing.holdFrom.toFixed(3)),
         crop: s.crop,
-        pane: { ...lay.panes[i], y: lay.y, h: lay.h },
+        pane: lay.panes[i],
       })),
       ...(flag("keep-temp") ? { temp: TMP } : {}),
     },

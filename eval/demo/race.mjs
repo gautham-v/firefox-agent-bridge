@@ -58,7 +58,20 @@ for (const b of BROWSERS) if (!["firefox", "chrome"].includes(b)) throw new Erro
 BROWSERS.sort((a, b) => (a === "firefox" ? -1 : b === "firefox" ? 1 : 0)); // Firefox's takes first
 const TAKES = Number(opt("takes", 1));
 const MODEL = opt("model", "claude-sonnet-5-5");
-const EFFORT = opt("effort"); // passed to both browsers as --effort; unset keeps the CLI default, as the eval does
+const EFFORT = opt("effort");
+// --window-size 1280x800 [--window-at 100,120]: both browsers' front windows get the same size and
+// place before each take, so the two panes match (Chrome by AppleScript, Firefox through System
+// Events, which needs Accessibility permission for the terminal).
+const WINDOW = opt("window-size") ? opt("window-size").split("x").map(Number) : null;
+const AT = (opt("window-at") ?? "100,120").split(",").map(Number);
+async function sizeWindow(browser) {
+  const [w, h] = WINDOW, [x, y] = AT;
+  const script = browser === "chrome"
+    ? `tell application "Google Chrome" to set bounds of front window to {${x}, ${y}, ${x + w}, ${y + h}}`
+    : `tell application "System Events" to tell process "firefox"\n set position of front window to {${x}, ${y}}\n set size of front window to {${w}, ${h}}\nend tell`;
+  await run("osascript", ["-e", script]).catch((e) => { throw new Error(`couldn't size the ${browser} window: ${e.message}`); });
+  await sleep(600);
+} // passed to both browsers as --effort; unset keeps the CLI default, as the eval does
 const LEAD_IN_MS = Number(opt("lead-in", 2)) * 1000;
 const TAIL_MS = Number(opt("tail", 2)) * 1000;
 const GAP_MS = Number(opt("gap", 5)) * 1000;
@@ -126,6 +139,7 @@ async function take(browser, n) {
   const beforeChrome = new Set(before.filter((w) => pickWindow([w], "chrome", {})).map((w) => String(w.id)));
   let win = null;
   if (browser === "chrome" && !flag("no-activate")) await activate("Google Chrome");
+  if (WINDOW) await sizeWindow(browser);
   if (browser === "firefox") {
     if (!flag("no-activate")) await activate("Firefox Developer Edition");
     await sleep(500);
