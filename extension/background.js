@@ -913,6 +913,17 @@ async function bindChat(chat) {
   await createSessionTab(chat.id, client, "about:blank", chat.windowId);
 }
 
+// A tab the user added from the panel (the + menu, a drag, an Alt+click in it). With no group
+// yet, it starts one.
+async function addToGroup(chat, tabId) {
+  const groupId = await sessionGroupId(chat.id);
+  const tab = await browser.tabs.get(tabId);
+  if (groupId != null && tab.groupId === groupId) return;
+  if (groupId != null) await browser.tabs.group({ tabIds: [tabId], groupId });
+  else await startGroup(chat.id, ENGINE_NAMES[chat.engine] ?? "Claude", tabId, tab.windowId);
+  scheduleGroupPush(chat.id);
+}
+
 function scheduleGroupPush(chatId) {
   const chat = chats.get(chatId);
   if (!chat || chat.groupTimer) return;
@@ -1007,6 +1018,7 @@ async function sendToHost(chat, m) {
   if (!port) return emit(chat, { kind: "error", code: "spawn", message: HOST_DOWN });
   await bindChat(chat).catch(() => {});
   const tabs = (await groupTabs(chat).catch(() => [])).map((t) => ({ tabId: t.id, title: t.title, url: t.url, current: !!t.active }));
+  const elements = pickedElements(m.elements);
   const resume = chat.resume;
   chat.resume = false;
   port?.postMessage({
@@ -1017,7 +1029,7 @@ async function sendToHost(chat, m) {
     effort: chat.effort,
     text: m.text,
     attachments: m.attachments ?? [],
-    context: { tabs },
+    context: { tabs, ...(elements.length ? { elements } : {}) },
     resume,
   });
   scheduleGroupPush(chat.id);
@@ -1026,6 +1038,7 @@ async function sendToHost(chat, m) {
 const panelCommands = {
   async hello(panel, m) {
     panel.windowId = m.windowId ?? (await lastNormalWindowId());
+    schedulePointTabs();
     const id = validChatId(m.chatId) ? m.chatId : windowChat.get(panel.windowId);
     return showChat(panel, id ? chatFor(id, panel.windowId) : newChat(panel.windowId));
   },
@@ -1073,14 +1086,9 @@ const panelCommands = {
   "chat.history": (panel, m) => ask(panel, { type: "chat.history", requestId: m.requestId }),
   "chat.capabilities": (panel, m) => ask(panel, { type: "chat.capabilities", requestId: m.requestId, engine: m.engine }),
 
-  // A tab dragged in the panel or picked from it. With no group yet, it starts one.
-  async "group.add"(panel, m) {
-    const chat = chats.get(panel.chatId);
+  "group.add"(panel, m) {
     if (typeof m.tabId !== "number") return;
-    const groupId = await sessionGroupId(chat.id);
-    if (groupId != null) await browser.tabs.group({ tabIds: [m.tabId], groupId });
-    else await startGroup(chat.id, ENGINE_NAMES[chat.engine] ?? "Claude", m.tabId, (await browser.tabs.get(m.tabId)).windowId);
-    scheduleGroupPush(chat.id);
+    return addToGroup(chats.get(panel.chatId), m.tabId);
   },
 
   async "group.remove"(panel, m) {
@@ -1096,6 +1104,25 @@ const panelCommands = {
   // of it; resuming only this chat would leave the toolbar paused and pause the next chat.
   resume: () => control.resumeAll(),
   stopAll: () => stopAllAgents(),
+
+  // The pointer is over an element link in the agent's reply (or was clicked, `reveal`): outline
+  // the element in its tab. Only tabs in the chat's group; a click brings the tab forward.
+  async mark(panel, m) {
+    if (typeof m.tabId !== "number" || !PICK_REF.test(m.ref ?? "")) return;
+    const failed = (error) => m.reveal && post(panel, { type: "markFailed", error });
+    const groupId = await sessionGroupId(panel.chatId);
+    const tab = await browser.tabs.get(m.tabId).catch(() => null);
+    if (groupId == null || tab?.groupId !== groupId) return failed("That tab isn't in this chat's group.");
+    try {
+      if (m.reveal && !tab.active) await browser.tabs.update(tab.id, { active: true });
+      await page(tab.id, "mark", { ref: m.ref, label: String(m.label ?? "").slice(0, 80), reveal: !!m.reveal, clear: !!m.clear });
+    } catch {
+      failed("That element isn't on the page any more.");
+    }
+  },
+
+  // Alt was released in the panel, so the page never heard it; arming again takes the outline down.
+  "point.clear": () => schedulePointTabs(),
 
   popout: (panel) =>
     browser.windows.create({
@@ -1114,6 +1141,7 @@ browser.runtime.onConnect.addListener((p) => {
     panels.delete(panel);
     for (const [rid, a] of asked) if (a.panel === panel) asked.delete(rid);
     scheduleRefresh();
+    schedulePointTabs();
   });
   p.onMessage.addListener((m) => {
     const name = m?.cmd ?? m?.type;
@@ -1122,6 +1150,79 @@ browser.runtime.onConnect.addListener((p) => {
     Promise.resolve(panelCommands[name]?.(panel, m)).catch(() => {});
   });
 });
+
+// ---- Point and ask. While a panel is open, the tab its window shows is armed: holding Alt there
+// outlines the element under the pointer (the experiment draws it), and an Alt+click comes back
+// as a pick, which becomes an attachment in that window's panel: a crop of the element, and its
+// ref, role and text for the message's context. The other way, the panel's mark command outlines
+// an element the agent linked as [label](ref:ref_N).
+
+const PICK_REF = /^ref_\d+(@f\d+)?$/;
+const clipText = (s, n) => String(s ?? "").slice(0, n);
+let pointTimer = null;
+
+function schedulePointTabs() {
+  clearTimeout(pointTimer);
+  pointTimer = setTimeout(syncPointTabs, 50);
+}
+
+async function syncPointTabs() {
+  const tabIds = [];
+  for (const windowId of new Set([...panels].map((p) => p.windowId))) {
+    if (windowId == null) continue;
+    const [tab] = await browser.tabs.query({ active: true, windowId }).catch(() => []);
+    if (tab && /^(https?|file):/.test(tab.url ?? "")) tabIds.push(tab.id);
+  }
+  try {
+    await browser.claudePage.setPointTabs(tabIds);
+  } catch {
+    // the experiment is out of date or missing
+  }
+}
+
+browser.tabs.onActivated.addListener(() => panels.size && schedulePointTabs());
+browser.tabs.onUpdated.addListener((tabId, change, tab) => {
+  if (panels.size && tab.active && (change.status === "complete" || "url" in change)) schedulePointTabs();
+});
+
+// The elements a message names in its context, as the host prints them.
+function pickedElements(list) {
+  return (Array.isArray(list) ? list : [])
+    .filter((e) => Number.isInteger(e?.tabId) && PICK_REF.test(e.ref ?? ""))
+    .slice(0, 10)
+    .map((e) => ({ tabId: e.tabId, ref: e.ref, role: clipText(e.role, 40), name: clipText(e.name, 150), text: clipText(e.text, 1000) }));
+}
+
+// A crop of the tab around the picked element. Its rect is in its own frame's viewport, so it is
+// moved by where that frame sits on screen relative to the top frame; only the part in view is
+// captured.
+async function pickImage(tabId, { rect, frame }) {
+  const vp = await page(tabId, "viewport", {});
+  const dx = frame.x - vp.screenX || 0;
+  const dy = frame.y - vp.screenY || 0;
+  const x0 = Math.max(0, rect.x + dx);
+  const y0 = Math.max(0, rect.y + dy);
+  const width = Math.min(vp.width, rect.x + dx + rect.width) - x0;
+  const height = Math.min(vp.height, rect.y + dy + rect.height) - y0;
+  if (!(width >= 1 && height >= 1)) return null;
+  const scale = Math.min(vp.dpr || 1, SCREENSHOT_MAX_EDGE / Math.max(width, height), Math.sqrt(SCREENSHOT_MAX_PIXELS / (width * height)));
+  return withoutCursor(tabId, () => browser.tabs.captureTab(tabId, { format: "png", scale, rect: { x: x0 + vp.scrollX, y: y0 + vp.scrollY, width, height } }));
+}
+
+async function onPick(tabId, pick) {
+  if (!PICK_REF.test(pick?.ref ?? "")) return;
+  const tab = await browser.tabs.get(tabId).catch(() => null);
+  const shown = [...panels].filter((p) => p.windowId === tab?.windowId && p.ready);
+  const chat = chats.get(shown[0]?.chatId);
+  if (!chat) return;
+  const image = await pickImage(tabId, pick).catch(() => null);
+  await addToGroup(chat, tabId).catch(() => {});
+  page(tabId, "pointAdded", { ref: pick.ref }).catch(() => {});
+  const [element] = pickedElements([{ ...pick, tabId }]);
+  for (const panel of shown) if (panel.chatId === chat.id) post(panel, { type: "pick", chatId: chat.id, element: { ...element, image } });
+}
+
+browser.claudePage.onPick?.addListener((tabId, pick) => onPick(tabId, pick).catch(() => {}));
 
 // The toolbar button opens and closes the sidebar. toggle() must run in the click's own call
 // stack (Firefox only lets user actions open a sidebar), so nothing may be awaited before it.

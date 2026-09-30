@@ -36,7 +36,9 @@ const SYSTEM_PROMPT =
   "rather than opening new ones unless the task needs one. A message may begin with a <panel-context> block listing the " +
   "current tabs and attached files; the user did not type it. Prefer find and get_page_text over reading a whole page, " +
   "and if a large result is saved to a file, open it with the Read tool, not shell commands, which need the user's approval. " +
-  "Keep answers short.";
+  "When you talk about a specific element on a page, you can link it as [label](ref:ref_N), with a ref from find or read_page " +
+  "in the tab you last used (for another tab, [label](ref:<tabId>/ref_N)); the user sees a chip that outlines the element " +
+  "in the page when they point at it. Keep answers short.";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i; // Claude Code's session ids
 const MODEL_ID = /^[A-Za-z0-9][\w.:\-[\]]{0,80}$/; // never a flag
@@ -316,7 +318,8 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
       else files.push({ name: safeName(a.name), path: file });
     }
     const tabs = Array.isArray(msg.context?.tabs) ? msg.context.tabs : [];
-    return { text: contextBlock(tabs, files) + String(msg.text ?? ""), images };
+    const elements = Array.isArray(msg.context?.elements) ? msg.context.elements : [];
+    return { text: contextBlock(tabs, files, elements) + String(msg.text ?? ""), images };
   }
 
   // ---- Claude Code --------------------------------------------------------------------------

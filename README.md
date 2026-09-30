@@ -65,7 +65,9 @@ Differences from Chrome:
 - `find` matches keywords over element names, roles, labels and attributes. It doesn't call a
   model, so use words that appear on the page.
 - `read_page` and `find` only walk the top frame. Clicks, typing and scrolling by coordinate reach
-  into any frame; a scroll over a frame that can't scroll scrolls the page around it.
+  into any frame; a scroll over a frame that can't scroll scrolls the page around it. A ref from
+  a child frame (from an element you pointed at in the chat panel) names its frame, as in
+  `ref_7@f12`, and works with every tool that takes a ref.
 - There is no `gif_creator`, console reading, network reading or shortcuts.
 
 ## Chat panel
@@ -83,6 +85,14 @@ Nothing is billed beyond your existing subscription, and nothing runs until you 
   lists your Claude Code skills, connectors and plugins (read-only). The model menu picks the
   engine, model and effort. Enter sends; while a task runs, Stop interrupts it, and a message you
   send instead is added to the task.
+- **Point and ask.** While the panel is open, hold Alt (⌥ on a Mac) over the page you're viewing:
+  the element under the pointer gets an outline and a label with its role and name. Alt+click
+  attaches it to the composer instead of clicking it: a crop of the element, plus its role, name,
+  visible text and a ref the agent can use with `computer`, `read_page`, `find` and `form_input`.
+  The tab joins the chat's group if it isn't in it. Esc or letting go of Alt clears the outline.
+  The agent points back by linking an element as `[label](ref:ref_12)`, which shows as a purple
+  chip; hovering it outlines the element in its tab, and clicking it switches to the tab and
+  scrolls the element into view. Both work inside frames.
 - **Permissions.** Firefox tools run without asking. Anything else, such as a shell command, a file
   edit, a read outside the chat folder or a web fetch, shows an Allow once / Always allow in this
   chat / Deny card with what it would do, and waits. Always allow covers the exact command (or the
