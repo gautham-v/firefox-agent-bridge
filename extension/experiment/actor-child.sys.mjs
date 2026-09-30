@@ -607,7 +607,11 @@ function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, fr
 // frame of the tab at once and merges the answers by score, so each frame answers its best
 // matches as { score, line } rather than text. `origin` is the top frame's viewport (its place
 // on screen and size), so a child frame's coordinates are given in the top frame's, which is what
-// screenshots and clicks use.
+// screenshots and clicks use. Only the best FIND_MAX are described; the scores of the rest that
+// were close behind go along so the merged answer can say how many more there were.
+
+const FIND_MAX = 8;
+const FIND_KEEP = 0.5; // of the best score
 
 const STOPWORDS = new Set(["the", "a", "an", "for", "on", "in", "of", "to", "with", "and", "or", "that", "this", "at", "by", "is", "it", "element", "page"]);
 
@@ -644,7 +648,7 @@ function findElements(doc, { query, frameScale = 1, origin, redact }) {
   const view = viewSize(win);
   const child = !!win.browsingContext.parent;
   // A frame with no size shows nothing (a hidden or tracking frame).
-  if (child && !(view.width > 1 && view.height > 1)) return { matches: [], total: 0, masked: null };
+  if (child && !(view.width > 1 && view.height > 1)) return { matches: [], rest: [], masked: null };
   const red = redactor(doc, redact);
   // What is scored is masked too, so a query can't probe for a masked value.
   const hide = (s) => red.scrub(s, false);
@@ -695,7 +699,7 @@ function findElements(doc, { query, frameScale = 1, origin, redact }) {
             const r = el.getBoundingClientRect();
             const inView = r.bottom > 0 && r.right > 0 && r.top < view.height && r.left < view.width;
             if (inView) score += 0.5;
-            scored.push({ el, role, score, rect: r });
+            scored.push({ el, role, score, rect: r, interactive });
           }
         }
       }
@@ -706,9 +710,13 @@ function findElements(doc, { query, frameScale = 1, origin, redact }) {
   };
   visit(doc.body ?? doc.documentElement);
 
-  scored.sort((a, b) => b.score - a.score);
-  const best = scored.length ? scored[0].score : 0;
-  const top = scored.filter((m) => m.score >= Math.max(1, best * 0.4)).slice(0, 20);
+  // Text inside a matched button or link is the same target twice.
+  const targets = scored.filter((m) => m.interactive).map((m) => m.el);
+  const kept = scored.filter((m) => m.role !== "text" || !targets.some((t) => t !== m.el && t.contains(m.el)));
+  kept.sort((a, b) => b.score - a.score);
+  const best = kept.length ? kept[0].score : 0;
+  const close = kept.filter((m) => m.score >= Math.max(1, best * FIND_KEEP));
+  const top = close.slice(0, FIND_MAX);
   // Where this frame's viewport sits in the top frame's, in CSS pixels.
   const dx = child && origin ? win.mozInnerScreenX - origin.x : 0;
   const dy = child && origin ? win.mozInnerScreenY - origin.y : 0;
@@ -720,11 +728,11 @@ function findElements(doc, { query, frameScale = 1, origin, redact }) {
     const cx = Math.round((x + dx) * frameScale);
     const cy = Math.round((y + dy) * frameScale);
     const onScreen = rect.bottom > 0 && rect.right > 0 && rect.top < view.height && rect.left < view.width && inTop(x + dx, y + dy);
-    const at = !(rect.width || rect.height) ? " (not rendered)" : onScreen ? ` at (${cx}, ${cy})` : " (off-screen; click by ref, or scroll_to first)";
+    const at = !(rect.width || rect.height) ? " (not rendered)" : onScreen ? ` at (${cx}, ${cy})` : " (off-screen)";
     const name = red.mask(el) && !isField(el) ? "" : text ?? nameOf(el, role);
     return { score, line: red.scrub(`${describe(el, role, name, red)}${at}${where}`) };
   });
-  return { matches, total: scored.length, masked: red.masked() };
+  return { matches, rest: close.slice(FIND_MAX).map((m) => m.score), masked: red.masked() };
 }
 
 // Text directly inside an element (not in child elements), for elements like spans and divs

@@ -1156,7 +1156,7 @@ test("the host's rules go to every page op, and a masked result gets its own lin
   // find runs in every frame at once; each answers its matches and what it masked.
   env.browser.claudePage.broadcast = async (tabId, op, args) => {
     env.calls.push({ op, args: plain(args) });
-    return [{ matches: [{ score: 3, line: 'textbox "Account" [ref_1] value=[redacted: account-number, filled]' }], total: 1, masked: { count: 1, site: "chase.com" } }];
+    return [{ matches: [{ score: 3, line: 'textbox "Account" [ref_1] value=[redacted: account-number, filled]' }], rest: [], masked: { count: 1, site: "chase.com" } }];
   };
   for (const tool of ["read_page", "find", "form_input", "javascript_tool"]) {
     const out = await env.callTool(tool, { tabId: 2, ref: "ref_1", value: "x", query: "q", text: "1" });
@@ -1672,8 +1672,8 @@ test("read_page without child frames answers what the page did", async () => {
 test("find runs in every frame with the top frame's viewport and merges matches by score", async () => {
   const env = await framesEnv({
     finds: [
-      { matches: [{ score: 4, line: 'text "Ice cream select example" [ref_4] at (300, 200)' }], total: 1, masked: null },
-      { matches: [{ score: 9, line: 'combobox "Choose a flavor" [ref_1@f12] at (320, 540) (in frame play.example)' }, { score: 1, line: 'text "x" [ref_2@f12]' }], total: 2, masked: { count: 1, site: "play.example" } },
+      { matches: [{ score: 5, line: 'text "Ice cream select example" [ref_4] at (300, 200)' }], rest: [], masked: null },
+      { matches: [{ score: 9, line: 'combobox "Choose a flavor" [ref_1@f12] at (320, 540) (in frame play.example)' }, { score: 1, line: 'text "x" [ref_2@f12]' }], rest: [], masked: { count: 1, site: "play.example" } },
       null,
       { error: "no document" },
     ],
@@ -1684,13 +1684,73 @@ test("find runs in every frame with the top frame's viewport and merges matches 
   assert.deepEqual(find.args.origin, { x: 100, y: 50, width: 1000, height: 800 });
   assert.equal(
     r.result.content[0].text,
-    'Found 2 element(s) for "ice cream select" (coordinates match the screenshot frame; clicking by ref is more reliable):\ncombobox "Choose a flavor" [ref_1@f12] at (320, 540) (in frame play.example)\ntext "Ice cream select example" [ref_4] at (300, 200)',
+    'Found 2 for "ice cream select" (screenshot coordinates; click by ref if off-screen):\ncombobox "Choose a flavor" [ref_1@f12] at (320, 540) (in frame play.example)\ntext "Ice cream select example" [ref_4] at (300, 200)',
   );
   assert.equal(r.result.content[1].text, "1 field masked on play.example");
 });
 
+// A find answer of `count` links, best first, from one frame.
+const findFrame = (count, { name = (i) => `Link ${i}`, rest = [] } = {}) => ({
+  matches: Array.from({ length: count }, (_, i) => ({ score: 20 - i, line: `link "${name(i)}" [ref_${i + 1}] at (10, ${i * 20})` })),
+  rest,
+  masked: null,
+});
+
+test("find shows the best 8 and says how many close matches it left out, its frames' too", async () => {
+  const env = await framesEnv({ finds: [findFrame(8, { rest: [11, 11, 3] }), { ...findFrame(2), matches: [{ score: 19.5, line: 'button "Go" [ref_1@f12]' }, { score: 2, line: 'text "far" [ref_2@f12]' }] }] });
+  const out = (await env.callTool("find", { tabId: 2, query: "link" })).result.content[0].text;
+  const lines = out.split("\n");
+  assert.equal(lines.length, 1 + 8 + 1);
+  assert.match(lines[0], /^Found 8 for "link"/);
+  assert.ok(lines.includes('button "Go" [ref_1@f12]'), "the other frame's close match ranks with the rest");
+  assert.ok(!out.includes("far"), "matches far behind the best are dropped");
+  assert.ok(!out.includes("ref_8]"), "the eighth link of the first frame is pushed out by the other frame's");
+  // Behind the 8 shown: link 8 pushed out, and the first frame's own two left-out matches above the floor of 10.
+  assert.equal(lines.at(-1), "(+3 more, refine the query)");
+});
+
+test("find clips long names and hrefs but not refs or coordinates", async () => {
+  const long = "Walnut Writing Desk with Two Drawers, Solid Hardwood, Natural FinishFree shipping · In stock · Ships in 2 days";
+  const href = "https://shop.example.com/furniture/results/?keywords=writing+desk&origin=SearchResults&itemId=4439342156";
+  const env = await framesEnv({
+    finds: [{ matches: [{ score: 9, line: `link ${JSON.stringify(long)} [ref_7@f3] href=${JSON.stringify(href)} at (154, 310)` }, { score: 8, line: `text ${JSON.stringify('say "hi" ' + "x".repeat(80))} [ref_8]` }], rest: [], masked: null }],
+  });
+  const out = (await env.callTool("find", { tabId: 2, query: "apply" })).result.content[0].text.split("\n");
+  assert.equal(out[1], `link "${long.slice(0, 49)}…" [ref_7@f3] href="https://shop.example.com/furniture/results/?…" at (154, 310)`);
+  assert.equal(out[2], `text ${JSON.stringify(('say "hi" ' + "x".repeat(80)).slice(0, 49) + "…")} [ref_8]`);
+  const short = await framesEnv({ finds: [{ matches: [{ score: 9, line: 'link "Home" [ref_1] href="/" at (1, 2)' }, { score: 9, line: "div [ref_2] at (3, 4)" }], rest: [], masked: null }] });
+  assert.deepEqual((await short.callTool("find", { tabId: 2, query: "x" })).result.content[0].text.split("\n").slice(1), ['link "Home" [ref_1] href="/" at (1, 2)', "div [ref_2] at (3, 4)"]);
+});
+
+// Real find answers from earlier sessions (extension/test/fixtures/find-recorded.json), as the
+// actor would now answer them: the same lines, best first, 8 at most with the score of each left
+// out behind (every line counts as close, which is the most it could keep).
+test("find answers recorded from real pages come out at a fraction of the size, refs and coordinates intact", async (t) => {
+  const recorded = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "find-recorded.json"), "utf8"));
+  let before = 0;
+  let after = 0;
+  for (const { query, recorded: old } of recorded) {
+    const lines = old.split("\n").slice(1).filter((l) => !l.startsWith("[")).map((l) => l.replace(" (off-screen; click by ref, or scroll_to first)", " (off-screen)"));
+    const env = await framesEnv({ finds: [{ matches: lines.slice(0, 8).map((line, i) => ({ score: 100 - i, line })), rest: lines.slice(8).map((_, i) => 92 - i), masked: null }] });
+    const out = (await env.callTool("find", { tabId: 2, query })).result.content[0].text;
+    const got = out.split("\n");
+    const shown = lines.slice(0, 8);
+    assert.equal(got.length - 1 - (lines.length > 8 ? 1 : 0), shown.length, query);
+    shown.forEach((l, i) => {
+      assert.equal(got[1 + i].match(/\[ref_\d+(@f\d+)?\]/)?.[0], l.match(/\[ref_\d+(@f\d+)?\]/)?.[0], `${query}: ref ${i}`);
+      assert.equal(got[1 + i].match(/at \(-?\d+, -?\d+\)|\(off-screen\)|\(not rendered\)/)?.[0], l.match(/at \(-?\d+, -?\d+\)|\(off-screen\)|\(not rendered\)/)?.[0], `${query}: place ${i}`);
+    });
+    if (lines.length > 8) assert.equal(got.at(-1), `(+${lines.length - 8} more, refine the query)`);
+    before += Buffer.byteLength(old);
+    after += Buffer.byteLength(out);
+    t.diagnostic(`${String(Buffer.byteLength(old)).padStart(5)} -> ${String(Buffer.byteLength(out)).padStart(4)}  ${query}`);
+  }
+  t.diagnostic(`total ${before} -> ${after} bytes (${Math.round((100 * after) / before)}%)`);
+  assert.ok(after < before * 0.5, "less than half the bytes");
+});
+
 test("find with no match anywhere says so, and a top frame that failed is an error", async () => {
-  const none = await framesEnv({ finds: [{ matches: [], total: 0, masked: null }, { matches: [], total: 0, masked: null }] });
+  const none = await framesEnv({ finds: [{ matches: [], rest: [], masked: null }, { matches: [], rest: [], masked: null }] });
   const r = await none.callTool("find", { tabId: 2, query: "nothing" });
   assert.equal(r.result.content[0].text, 'No elements matched "nothing". Try read_page with filter "interactive".');
   const failed = await framesEnv({ finds: [{ error: "No document in this frame." }] });
