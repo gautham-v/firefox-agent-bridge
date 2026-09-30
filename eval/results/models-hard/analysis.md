@@ -157,3 +157,33 @@ Written by `eval/models-charts.mjs`, which reproduces round 1's `charts.json` se
 5. `tool_use_per_config`.
 6. `token_breakdown_per_config`.
 7. `cost_per_successful_task`.
+
+## Sonnet rerun after the restart (2026-09-30)
+Sonnet 5.5 at low, medium and high, the same 6 tasks x 3 rounds (54 runs), once Firefox had restarted with main at c1ad4bb. It loads the typing fix (`change` fires on Tab or a click away in background tabs) and the `computer` description that says there are no separate screenshot or click tools. Rows are in `sonnet-rerun.jsonl`, the generated tables in `sonnet-rerun-report.md`. Same concurrency (3) and load (1.9 sibling runs, no other eval) as round 2. $16.75 list.
+
+| | round 2 low | rerun low | round 2 medium | rerun medium | round 2 high | rerun high |
+|---|---|---|---|---|---|---|
+| mean score (passes of 18) | 0.935 (14) | 0.891 (12) | 0.930 (12) | 0.991 (17) | 0.994 (17) | 0.970 (15) |
+| uitp-no-js passes | 3/3 | 3/3 | 1/3 | 3/3 | 2/3 | 3/3 |
+| calls to tools not offered | 13 | 13 | 15 | 8 | 13 | 7 |
+| mean cost | $0.302 | $0.301 | $0.390 | $0.306 | $0.386 | $0.323 |
+| median wall time | 79 s | 75 s | 80 s | 67 s | 88 s | 81 s |
+| median tool calls | 25 | 27 | 35 | 33.5 | 45 | 44 |
+
+Per task, mean score (passes of 3):
+
+| task | low r2 | low rerun | medium r2 | medium rerun | high r2 | high rerun |
+|---|---|---|---|---|---|---|
+| books-no-js | 0.89 (1) | 0.89 (1) | 0.94 (2) | 0.94 (2) | 1.00 (3) | 0.89 (1) |
+| hockey-no-js | 1.00 (3) | 0.87 (1) | 0.93 (2) | 1.00 (3) | 1.00 (3) | 0.93 (2) |
+| sudoku-no-js | 1.00 (3) | 0.70 (2) | 1.00 (3) | 1.00 (3) | 1.00 (3) | 1.00 (3) |
+| tldraw-no-js | 1.00 (3) | 1.00 (3) | 1.00 (3) | 1.00 (3) | 1.00 (3) | 1.00 (3) |
+| uitp-no-js | 1.00 (3) | 1.00 (3) | 0.93 (1) | 1.00 (3) | 0.96 (2) | 1.00 (3) |
+| wc-tiebreak | 0.72 (1) | 0.89 (2) | 0.78 (1) | 1.00 (3) | 1.00 (3) | 1.00 (3) |
+
+- **uitp-no-js went from 6 of 9 to 9 of 9.** Two runs (medium and high) typed "Ship it 42" with `computer` and the button took the name without `form_input`, which no run could do in round 2. The other 7 used `form_input` from the start, so the typing path was tested twice, not nine times.
+- **The effort ranking moved, within noise.** Medium went from 12 to 17 passes (Fisher p = 0.09), high from 17 to 15 and low from 14 to 12 (p = 0.60 and 0.71). Over both rounds (36 runs each): low 26 passes (0.913), medium 29 (0.960), high 32 (0.982). High is still best and low is now weakest; medium isn't the worst config any more.
+- **The other misses are the same slips as round 2.** Books: one star miscounted in Fiction (3.20 or 3.17 for 3.185) in 5 runs, and in Young Adult too (3.31 for 3.296) in 2 of them. Hockey: 30 or 33 seasons of 50+ wins instead of 34, and one year missing from a tie list. Sudoku low, round 2: a wrong solution entered in rows 1-8. wc-tiebreak low, round 3: Bexley ranked first from the head-to-head goals slip.
+- **Closing the tab can lose the answer.** `tabs_context_mcp` now says "Created tab N for this session; close it with tabs_close_mcp when done." wc-tiebreak runs closed their tab 9 times in 9 (6 in round 2). One (medium, round 1) gave its JSON, then closed the tab and ended on "I closed the tab I opened. The answer is above.", which the harness scored 0. `models.mjs` and `models-rescore.mjs` now take the last JSON from an earlier message when the final one has none (`answer_source: "earlier_text"`), and the row was rescored to 1. Round 2 had no row without a JSON answer. State tasks still left their tabs open: no inspect errors.
+- **Calls to tools not offered: 41 to 28 over 54 runs, but not from the description.** Round 2's 41 were `screenshot` 18, `zoom` 5, a `_placeholder` name 12 (`left_click_placeholder`, `screenshot_placeholder`, ...) and 6 others. The rerun's 28 are `screenshot` 21, a `_placeholder` name 6 and `type` 1. Every one has empty input and is followed by the same action through `computer`, so it reads as a slip in emitting the call, not a belief that the tool exists; the description can't reach it. Each costs one error turn.
+- **Cheaper for medium and high.** Mean cost $0.306 and $0.323 against $0.390 and $0.386, and 7–13 s faster at the median. Low was unchanged.

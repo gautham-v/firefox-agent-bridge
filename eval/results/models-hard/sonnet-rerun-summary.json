@@ -1,0 +1,3326 @@
+{
+  "generated_at": "2026-09-30T08:59:00.706Z",
+  "runs": 54,
+  "rounds": [
+    1,
+    2,
+    3
+  ],
+  "configs": [
+    "claude-sonnet-5-5/low",
+    "claude-sonnet-5-5/medium",
+    "claude-sonnet-5-5/high"
+  ],
+  "tasks": [
+    "books-no-js",
+    "hockey-no-js",
+    "sudoku-no-js",
+    "tldraw-no-js",
+    "uitp-no-js",
+    "wc-tiebreak"
+  ],
+  "per_config": {
+    "claude-sonnet-5-5/low": {
+      "n": 18,
+      "pass_rate": 0.6666666666666666,
+      "mean_score": 0.8913333333333333,
+      "timeouts": 0,
+      "total_cost_usd": 5.422948200000001,
+      "cost_per_success_usd": 0.45191235000000013,
+      "time_per_success_s": 106.78249999999998,
+      "tool_calls_by_tool": {
+        "tabs_context_mcp": 18,
+        "navigate": 85,
+        "get_page_text": 38,
+        "tabs_close_mcp": 7,
+        "computer": 546,
+        "screenshot": 7,
+        "find": 31,
+        "javascript_tool": 11,
+        "read_page": 30,
+        "form_input": 25,
+        "tabs_create_mcp": 22,
+        "scroll_placeholder": 1,
+        "left_placeholder": 1,
+        "screenshot_placeholder": 1,
+        "screenshot_placeholder2": 1,
+        "batch": 8,
+        "left_click_placeholder": 1,
+        "left_click_placeholder2": 1
+      },
+      "metrics": {
+        "wall_s": {
+          "median": 75.0035,
+          "p25": 41.0465,
+          "p75": 96.18575,
+          "iqr": 55.13925,
+          "mean": 71.18833333333333
+        },
+        "first_tool_s": {
+          "median": 1.975,
+          "p25": 1.834,
+          "p75": 2.21325,
+          "iqr": 0.37924999999999986,
+          "mean": 2.0295000000000005
+        },
+        "api_s": {
+          "median": 65.0575,
+          "p25": 31.2265,
+          "p75": 89.506,
+          "iqr": 58.2795,
+          "mean": 63.36544444444444
+        },
+        "cost_usd": {
+          "median": 0.23184559999999999,
+          "p25": 0.16720190000000001,
+          "p75": 0.4348574,
+          "iqr": 0.2676555,
+          "mean": 0.30127490000000007
+        },
+        "tool_calls": {
+          "median": 27,
+          "p25": 7,
+          "p75": 88,
+          "iqr": 81,
+          "mean": 46.333333333333336
+        },
+        "screenshots": {
+          "median": 4,
+          "p25": 0,
+          "p75": 14.5,
+          "iqr": 14.5,
+          "mean": 8.88888888888889
+        },
+        "turns": {
+          "median": 28,
+          "p25": 8,
+          "p75": 89,
+          "iqr": 81,
+          "mean": 47.333333333333336
+        },
+        "output_tokens": {
+          "median": 10361,
+          "p25": 4294.5,
+          "p75": 12130.75,
+          "iqr": 7836.25,
+          "mean": 8926
+        },
+        "input_tokens": {
+          "median": 21,
+          "p25": 12,
+          "p75": 49.5,
+          "iqr": 37.5,
+          "mean": 29.333333333333332
+        },
+        "cache_read_tokens": {
+          "median": 140867,
+          "p25": 70576,
+          "p75": 729427,
+          "iqr": 658851,
+          "mean": 395986.72222222225
+        },
+        "cache_write_tokens": {
+          "median": 25356,
+          "p25": 20884,
+          "p75": 37265,
+          "iqr": 16381,
+          "mean": 33189.72222222222
+        },
+        "total_input_tokens": {
+          "median": 164912.5,
+          "p25": 80993.75,
+          "p75": 778061.5,
+          "iqr": 697067.75,
+          "mean": 429205.77777777775
+        },
+        "thinking_blocks": {
+          "median": 6.5,
+          "p25": 2,
+          "p75": 16,
+          "iqr": 14,
+          "mean": 8.61111111111111
+        },
+        "tool_errors": {
+          "median": 0,
+          "p25": 0,
+          "p75": 1,
+          "iqr": 1,
+          "mean": 1.3888888888888888
+        },
+        "repeated_calls": {
+          "median": 0,
+          "p25": 0,
+          "p75": 0,
+          "iqr": 0,
+          "mean": 1.2777777777777777
+        },
+        "retries_after_error": {
+          "median": 0,
+          "p25": 0,
+          "p75": 0,
+          "iqr": 0,
+          "mean": 0.3333333333333333
+        },
+        "tool_result_kchars": {
+          "median": 16.412,
+          "p25": 5.75525,
+          "p75": 27.91075,
+          "iqr": 22.1555,
+          "mean": 36.121944444444445
+        },
+        "load_other_eval": {
+          "median": 0,
+          "p25": 0,
+          "p75": 0,
+          "iqr": 0,
+          "mean": 0
+        },
+        "load_siblings": {
+          "median": 2,
+          "p25": 1.8375000000000001,
+          "p75": 2,
+          "iqr": 0.16249999999999987,
+          "mean": 1.9188888888888893
+        }
+      },
+      "pareto_score_cost": true,
+      "pareto_score_time": false
+    },
+    "claude-sonnet-5-5/medium": {
+      "n": 18,
+      "pass_rate": 0.9444444444444444,
+      "mean_score": 0.9907222222222222,
+      "timeouts": 0,
+      "total_cost_usd": 5.5034794,
+      "cost_per_success_usd": 0.32373408235294115,
+      "time_per_success_s": 78.85952941176471,
+      "tool_calls_by_tool": {
+        "tabs_context_mcp": 18,
+        "navigate": 84,
+        "computer": 584,
+        "screenshot": 7,
+        "javascript_tool": 10,
+        "tabs_close_mcp": 6,
+        "tabs_create_mcp": 21,
+        "find": 19,
+        "read_page": 31,
+        "get_page_text": 30,
+        "form_input": 23,
+        "type": 1,
+        "batch": 1
+      },
+      "metrics": {
+        "wall_s": {
+          "median": 66.8255,
+          "p25": 43.204750000000004,
+          "p75": 103.2435,
+          "iqr": 60.03874999999999,
+          "mean": 74.47844444444445
+        },
+        "first_tool_s": {
+          "median": 2.3565,
+          "p25": 2.01575,
+          "p75": 2.5895,
+          "iqr": 0.57375,
+          "mean": 2.269166666666667
+        },
+        "api_s": {
+          "median": 62.822,
+          "p25": 33.56375,
+          "p75": 100.51575,
+          "iqr": 66.952,
+          "mean": 67.20094444444445
+        },
+        "cost_usd": {
+          "median": 0.2394875,
+          "p25": 0.17347015000000002,
+          "p75": 0.33987225,
+          "iqr": 0.16640209999999997,
+          "mean": 0.30574885555555553
+        },
+        "tool_calls": {
+          "median": 33.5,
+          "p25": 7.25,
+          "p75": 83,
+          "iqr": 75.75,
+          "mean": 46.388888888888886
+        },
+        "screenshots": {
+          "median": 5,
+          "p25": 0,
+          "p75": 16.25,
+          "iqr": 16.25,
+          "mean": 9
+        },
+        "turns": {
+          "median": 34.5,
+          "p25": 8.25,
+          "p75": 84,
+          "iqr": 75.75,
+          "mean": 47.388888888888886
+        },
+        "output_tokens": {
+          "median": 9007,
+          "p25": 4508.75,
+          "p75": 13303.75,
+          "iqr": 8795,
+          "mean": 8929.333333333334
+        },
+        "input_tokens": {
+          "median": 20,
+          "p25": 12,
+          "p75": 47,
+          "iqr": 35,
+          "mean": 28.77777777777778
+        },
+        "cache_read_tokens": {
+          "median": 148530.5,
+          "p25": 68996,
+          "p75": 594311.25,
+          "iqr": 525315.25,
+          "mean": 401366.5
+        },
+        "cache_write_tokens": {
+          "median": 23472,
+          "p25": 21650,
+          "p75": 32763.75,
+          "iqr": 11113.75,
+          "mean": 34031.166666666664
+        },
+        "total_input_tokens": {
+          "median": 173381.5,
+          "p25": 85227,
+          "p75": 626919,
+          "iqr": 541692,
+          "mean": 435426.44444444444
+        },
+        "thinking_blocks": {
+          "median": 5,
+          "p25": 2,
+          "p75": 8.75,
+          "iqr": 6.75,
+          "mean": 7.611111111111111
+        },
+        "tool_errors": {
+          "median": 0,
+          "p25": 0,
+          "p75": 1,
+          "iqr": 1,
+          "mean": 1.1666666666666667
+        },
+        "repeated_calls": {
+          "median": 0,
+          "p25": 0,
+          "p75": 0,
+          "iqr": 0,
+          "mean": 1.1666666666666667
+        },
+        "retries_after_error": {
+          "median": 0,
+          "p25": 0,
+          "p75": 0,
+          "iqr": 0,
+          "mean": 0.3333333333333333
+        },
+        "tool_result_kchars": {
+          "median": 14.038499999999999,
+          "p25": 5.561,
+          "p75": 28.12325,
+          "iqr": 22.56225,
+          "mean": 35.425888888888885
+        },
+        "load_other_eval": {
+          "median": 0,
+          "p25": 0,
+          "p75": 0,
+          "iqr": 0,
+          "mean": 0
+        },
+        "load_siblings": {
+          "median": 2,
+          "p25": 1.8075,
+          "p75": 2,
+          "iqr": 0.1924999999999999,
+          "mean": 1.8494444444444444
+        }
+      },
+      "pareto_score_cost": true,
+      "pareto_score_time": true
+    },
+    "claude-sonnet-5-5/high": {
+      "n": 18,
+      "pass_rate": 0.8333333333333334,
+      "mean_score": 0.9703333333333334,
+      "timeouts": 0,
+      "total_cost_usd": 5.8202072000000005,
+      "cost_per_success_usd": 0.38801381333333335,
+      "time_per_success_s": 93.46673333333335,
+      "tool_calls_by_tool": {
+        "tabs_context_mcp": 18,
+        "navigate": 86,
+        "get_page_text": 36,
+        "tabs_close_mcp": 6,
+        "computer": 661,
+        "batch": 14,
+        "tabs_create_mcp": 21,
+        "find": 24,
+        "read_page": 30,
+        "form_input": 21,
+        "screenshot": 7,
+        "javascript_tool": 11
+      },
+      "metrics": {
+        "wall_s": {
+          "median": 81.0325,
+          "p25": 44.45975,
+          "p75": 109.9485,
+          "iqr": 65.48875,
+          "mean": 77.88894444444446
+        },
+        "first_tool_s": {
+          "median": 2.026,
+          "p25": 1.863,
+          "p75": 2.2212500000000004,
+          "iqr": 0.3582500000000004,
+          "mean": 2.0829999999999997
+        },
+        "api_s": {
+          "median": 72.5355,
+          "p25": 35.356500000000004,
+          "p75": 101.0275,
+          "iqr": 65.67099999999999,
+          "mean": 70.46088888888887
+        },
+        "cost_usd": {
+          "median": 0.2786272,
+          "p25": 0.1794126,
+          "p75": 0.43269195000000005,
+          "iqr": 0.25327935,
+          "mean": 0.32334484444444445
+        },
+        "tool_calls": {
+          "median": 44,
+          "p25": 13.25,
+          "p75": 91,
+          "iqr": 77.75,
+          "mean": 51.94444444444444
+        },
+        "screenshots": {
+          "median": 8,
+          "p25": 0,
+          "p75": 22.25,
+          "iqr": 22.25,
+          "mean": 11.777777777777779
+        },
+        "turns": {
+          "median": 45,
+          "p25": 14.25,
+          "p75": 92,
+          "iqr": 77.75,
+          "mean": 52.94444444444444
+        },
+        "output_tokens": {
+          "median": 10546,
+          "p25": 5169.75,
+          "p75": 15559.5,
+          "iqr": 10389.75,
+          "mean": 10297.611111111111
+        },
+        "input_tokens": {
+          "median": 23,
+          "p25": 12,
+          "p75": 61.5,
+          "iqr": 49.5,
+          "mean": 35.22222222222222
+        },
+        "cache_read_tokens": {
+          "median": 169402,
+          "p25": 84075,
+          "p75": 881314.75,
+          "iqr": 797239.75,
+          "mean": 453798.1111111111
+        },
+        "cache_write_tokens": {
+          "median": 27950,
+          "p25": 24601.75,
+          "p75": 37808.5,
+          "iqr": 13206.75,
+          "mean": 32384.666666666668
+        },
+        "total_input_tokens": {
+          "median": 193296.5,
+          "p25": 111154,
+          "p75": 919193.25,
+          "iqr": 808039.25,
+          "mean": 486218
+        },
+        "thinking_blocks": {
+          "median": 7,
+          "p25": 4,
+          "p75": 17.75,
+          "iqr": 13.75,
+          "mean": 11.333333333333334
+        },
+        "tool_errors": {
+          "median": 0,
+          "p25": 0,
+          "p75": 1,
+          "iqr": 1,
+          "mean": 1
+        },
+        "repeated_calls": {
+          "median": 0,
+          "p25": 0,
+          "p75": 0,
+          "iqr": 0,
+          "mean": 1.0555555555555556
+        },
+        "retries_after_error": {
+          "median": 0,
+          "p25": 0,
+          "p75": 0,
+          "iqr": 0,
+          "mean": 0.2777777777777778
+        },
+        "tool_result_kchars": {
+          "median": 15.8165,
+          "p25": 5.4365000000000006,
+          "p75": 29.131,
+          "iqr": 23.694499999999998,
+          "mean": 18.20172222222222
+        },
+        "load_other_eval": {
+          "median": 0,
+          "p25": 0,
+          "p75": 0,
+          "iqr": 0,
+          "mean": 0
+        },
+        "load_siblings": {
+          "median": 2,
+          "p25": 1.895,
+          "p75": 2,
+          "iqr": 0.10499999999999998,
+          "mean": 1.8855555555555554
+        }
+      },
+      "pareto_score_cost": false,
+      "pareto_score_time": false
+    }
+  },
+  "per_task_config": {
+    "books-no-js": {
+      "claude-sonnet-5-5/low": {
+        "n": 3,
+        "pass_rate": 0.3333333333333333,
+        "mean_score": 0.8886666666666666,
+        "timeouts": 0,
+        "total_cost_usd": 1.9179238,
+        "cost_per_success_usd": 1.9179238,
+        "time_per_success_s": 255.76999999999998,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "navigate": 40,
+          "read_page": 3,
+          "computer": 166,
+          "find": 15,
+          "screenshot": 2,
+          "get_page_text": 12,
+          "tabs_create_mcp": 1,
+          "tabs_close_mcp": 1
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 85.185,
+            "p25": 83.3115,
+            "p75": 87.166,
+            "iqr": 3.8545000000000016,
+            "mean": 85.25666666666666
+          },
+          "first_tool_s": {
+            "median": 1.806,
+            "p25": 1.742,
+            "p75": 1.832,
+            "iqr": 0.09000000000000008,
+            "mean": 1.7806666666666668
+          },
+          "api_s": {
+            "median": 76.889,
+            "p25": 69.6755,
+            "p75": 77.8295,
+            "iqr": 8.153999999999996,
+            "mean": 72.707
+          },
+          "cost_usd": {
+            "median": 0.4639394,
+            "p25": 0.46099840000000003,
+            "p75": 0.7299332000000001,
+            "iqr": 0.26893480000000003,
+            "mean": 0.6393079333333334
+          },
+          "tool_calls": {
+            "median": 82,
+            "p25": 70,
+            "p75": 92.5,
+            "iqr": 22.5,
+            "mean": 81
+          },
+          "screenshots": {
+            "median": 29,
+            "p25": 17.5,
+            "p75": 29,
+            "iqr": 11.5,
+            "mean": 21.333333333333332
+          },
+          "turns": {
+            "median": 83,
+            "p25": 71,
+            "p75": 93.5,
+            "iqr": 22.5,
+            "mean": 82
+          },
+          "output_tokens": {
+            "median": 12158,
+            "p25": 9864,
+            "p75": 12270.5,
+            "iqr": 2406.5,
+            "mean": 10703.666666666666
+          },
+          "input_tokens": {
+            "median": 50,
+            "p25": 49,
+            "p75": 51,
+            "iqr": 2,
+            "mean": 50
+          },
+          "cache_read_tokens": {
+            "median": 742017,
+            "p25": 716837,
+            "p75": 1262956,
+            "iqr": 546119,
+            "mean": 1072523
+          },
+          "cache_write_tokens": {
+            "median": 48949,
+            "p25": 48707,
+            "p75": 94892.5,
+            "iqr": 46185.5,
+            "mean": 79416.66666666667
+          },
+          "total_input_tokens": {
+            "median": 790530,
+            "p25": 765593,
+            "p75": 1357656.5,
+            "iqr": 592063.5,
+            "mean": 1151989.6666666667
+          },
+          "thinking_blocks": {
+            "median": 18,
+            "p25": 17,
+            "p75": 19,
+            "iqr": 2,
+            "mean": 18
+          },
+          "tool_errors": {
+            "median": 1,
+            "p25": 0.5,
+            "p75": 1,
+            "iqr": 0.5,
+            "mean": 0.6666666666666666
+          },
+          "repeated_calls": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "retries_after_error": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "tool_result_kchars": {
+            "median": 28.221,
+            "p25": 26.764,
+            "p75": 195.59,
+            "iqr": 168.826,
+            "mean": 138.829
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 2,
+            "p25": 1.915,
+            "p75": 2,
+            "iqr": 0.08499999999999996,
+            "mean": 1.9433333333333334
+          }
+        },
+        "pareto_score_cost": true,
+        "pareto_score_time": true
+      },
+      "claude-sonnet-5-5/medium": {
+        "n": 3,
+        "pass_rate": 0.6666666666666666,
+        "mean_score": 0.9443333333333334,
+        "timeouts": 0,
+        "total_cost_usd": 2.2421082,
+        "cost_per_success_usd": 1.1210541,
+        "time_per_success_s": 181.406,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "navigate": 38,
+          "read_page": 6,
+          "get_page_text": 11,
+          "find": 11,
+          "computer": 183,
+          "batch": 1
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 116.467,
+            "p25": 91.7875,
+            "p75": 147.852,
+            "iqr": 56.06450000000001,
+            "mean": 120.93733333333334
+          },
+          "first_tool_s": {
+            "median": 2.379,
+            "p25": 1.9805000000000001,
+            "p75": 2.5175,
+            "iqr": 0.5369999999999999,
+            "mean": 2.205666666666667
+          },
+          "api_s": {
+            "median": 108.361,
+            "p25": 79.107,
+            "p75": 135.1305,
+            "iqr": 56.02350000000001,
+            "mean": 106.70466666666668
+          },
+          "cost_usd": {
+            "median": 0.7264233999999999,
+            "p25": 0.6411562,
+            "p75": 0.8431096,
+            "iqr": 0.20195340000000006,
+            "mean": 0.7473694000000001
+          },
+          "tool_calls": {
+            "median": 97,
+            "p25": 74,
+            "p75": 101,
+            "iqr": 27,
+            "mean": 84.33333333333333
+          },
+          "screenshots": {
+            "median": 29,
+            "p25": 17,
+            "p75": 30,
+            "iqr": 13,
+            "mean": 21.666666666666668
+          },
+          "turns": {
+            "median": 98,
+            "p25": 75,
+            "p75": 102,
+            "iqr": 27,
+            "mean": 85.33333333333333
+          },
+          "output_tokens": {
+            "median": 15533,
+            "p25": 11605.5,
+            "p75": 15836.5,
+            "iqr": 4231,
+            "mean": 13117
+          },
+          "input_tokens": {
+            "median": 56,
+            "p25": 47,
+            "p75": 65,
+            "iqr": 18,
+            "mean": 56
+          },
+          "cache_read_tokens": {
+            "median": 1483797,
+            "p25": 1167666,
+            "p75": 1541398,
+            "iqr": 373732,
+            "mean": 1311443.6666666667
+          },
+          "cache_write_tokens": {
+            "median": 67029,
+            "p25": 62282,
+            "p75": 103907,
+            "iqr": 41625,
+            "mean": 88449.66666666667
+          },
+          "total_input_tokens": {
+            "median": 1550900,
+            "p25": 1230013,
+            "p75": 1645361,
+            "iqr": 415348,
+            "mean": 1399949.3333333333
+          },
+          "thinking_blocks": {
+            "median": 21,
+            "p25": 17,
+            "p75": 27,
+            "iqr": 10,
+            "mean": 22.333333333333332
+          },
+          "tool_errors": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0.5,
+            "iqr": 0.5,
+            "mean": 0.3333333333333333
+          },
+          "repeated_calls": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "retries_after_error": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0.5,
+            "iqr": 0.5,
+            "mean": 0.3333333333333333
+          },
+          "tool_result_kchars": {
+            "median": 36.514,
+            "p25": 31.029000000000003,
+            "p75": 202.535,
+            "iqr": 171.506,
+            "mean": 143.53799999999998
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 1.8,
+            "p25": 1.5899999999999999,
+            "p75": 1.815,
+            "iqr": 0.2250000000000001,
+            "mean": 1.67
+          }
+        },
+        "pareto_score_cost": true,
+        "pareto_score_time": true
+      },
+      "claude-sonnet-5-5/high": {
+        "n": 3,
+        "pass_rate": 0.3333333333333333,
+        "mean_score": 0.8886666666666666,
+        "timeouts": 0,
+        "total_cost_usd": 2.035155,
+        "cost_per_success_usd": 2.035155,
+        "time_per_success_s": 363.798,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "navigate": 40,
+          "read_page": 3,
+          "find": 12,
+          "computer": 240,
+          "get_page_text": 12
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 120.837,
+            "p25": 119.209,
+            "p75": 123.10849999999999,
+            "iqr": 3.899499999999989,
+            "mean": 121.266
+          },
+          "first_tool_s": {
+            "median": 1.888,
+            "p25": 1.839,
+            "p75": 2.056,
+            "iqr": 0.21700000000000008,
+            "mean": 1.9673333333333334
+          },
+          "api_s": {
+            "median": 109.34,
+            "p25": 108.38300000000001,
+            "p75": 110.64150000000001,
+            "iqr": 2.258499999999998,
+            "mean": 109.56966666666666
+          },
+          "cost_usd": {
+            "median": 0.6767500000000001,
+            "p25": 0.6341214000000001,
+            "p75": 0.7218311000000001,
+            "iqr": 0.0877097,
+            "mean": 0.678385
+          },
+          "tool_calls": {
+            "median": 102,
+            "p25": 102,
+            "p75": 104,
+            "iqr": 2,
+            "mean": 103.33333333333333
+          },
+          "screenshots": {
+            "median": 31,
+            "p25": 31,
+            "p75": 32.5,
+            "iqr": 1.5,
+            "mean": 32
+          },
+          "turns": {
+            "median": 103,
+            "p25": 103,
+            "p75": 105,
+            "iqr": 2,
+            "mean": 104.33333333333333
+          },
+          "output_tokens": {
+            "median": 16441,
+            "p25": 16112.5,
+            "p75": 16483,
+            "iqr": 370.5,
+            "mean": 16250
+          },
+          "input_tokens": {
+            "median": 76,
+            "p25": 65,
+            "p75": 78,
+            "iqr": 13,
+            "mean": 70
+          },
+          "cache_read_tokens": {
+            "median": 1342340,
+            "p25": 1141242,
+            "p75": 1494605.5,
+            "iqr": 353363.5,
+            "mean": 1309785
+          },
+          "cache_write_tokens": {
+            "median": 61379,
+            "p25": 61049.5,
+            "p75": 64810.5,
+            "iqr": 3761,
+            "mean": 63447
+          },
+          "total_input_tokens": {
+            "median": 1403136,
+            "p25": 1202356.5,
+            "p75": 1559164.5,
+            "iqr": 356808,
+            "mean": 1373302
+          },
+          "thinking_blocks": {
+            "median": 33,
+            "p25": 26,
+            "p75": 33.5,
+            "iqr": 7.5,
+            "mean": 28.666666666666668
+          },
+          "tool_errors": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "repeated_calls": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "retries_after_error": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "tool_result_kchars": {
+            "median": 29.162,
+            "p25": 29.1,
+            "p75": 36.551,
+            "iqr": 7.4510000000000005,
+            "mean": 34.04666666666666
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 1.75,
+            "p25": 1.2650000000000001,
+            "p75": 1.875,
+            "iqr": 0.6099999999999999,
+            "mean": 1.51
+          }
+        },
+        "pareto_score_cost": false,
+        "pareto_score_time": false
+      }
+    },
+    "hockey-no-js": {
+      "claude-sonnet-5-5/low": {
+        "n": 3,
+        "pass_rate": 0.3333333333333333,
+        "mean_score": 0.8666666666666667,
+        "timeouts": 0,
+        "total_cost_usd": 0.5000072,
+        "cost_per_success_usd": 0.5000072,
+        "time_per_success_s": 122.465,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "navigate": 12,
+          "get_page_text": 12,
+          "tabs_close_mcp": 3,
+          "batch": 3
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 39.439,
+            "p25": 38.298,
+            "p75": 42.653999999999996,
+            "iqr": 4.3559999999999945,
+            "mean": 40.821666666666665
+          },
+          "first_tool_s": {
+            "median": 2.034,
+            "p25": 2.017,
+            "p75": 2.1395,
+            "iqr": 0.12250000000000005,
+            "mean": 2.093
+          },
+          "api_s": {
+            "median": 30.046,
+            "p25": 29.019,
+            "p75": 32.407,
+            "iqr": 3.387999999999998,
+            "mean": 30.935333333333332
+          },
+          "cost_usd": {
+            "median": 0.1671212,
+            "p25": 0.1662816,
+            "p75": 0.1672826,
+            "iqr": 0.0010010000000000019,
+            "mean": 0.16666906666666667
+          },
+          "tool_calls": {
+            "median": 14,
+            "p25": 9.5,
+            "p75": 14,
+            "iqr": 4.5,
+            "mean": 11
+          },
+          "screenshots": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "turns": {
+            "median": 15,
+            "p25": 10.5,
+            "p75": 15,
+            "iqr": 4.5,
+            "mean": 12
+          },
+          "output_tokens": {
+            "median": 4284,
+            "p25": 4225.5,
+            "p75": 4305,
+            "iqr": 79.5,
+            "mean": 4259
+          },
+          "input_tokens": {
+            "median": 12,
+            "p25": 12,
+            "p75": 12,
+            "iqr": 0,
+            "mean": 12
+          },
+          "cache_read_tokens": {
+            "median": 83220,
+            "p25": 83210,
+            "p75": 83703,
+            "iqr": 493,
+            "mean": 83535.33333333333
+          },
+          "cache_write_tokens": {
+            "median": 26855,
+            "p25": 26816,
+            "p75": 26867,
+            "iqr": 51,
+            "mean": 26837
+          },
+          "total_input_tokens": {
+            "median": 110111,
+            "p25": 110050,
+            "p75": 110582,
+            "iqr": 532,
+            "mean": 110384.33333333333
+          },
+          "thinking_blocks": {
+            "median": 3,
+            "p25": 3,
+            "p75": 4,
+            "iqr": 1,
+            "mean": 3.6666666666666665
+          },
+          "tool_errors": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "repeated_calls": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "retries_after_error": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "tool_result_kchars": {
+            "median": 34.353,
+            "p25": 34.3485,
+            "p75": 34.457,
+            "iqr": 0.10849999999999937,
+            "mean": 34.419333333333334
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 2,
+            "p25": 1.835,
+            "p75": 2,
+            "iqr": 0.16500000000000004,
+            "mean": 1.89
+          }
+        },
+        "pareto_score_cost": true,
+        "pareto_score_time": true
+      },
+      "claude-sonnet-5-5/medium": {
+        "n": 3,
+        "pass_rate": 1,
+        "mean_score": 1,
+        "timeouts": 0,
+        "total_cost_usd": 0.4924448,
+        "cost_per_success_usd": 0.16414826666666668,
+        "time_per_success_s": 39.33833333333333,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "navigate": 13,
+          "get_page_text": 13,
+          "tabs_close_mcp": 3
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 42.124,
+            "p25": 35.784,
+            "p75": 44.2855,
+            "iqr": 8.5015,
+            "mean": 39.33833333333333
+          },
+          "first_tool_s": {
+            "median": 2.612,
+            "p25": 2.4450000000000003,
+            "p75": 2.67,
+            "iqr": 0.22499999999999964,
+            "mean": 2.5393333333333334
+          },
+          "api_s": {
+            "median": 32.708,
+            "p25": 29.686999999999998,
+            "p75": 34.4195,
+            "iqr": 4.732500000000002,
+            "mean": 31.834999999999997
+          },
+          "cost_usd": {
+            "median": 0.1700028,
+            "p25": 0.1542863,
+            "p75": 0.17693750000000003,
+            "iqr": 0.022651200000000038,
+            "mean": 0.16414826666666668
+          },
+          "tool_calls": {
+            "median": 14,
+            "p25": 9,
+            "p75": 14,
+            "iqr": 5,
+            "mean": 10.666666666666666
+          },
+          "screenshots": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "turns": {
+            "median": 15,
+            "p25": 10,
+            "p75": 15,
+            "iqr": 5,
+            "mean": 11.666666666666666
+          },
+          "output_tokens": {
+            "median": 4501,
+            "p25": 4008,
+            "p75": 4516.5,
+            "iqr": 508.5,
+            "mean": 4182.666666666667
+          },
+          "input_tokens": {
+            "median": 12,
+            "p25": 10,
+            "p75": 15,
+            "iqr": 5,
+            "mean": 12.666666666666666
+          },
+          "cache_read_tokens": {
+            "median": 83204,
+            "p25": 65831.5,
+            "p75": 116142.5,
+            "iqr": 50311,
+            "mean": 93581.33333333333
+          },
+          "cache_write_tokens": {
+            "median": 27082,
+            "p25": 25255,
+            "p75": 27128.5,
+            "iqr": 1873.5,
+            "mean": 25895
+          },
+          "total_input_tokens": {
+            "median": 110298,
+            "p25": 91096.5,
+            "p75": 143286,
+            "iqr": 52189.5,
+            "mean": 119489
+          },
+          "thinking_blocks": {
+            "median": 3,
+            "p25": 2.5,
+            "p75": 3,
+            "iqr": 0.5,
+            "mean": 2.6666666666666665
+          },
+          "tool_errors": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "repeated_calls": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "retries_after_error": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "tool_result_kchars": {
+            "median": 34.351,
+            "p25": 31.667,
+            "p75": 34.352000000000004,
+            "iqr": 2.6850000000000023,
+            "mean": 32.562333333333335
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 2,
+            "p25": 2,
+            "p75": 2,
+            "iqr": 0,
+            "mean": 2
+          }
+        },
+        "pareto_score_cost": true,
+        "pareto_score_time": true
+      },
+      "claude-sonnet-5-5/high": {
+        "n": 3,
+        "pass_rate": 0.6666666666666666,
+        "mean_score": 0.9333333333333332,
+        "timeouts": 0,
+        "total_cost_usd": 0.5299614,
+        "cost_per_success_usd": 0.2649807,
+        "time_per_success_s": 67.187,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "navigate": 13,
+          "get_page_text": 13,
+          "tabs_close_mcp": 3,
+          "batch": 2
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 42.989,
+            "p25": 42.751,
+            "p75": 45.930499999999995,
+            "iqr": 3.1794999999999973,
+            "mean": 44.791333333333334
+          },
+          "first_tool_s": {
+            "median": 2.213,
+            "p25": 2.1965000000000003,
+            "p75": 2.524,
+            "iqr": 0.3274999999999997,
+            "mean": 2.4093333333333335
+          },
+          "api_s": {
+            "median": 34.206,
+            "p25": 32.856500000000004,
+            "p75": 36.507000000000005,
+            "iqr": 3.650500000000001,
+            "mean": 34.84033333333334
+          },
+          "cost_usd": {
+            "median": 0.1793334,
+            "p25": 0.1751556,
+            "p75": 0.1794918,
+            "iqr": 0.004336200000000012,
+            "mean": 0.1766538
+          },
+          "tool_calls": {
+            "median": 14,
+            "p25": 10,
+            "p75": 14,
+            "iqr": 4,
+            "mean": 11.333333333333334
+          },
+          "screenshots": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "turns": {
+            "median": 15,
+            "p25": 11,
+            "p75": 15,
+            "iqr": 4,
+            "mean": 12.333333333333334
+          },
+          "output_tokens": {
+            "median": 5163,
+            "p25": 4880.5,
+            "p75": 5176.5,
+            "iqr": 296,
+            "mean": 4983.666666666667
+          },
+          "input_tokens": {
+            "median": 12,
+            "p25": 12,
+            "p75": 12,
+            "iqr": 0,
+            "mean": 12
+          },
+          "cache_read_tokens": {
+            "median": 83417,
+            "p25": 83394,
+            "p75": 84733,
+            "iqr": 1339,
+            "mean": 84279
+          },
+          "cache_write_tokens": {
+            "median": 27749,
+            "p25": 27345,
+            "p75": 27756,
+            "iqr": 411,
+            "mean": 27484.333333333332
+          },
+          "total_input_tokens": {
+            "median": 111178,
+            "p25": 111162,
+            "p75": 112090,
+            "iqr": 928,
+            "mean": 111775.33333333333
+          },
+          "thinking_blocks": {
+            "median": 4,
+            "p25": 4,
+            "p75": 4.5,
+            "iqr": 0.5,
+            "mean": 4.333333333333333
+          },
+          "tool_errors": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "repeated_calls": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "retries_after_error": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "tool_result_kchars": {
+            "median": 34.353,
+            "p25": 34.3485,
+            "p75": 34.4405,
+            "iqr": 0.09199999999999875,
+            "mean": 34.40833333333333
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 2,
+            "p25": 1.875,
+            "p75": 2,
+            "iqr": 0.125,
+            "mean": 1.9166666666666667
+          }
+        },
+        "pareto_score_cost": false,
+        "pareto_score_time": false
+      }
+    },
+    "sudoku-no-js": {
+      "claude-sonnet-5-5/low": {
+        "n": 3,
+        "pass_rate": 0.6666666666666666,
+        "mean_score": 0.7036666666666666,
+        "timeouts": 0,
+        "total_cost_usd": 0.7327238,
+        "cost_per_success_usd": 0.3663619,
+        "time_per_success_s": 157.8615,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "navigate": 3,
+          "read_page": 3,
+          "form_input": 5,
+          "computer": 5
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 96.846,
+            "p25": 96.2125,
+            "p75": 110.072,
+            "iqr": 13.859499999999997,
+            "mean": 105.241
+          },
+          "first_tool_s": {
+            "median": 2.118,
+            "p25": 2.088,
+            "p75": 2.3315,
+            "iqr": 0.24350000000000005,
+            "mean": 2.2403333333333335
+          },
+          "api_s": {
+            "median": 94.464,
+            "p25": 93.777,
+            "p75": 107.5615,
+            "iqr": 13.784499999999994,
+            "mean": 102.73766666666667
+          },
+          "cost_usd": {
+            "median": 0.23458140000000002,
+            "p25": 0.23184559999999999,
+            "p75": 0.251807,
+            "iqr": 0.019961400000000018,
+            "mean": 0.24424126666666668
+          },
+          "tool_calls": {
+            "median": 7,
+            "p25": 6,
+            "p75": 7,
+            "iqr": 1,
+            "mean": 6.333333333333333
+          },
+          "screenshots": {
+            "median": 2,
+            "p25": 1.5,
+            "p75": 2,
+            "iqr": 0.5,
+            "mean": 1.6666666666666667
+          },
+          "turns": {
+            "median": 8,
+            "p25": 7,
+            "p75": 8,
+            "iqr": 1,
+            "mean": 7.333333333333333
+          },
+          "output_tokens": {
+            "median": 13814,
+            "p25": 13623,
+            "p75": 15349,
+            "iqr": 1726,
+            "mean": 14710
+          },
+          "input_tokens": {
+            "median": 10,
+            "p25": 9,
+            "p75": 10,
+            "iqr": 1,
+            "mean": 9.333333333333334
+          },
+          "cache_read_tokens": {
+            "median": 58129,
+            "p25": 45486,
+            "p75": 58338,
+            "iqr": 12852,
+            "mean": 49839.666666666664
+          },
+          "cache_write_tokens": {
+            "median": 21178,
+            "p25": 20982,
+            "p75": 22290,
+            "iqr": 1308,
+            "mean": 21788.666666666668
+          },
+          "total_input_tokens": {
+            "median": 78925,
+            "p25": 67589,
+            "p75": 79330,
+            "iqr": 11741,
+            "mean": 71637.66666666667
+          },
+          "thinking_blocks": {
+            "median": 2,
+            "p25": 1.5,
+            "p75": 2,
+            "iqr": 0.5,
+            "mean": 1.6666666666666667
+          },
+          "tool_errors": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "repeated_calls": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "retries_after_error": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "tool_result_kchars": {
+            "median": 5.754,
+            "p25": 5.654,
+            "p75": 5.7565,
+            "iqr": 0.10250000000000004,
+            "mean": 5.689
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 2,
+            "p25": 1.8900000000000001,
+            "p75": 2,
+            "iqr": 0.10999999999999988,
+            "mean": 1.9266666666666667
+          }
+        },
+        "pareto_score_cost": true,
+        "pareto_score_time": true
+      },
+      "claude-sonnet-5-5/medium": {
+        "n": 3,
+        "pass_rate": 1,
+        "mean_score": 1,
+        "timeouts": 0,
+        "total_cost_usd": 0.737085,
+        "cost_per_success_usd": 0.245695,
+        "time_per_success_s": 105.01566666666668,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "navigate": 3,
+          "read_page": 2,
+          "form_input": 3,
+          "computer": 17
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 104.444,
+            "p25": 102.043,
+            "p75": 107.7025,
+            "iqr": 5.659499999999994,
+            "mean": 105.01566666666668
+          },
+          "first_tool_s": {
+            "median": 2.334,
+            "p25": 2.2735000000000003,
+            "p75": 2.3810000000000002,
+            "iqr": 0.10749999999999993,
+            "mean": 2.325
+          },
+          "api_s": {
+            "median": 101.822,
+            "p25": 99.20949999999999,
+            "p75": 105.07,
+            "iqr": 5.860500000000002,
+            "mean": 102.24566666666665
+          },
+          "cost_usd": {
+            "median": 0.24913659999999996,
+            "p25": 0.24366759999999998,
+            "p75": 0.24944319999999998,
+            "iqr": 0.005775599999999992,
+            "mean": 0.245695
+          },
+          "tool_calls": {
+            "median": 7,
+            "p25": 6,
+            "p75": 11.5,
+            "iqr": 5.5,
+            "mean": 9.333333333333334
+          },
+          "screenshots": {
+            "median": 2,
+            "p25": 1.5,
+            "p75": 3.5,
+            "iqr": 2,
+            "mean": 2.6666666666666665
+          },
+          "turns": {
+            "median": 8,
+            "p25": 7,
+            "p75": 12.5,
+            "iqr": 5.5,
+            "mean": 10.333333333333334
+          },
+          "output_tokens": {
+            "median": 14605,
+            "p25": 14196.5,
+            "p75": 14679.5,
+            "iqr": 483,
+            "mean": 14382.333333333334
+          },
+          "input_tokens": {
+            "median": 10,
+            "p25": 9,
+            "p75": 12,
+            "iqr": 3,
+            "mean": 10.666666666666666
+          },
+          "cache_read_tokens": {
+            "median": 59343,
+            "p25": 46093,
+            "p75": 81426,
+            "iqr": 35333,
+            "mean": 65231.666666666664
+          },
+          "cache_write_tokens": {
+            "median": 22427,
+            "p25": 21909,
+            "p75": 22606,
+            "iqr": 697,
+            "mean": 22201
+          },
+          "total_input_tokens": {
+            "median": 81780,
+            "p25": 68011,
+            "p75": 104044,
+            "iqr": 36033,
+            "mean": 87443.33333333333
+          },
+          "thinking_blocks": {
+            "median": 2,
+            "p25": 1.5,
+            "p75": 3,
+            "iqr": 1.5,
+            "mean": 2.3333333333333335
+          },
+          "tool_errors": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "repeated_calls": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "retries_after_error": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "tool_result_kchars": {
+            "median": 5.554,
+            "p25": 3.7855,
+            "p75": 5.568,
+            "iqr": 1.7824999999999998,
+            "mean": 4.384333333333333
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 1.57,
+            "p25": 1.4100000000000001,
+            "p75": 1.715,
+            "iqr": 0.30499999999999994,
+            "mean": 1.5599999999999998
+          }
+        },
+        "pareto_score_cost": true,
+        "pareto_score_time": true
+      },
+      "claude-sonnet-5-5/high": {
+        "n": 3,
+        "pass_rate": 1,
+        "mean_score": 1,
+        "timeouts": 0,
+        "total_cost_usd": 0.8835936,
+        "cost_per_success_usd": 0.2945312,
+        "time_per_success_s": 110.622,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "navigate": 3,
+          "computer": 23,
+          "batch": 12,
+          "screenshot": 1
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 104.76,
+            "p25": 103.3435,
+            "p75": 114.96950000000001,
+            "iqr": 11.626000000000005,
+            "mean": 110.622
+          },
+          "first_tool_s": {
+            "median": 2.344,
+            "p25": 2.1944999999999997,
+            "p75": 2.49,
+            "iqr": 0.29550000000000054,
+            "mean": 2.3416666666666663
+          },
+          "api_s": {
+            "median": 101.564,
+            "p25": 100.491,
+            "p75": 110.589,
+            "iqr": 10.097999999999999,
+            "mean": 106.86533333333334
+          },
+          "cost_usd": {
+            "median": 0.28026439999999997,
+            "p25": 0.2754622,
+            "p75": 0.3064668,
+            "iqr": 0.031004599999999993,
+            "mean": 0.2945312
+          },
+          "tool_calls": {
+            "median": 14,
+            "p25": 13.5,
+            "p75": 14.5,
+            "iqr": 1,
+            "mean": 14
+          },
+          "screenshots": {
+            "median": 3,
+            "p25": 2.5,
+            "p75": 4,
+            "iqr": 1.5,
+            "mean": 3.3333333333333335
+          },
+          "turns": {
+            "median": 15,
+            "p25": 14.5,
+            "p75": 15.5,
+            "iqr": 1,
+            "mean": 15
+          },
+          "output_tokens": {
+            "median": 15979,
+            "p25": 15432.5,
+            "p75": 17289,
+            "iqr": 1856.5,
+            "mean": 16488
+          },
+          "input_tokens": {
+            "median": 16,
+            "p25": 13,
+            "p75": 16,
+            "iqr": 3,
+            "mean": 14
+          },
+          "cache_read_tokens": {
+            "median": 126496,
+            "p25": 90764,
+            "p75": 129448,
+            "iqr": 38684,
+            "mean": 104642.66666666667
+          },
+          "cache_write_tokens": {
+            "median": 27362,
+            "p25": 25592,
+            "p75": 28849.5,
+            "iqr": 3257.5,
+            "mean": 27173.666666666668
+          },
+          "total_input_tokens": {
+            "median": 156238,
+            "p25": 119321,
+            "p75": 156543.5,
+            "iqr": 37222.5,
+            "mean": 131830.33333333334
+          },
+          "thinking_blocks": {
+            "median": 4,
+            "p25": 3,
+            "p75": 4.5,
+            "iqr": 1.5,
+            "mean": 3.6666666666666665
+          },
+          "tool_errors": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0.5,
+            "iqr": 0.5,
+            "mean": 0.3333333333333333
+          },
+          "repeated_calls": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "retries_after_error": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "tool_result_kchars": {
+            "median": 5.413,
+            "p25": 3.6985,
+            "p75": 5.46,
+            "iqr": 1.7614999999999998,
+            "mean": 4.301333333333333
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 2,
+            "p25": 2,
+            "p75": 2,
+            "iqr": 0,
+            "mean": 2
+          }
+        },
+        "pareto_score_cost": false,
+        "pareto_score_time": false
+      }
+    },
+    "tldraw-no-js": {
+      "claude-sonnet-5-5/low": {
+        "n": 3,
+        "pass_rate": 1,
+        "mean_score": 1,
+        "timeouts": 0,
+        "total_cost_usd": 0.6831464,
+        "cost_per_success_usd": 0.22771546666666667,
+        "time_per_success_s": 66.07466666666667,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "navigate": 3,
+          "computer": 189,
+          "screenshot": 2,
+          "find": 2,
+          "batch": 5
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 66.641,
+            "p25": 64.8275,
+            "p75": 67.605,
+            "iqr": 2.7775000000000034,
+            "mean": 66.07466666666667
+          },
+          "first_tool_s": {
+            "median": 1.948,
+            "p25": 1.947,
+            "p75": 2.1155,
+            "iqr": 0.16849999999999987,
+            "mean": 2.0589999999999997
+          },
+          "api_s": {
+            "median": 63.895,
+            "p25": 59.061,
+            "p75": 65.0575,
+            "iqr": 5.996500000000005,
+            "mean": 61.44733333333334
+          },
+          "cost_usd": {
+            "median": 0.22481759999999995,
+            "p25": 0.2160995,
+            "p75": 0.23788249999999997,
+            "iqr": 0.02178299999999997,
+            "mean": 0.22771546666666667
+          },
+          "tool_calls": {
+            "median": 74,
+            "p25": 57,
+            "p75": 82,
+            "iqr": 25,
+            "mean": 68
+          },
+          "screenshots": {
+            "median": 9,
+            "p25": 8,
+            "p75": 9.5,
+            "iqr": 1.5,
+            "mean": 8.666666666666666
+          },
+          "turns": {
+            "median": 75,
+            "p25": 58,
+            "p75": 83,
+            "iqr": 25,
+            "mean": 69
+          },
+          "output_tokens": {
+            "median": 9624,
+            "p25": 9123,
+            "p75": 10361,
+            "iqr": 1238,
+            "mean": 9781.333333333334
+          },
+          "input_tokens": {
+            "median": 28,
+            "p25": 28,
+            "p75": 28,
+            "iqr": 0,
+            "mean": 28
+          },
+          "cache_read_tokens": {
+            "median": 198387,
+            "p25": 197967.5,
+            "p75": 209622,
+            "iqr": 11654.5,
+            "mean": 205597.33333333334
+          },
+          "cache_write_tokens": {
+            "median": 22253,
+            "p25": 21305,
+            "p75": 23094,
+            "iqr": 1789,
+            "mean": 22181.666666666668
+          },
+          "total_input_tokens": {
+            "median": 219829,
+            "p25": 219300.5,
+            "p75": 232324.5,
+            "iqr": 13024,
+            "mean": 227807
+          },
+          "thinking_blocks": {
+            "median": 9,
+            "p25": 8.5,
+            "p75": 9.5,
+            "iqr": 1,
+            "mean": 9
+          },
+          "tool_errors": {
+            "median": 1,
+            "p25": 1,
+            "p75": 1,
+            "iqr": 0,
+            "mean": 1
+          },
+          "repeated_calls": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "retries_after_error": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0.5,
+            "iqr": 0.5,
+            "mean": 0.3333333333333333
+          },
+          "tool_result_kchars": {
+            "median": 4.787,
+            "p25": 4.7364999999999995,
+            "p75": 4.7955000000000005,
+            "iqr": 0.05900000000000105,
+            "mean": 4.7589999999999995
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 2,
+            "p25": 1.9,
+            "p75": 2,
+            "iqr": 0.10000000000000009,
+            "mean": 1.9333333333333333
+          }
+        },
+        "pareto_score_cost": false,
+        "pareto_score_time": false
+      },
+      "claude-sonnet-5-5/medium": {
+        "n": 3,
+        "pass_rate": 1,
+        "mean_score": 1,
+        "timeouts": 0,
+        "total_cost_usd": 0.6564596,
+        "cost_per_success_usd": 0.21881986666666667,
+        "time_per_success_s": 60.65366666666667,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "navigate": 3,
+          "computer": 222,
+          "screenshot": 3,
+          "type": 1,
+          "find": 1
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 65.188,
+            "p25": 57.709,
+            "p75": 65.8655,
+            "iqr": 8.156499999999994,
+            "mean": 60.65366666666667
+          },
+          "first_tool_s": {
+            "median": 1.755,
+            "p25": 1.7265,
+            "p75": 2.27,
+            "iqr": 0.5435000000000001,
+            "mean": 2.0793333333333335
+          },
+          "api_s": {
+            "median": 62.79,
+            "p25": 54.823,
+            "p75": 62.822,
+            "iqr": 7.999000000000002,
+            "mean": 57.5
+          },
+          "cost_usd": {
+            "median": 0.2127552,
+            "p25": 0.20784160000000002,
+            "p75": 0.22676580000000002,
+            "iqr": 0.018924200000000002,
+            "mean": 0.21881986666666667
+          },
+          "tool_calls": {
+            "median": 76,
+            "p25": 74,
+            "p75": 80.5,
+            "iqr": 6.5,
+            "mean": 77.66666666666667
+          },
+          "screenshots": {
+            "median": 8,
+            "p25": 7.5,
+            "p75": 8,
+            "iqr": 0.5,
+            "mean": 7.666666666666667
+          },
+          "turns": {
+            "median": 77,
+            "p25": 75,
+            "p75": 81.5,
+            "iqr": 6.5,
+            "mean": 78.66666666666667
+          },
+          "output_tokens": {
+            "median": 9489,
+            "p25": 8911.5,
+            "p75": 10092,
+            "iqr": 1180.5,
+            "mean": 9506
+          },
+          "input_tokens": {
+            "median": 24,
+            "p25": 23,
+            "p75": 25,
+            "iqr": 2,
+            "mean": 24
+          },
+          "cache_read_tokens": {
+            "median": 169666,
+            "p25": 158823,
+            "p75": 184109,
+            "iqr": 25286,
+            "mean": 172066
+          },
+          "cache_write_tokens": {
+            "median": 22487,
+            "p25": 21729,
+            "p75": 23001.5,
+            "iqr": 1272.5,
+            "mean": 22324.666666666668
+          },
+          "total_input_tokens": {
+            "median": 190661,
+            "p25": 180575,
+            "p75": 206377.5,
+            "iqr": 25802.5,
+            "mean": 194414.66666666666
+          },
+          "thinking_blocks": {
+            "median": 6,
+            "p25": 6,
+            "p75": 7,
+            "iqr": 1,
+            "mean": 6.666666666666667
+          },
+          "tool_errors": {
+            "median": 1,
+            "p25": 1,
+            "p75": 1.5,
+            "iqr": 0.5,
+            "mean": 1.3333333333333333
+          },
+          "repeated_calls": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "retries_after_error": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "tool_result_kchars": {
+            "median": 3.676,
+            "p25": 3.5145,
+            "p75": 4.087,
+            "iqr": 0.5724999999999998,
+            "mean": 3.842333333333334
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 2,
+            "p25": 1.8,
+            "p75": 2,
+            "iqr": 0.19999999999999996,
+            "mean": 1.8666666666666665
+          }
+        },
+        "pareto_score_cost": true,
+        "pareto_score_time": false
+      },
+      "claude-sonnet-5-5/high": {
+        "n": 3,
+        "pass_rate": 1,
+        "mean_score": 1,
+        "timeouts": 0,
+        "total_cost_usd": 0.7925508,
+        "cost_per_success_usd": 0.2641836,
+        "time_per_success_s": 65.46866666666666,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "navigate": 3,
+          "computer": 232,
+          "screenshot": 3,
+          "find": 2
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 65.05,
+            "p25": 62.748999999999995,
+            "p75": 67.979,
+            "iqr": 5.230000000000004,
+            "mean": 65.46866666666666
+          },
+          "first_tool_s": {
+            "median": 1.819,
+            "p25": 1.7625,
+            "p75": 1.8485,
+            "iqr": 0.08600000000000008,
+            "mean": 1.801
+          },
+          "api_s": {
+            "median": 61.764,
+            "p25": 59.5135,
+            "p75": 64.3355,
+            "iqr": 4.821999999999996,
+            "mean": 61.978
+          },
+          "cost_usd": {
+            "median": 0.27699000000000007,
+            "p25": 0.25339740000000005,
+            "p75": 0.281373,
+            "iqr": 0.027975599999999934,
+            "mean": 0.2641836
+          },
+          "tool_calls": {
+            "median": 85,
+            "p25": 79,
+            "p75": 85,
+            "iqr": 6,
+            "mean": 81
+          },
+          "screenshots": {
+            "median": 11,
+            "p25": 11,
+            "p75": 12.5,
+            "iqr": 1.5,
+            "mean": 12
+          },
+          "turns": {
+            "median": 86,
+            "p25": 80,
+            "p75": 86,
+            "iqr": 6,
+            "mean": 82
+          },
+          "output_tokens": {
+            "median": 10479,
+            "p25": 10000.5,
+            "p75": 10767.5,
+            "iqr": 767,
+            "mean": 10352.333333333334
+          },
+          "input_tokens": {
+            "median": 30,
+            "p25": 29,
+            "p75": 33,
+            "iqr": 4,
+            "mean": 31.333333333333332
+          },
+          "cache_read_tokens": {
+            "median": 256960,
+            "p25": 231682,
+            "p75": 284920,
+            "iqr": 53238,
+            "mean": 258748
+          },
+          "cache_write_tokens": {
+            "median": 28137,
+            "p25": 25724.5,
+            "p75": 29162,
+            "iqr": 3437.5,
+            "mean": 27212
+          },
+          "total_input_tokens": {
+            "median": 287177,
+            "p25": 258460.5,
+            "p75": 314115,
+            "iqr": 55654.5,
+            "mean": 285991.3333333333
+          },
+          "thinking_blocks": {
+            "median": 11,
+            "p25": 10,
+            "p75": 11.5,
+            "iqr": 1.5,
+            "mean": 10.666666666666666
+          },
+          "tool_errors": {
+            "median": 1,
+            "p25": 1,
+            "p75": 1,
+            "iqr": 0,
+            "mean": 1
+          },
+          "repeated_calls": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "retries_after_error": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "tool_result_kchars": {
+            "median": 4.594,
+            "p25": 4.2955000000000005,
+            "p75": 4.809,
+            "iqr": 0.5134999999999996,
+            "mean": 4.538333333333333
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 2,
+            "p25": 1.9,
+            "p75": 2,
+            "iqr": 0.10000000000000009,
+            "mean": 1.9333333333333333
+          }
+        },
+        "pareto_score_cost": false,
+        "pareto_score_time": true
+      }
+    },
+    "uitp-no-js": {
+      "claude-sonnet-5-5/low": {
+        "n": 3,
+        "pass_rate": 1,
+        "mean_score": 1,
+        "timeouts": 0,
+        "total_cost_usd": 1.35628,
+        "cost_per_success_usd": 0.4520933333333333,
+        "time_per_success_s": 107.56066666666668,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "tabs_create_mcp": 21,
+          "navigate": 24,
+          "find": 14,
+          "read_page": 24,
+          "computer": 186,
+          "get_page_text": 14,
+          "form_input": 20,
+          "scroll_placeholder": 1,
+          "left_placeholder": 1,
+          "screenshot_placeholder": 1,
+          "screenshot_placeholder2": 1,
+          "screenshot": 3,
+          "left_click_placeholder": 1,
+          "left_click_placeholder2": 1
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 105.022,
+            "p25": 100.70500000000001,
+            "p75": 113.147,
+            "iqr": 12.441999999999993,
+            "mean": 107.56066666666668
+          },
+          "first_tool_s": {
+            "median": 2.307,
+            "p25": 2.1285,
+            "p75": 2.4755000000000003,
+            "iqr": 0.3470000000000004,
+            "mean": 2.300333333333333
+          },
+          "api_s": {
+            "median": 91.459,
+            "p25": 87.553,
+            "p75": 97.14750000000001,
+            "iqr": 9.59450000000001,
+            "mean": 92.64733333333334
+          },
+          "cost_usd": {
+            "median": 0.4410938,
+            "p25": 0.42862100000000003,
+            "p75": 0.4700658999999999,
+            "iqr": 0.041444899999999896,
+            "mean": 0.4520933333333333
+          },
+          "tool_calls": {
+            "median": 105,
+            "p25": 103.5,
+            "p75": 106.5,
+            "iqr": 3,
+            "mean": 105
+          },
+          "screenshots": {
+            "median": 22,
+            "p25": 19,
+            "p75": 24.5,
+            "iqr": 5.5,
+            "mean": 21.666666666666668
+          },
+          "turns": {
+            "median": 106,
+            "p25": 104.5,
+            "p75": 107.5,
+            "iqr": 3,
+            "mean": 106
+          },
+          "output_tokens": {
+            "median": 12030,
+            "p25": 11676.5,
+            "p75": 12039.5,
+            "iqr": 363,
+            "mean": 11800.666666666666
+          },
+          "input_tokens": {
+            "median": 64,
+            "p25": 61,
+            "p75": 66,
+            "iqr": 5,
+            "mean": 63.333333333333336
+          },
+          "cache_read_tokens": {
+            "median": 884299,
+            "p25": 821975,
+            "p75": 964554.5,
+            "iqr": 142579.5,
+            "mean": 896253.3333333334
+          },
+          "cache_write_tokens": {
+            "median": 37719,
+            "p25": 36811,
+            "p75": 40064.5,
+            "iqr": 3253.5,
+            "mean": 38677.333333333336
+          },
+          "total_input_tokens": {
+            "median": 922082,
+            "p25": 858847,
+            "p75": 1004685,
+            "iqr": 145838,
+            "mean": 934994
+          },
+          "thinking_blocks": {
+            "median": 17,
+            "p25": 16.5,
+            "p75": 18,
+            "iqr": 1.5,
+            "mean": 17.333333333333332
+          },
+          "tool_errors": {
+            "median": 5,
+            "p25": 4,
+            "p75": 8.5,
+            "iqr": 4.5,
+            "mean": 6.666666666666667
+          },
+          "repeated_calls": {
+            "median": 8,
+            "p25": 7.5,
+            "p75": 8,
+            "iqr": 0.5,
+            "mean": 7.666666666666667
+          },
+          "retries_after_error": {
+            "median": 1,
+            "p25": 0.5,
+            "p75": 2.5,
+            "iqr": 2,
+            "mean": 1.6666666666666667
+          },
+          "tool_result_kchars": {
+            "median": 24.145,
+            "p25": 23.195,
+            "p75": 25.5625,
+            "iqr": 2.3674999999999997,
+            "mean": 24.456666666666667
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 1.86,
+            "p25": 1.7850000000000001,
+            "p75": 1.875,
+            "iqr": 0.08999999999999986,
+            "mean": 1.82
+          }
+        },
+        "pareto_score_cost": false,
+        "pareto_score_time": false
+      },
+      "claude-sonnet-5-5/medium": {
+        "n": 3,
+        "pass_rate": 1,
+        "mean_score": 1,
+        "timeouts": 0,
+        "total_cost_usd": 1.1357633999999999,
+        "cost_per_success_usd": 0.3785878,
+        "time_per_success_s": 97.31066666666668,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "tabs_create_mcp": 21,
+          "navigate": 24,
+          "find": 7,
+          "read_page": 23,
+          "get_page_text": 6,
+          "computer": 162,
+          "form_input": 20,
+          "screenshot": 4
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 91.55,
+            "p25": 84.7045,
+            "p75": 107.03649999999999,
+            "iqr": 22.331999999999994,
+            "mean": 97.31066666666668
+          },
+          "first_tool_s": {
+            "median": 2.579,
+            "p25": 2.3495,
+            "p75": 2.5860000000000003,
+            "iqr": 0.23650000000000038,
+            "mean": 2.4306666666666668
+          },
+          "api_s": {
+            "median": 78.286,
+            "p25": 71.7265,
+            "p75": 93.4255,
+            "iqr": 21.698999999999998,
+            "mean": 84.006
+          },
+          "cost_usd": {
+            "median": 0.34032919999999994,
+            "p25": 0.3394153,
+            "p75": 0.39863099999999996,
+            "iqr": 0.05921569999999998,
+            "mean": 0.3785878
+          },
+          "tool_calls": {
+            "median": 83,
+            "p25": 83,
+            "p75": 93.5,
+            "iqr": 10.5,
+            "mean": 90
+          },
+          "screenshots": {
+            "median": 19,
+            "p25": 19,
+            "p75": 23.5,
+            "iqr": 4.5,
+            "mean": 22
+          },
+          "turns": {
+            "median": 84,
+            "p25": 84,
+            "p75": 94.5,
+            "iqr": 10.5,
+            "mean": 91
+          },
+          "output_tokens": {
+            "median": 9129,
+            "p25": 9007,
+            "p75": 10490,
+            "iqr": 1483,
+            "mean": 9955
+          },
+          "input_tokens": {
+            "median": 52,
+            "p25": 51,
+            "p75": 60,
+            "iqr": 9,
+            "mean": 56.666666666666664
+          },
+          "cache_read_tokens": {
+            "median": 595616,
+            "p25": 593006.5,
+            "p75": 755865,
+            "iqr": 162858.5,
+            "mean": 700709
+          },
+          "cache_write_tokens": {
+            "median": 32867,
+            "p25": 32660.5,
+            "p75": 35816.5,
+            "iqr": 3156,
+            "mean": 34695.666666666664
+          },
+          "total_input_tokens": {
+            "median": 628120,
+            "p25": 625718,
+            "p75": 791534,
+            "iqr": 165816,
+            "mean": 735461.3333333334
+          },
+          "thinking_blocks": {
+            "median": 9,
+            "p25": 8,
+            "p75": 11,
+            "iqr": 3,
+            "mean": 9.666666666666666
+          },
+          "tool_errors": {
+            "median": 6,
+            "p25": 5,
+            "p75": 6,
+            "iqr": 1,
+            "mean": 5.333333333333333
+          },
+          "repeated_calls": {
+            "median": 7,
+            "p25": 6.5,
+            "p75": 7.5,
+            "iqr": 1,
+            "mean": 7
+          },
+          "retries_after_error": {
+            "median": 2,
+            "p25": 1,
+            "p75": 2.5,
+            "iqr": 1.5,
+            "mean": 1.6666666666666667
+          },
+          "tool_result_kchars": {
+            "median": 19.286,
+            "p25": 18.506500000000003,
+            "p75": 20.1355,
+            "iqr": 1.6289999999999978,
+            "mean": 19.332666666666668
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 2,
+            "p25": 2,
+            "p75": 2,
+            "iqr": 0,
+            "mean": 2
+          }
+        },
+        "pareto_score_cost": true,
+        "pareto_score_time": true
+      },
+      "claude-sonnet-5-5/high": {
+        "n": 3,
+        "pass_rate": 1,
+        "mean_score": 1,
+        "timeouts": 0,
+        "total_cost_usd": 1.3331966,
+        "cost_per_success_usd": 0.44439886666666667,
+        "time_per_success_s": 99.896,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "tabs_create_mcp": 21,
+          "navigate": 24,
+          "find": 10,
+          "read_page": 27,
+          "computer": 166,
+          "form_input": 21,
+          "screenshot": 3,
+          "get_page_text": 11
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 96.853,
+            "p25": 94.005,
+            "p75": 104.2655,
+            "iqr": 10.260500000000008,
+            "mean": 99.896
+          },
+          "first_tool_s": {
+            "median": 2.051,
+            "p25": 2.012,
+            "p75": 2.154,
+            "iqr": 0.1419999999999999,
+            "mean": 2.093666666666667
+          },
+          "api_s": {
+            "median": 84.078,
+            "p25": 81.12100000000001,
+            "p75": 91.41499999999999,
+            "iqr": 10.293999999999983,
+            "mean": 86.998
+          },
+          "cost_usd": {
+            "median": 0.4438924,
+            "p25": 0.4214915,
+            "p75": 0.46705299999999994,
+            "iqr": 0.04556149999999992,
+            "mean": 0.44439886666666667
+          },
+          "tool_calls": {
+            "median": 92,
+            "p25": 90,
+            "p75": 99,
+            "iqr": 9,
+            "mean": 95.33333333333333
+          },
+          "screenshots": {
+            "median": 23,
+            "p25": 21.5,
+            "p75": 25,
+            "iqr": 3.5,
+            "mean": 23.333333333333332
+          },
+          "turns": {
+            "median": 93,
+            "p25": 91,
+            "p75": 100,
+            "iqr": 9,
+            "mean": 96.33333333333333
+          },
+          "output_tokens": {
+            "median": 10613,
+            "p25": 10398,
+            "p75": 11427.5,
+            "iqr": 1029.5,
+            "mean": 11012.666666666666
+          },
+          "input_tokens": {
+            "median": 72,
+            "p25": 68,
+            "p75": 74,
+            "iqr": 6,
+            "mean": 70.66666666666667
+          },
+          "cache_read_tokens": {
+            "median": 920552,
+            "p25": 842077.5,
+            "p75": 963090,
+            "iqr": 121012.5,
+            "mean": 896594.3333333334
+          },
+          "cache_write_tokens": {
+            "median": 38377,
+            "p25": 37240,
+            "p75": 40003,
+            "iqr": 2763,
+            "mean": 38703
+          },
+          "total_input_tokens": {
+            "median": 959001,
+            "p25": 879385.5,
+            "p75": 1003167,
+            "iqr": 123781.5,
+            "mean": 935368
+          },
+          "thinking_blocks": {
+            "median": 18,
+            "p25": 17.5,
+            "p75": 19,
+            "iqr": 1.5,
+            "mean": 18.333333333333332
+          },
+          "tool_errors": {
+            "median": 4,
+            "p25": 4,
+            "p75": 4.5,
+            "iqr": 0.5,
+            "mean": 4.333333333333333
+          },
+          "repeated_calls": {
+            "median": 6,
+            "p25": 6,
+            "p75": 6.5,
+            "iqr": 0.5,
+            "mean": 6.333333333333333
+          },
+          "retries_after_error": {
+            "median": 1,
+            "p25": 1,
+            "p75": 1.5,
+            "iqr": 0.5,
+            "mean": 1.3333333333333333
+          },
+          "tool_result_kchars": {
+            "median": 22.51,
+            "p25": 22.114,
+            "p75": 23.288,
+            "iqr": 1.1739999999999995,
+            "mean": 22.764666666666667
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 2,
+            "p25": 1.9300000000000002,
+            "p75": 2,
+            "iqr": 0.06999999999999984,
+            "mean": 1.9533333333333334
+          }
+        },
+        "pareto_score_cost": false,
+        "pareto_score_time": false
+      }
+    },
+    "wc-tiebreak": {
+      "claude-sonnet-5-5/low": {
+        "n": 3,
+        "pass_rate": 0.6666666666666666,
+        "mean_score": 0.8889999999999999,
+        "timeouts": 0,
+        "total_cost_usd": 0.23286700000000002,
+        "cost_per_success_usd": 0.11643350000000001,
+        "time_per_success_s": 33.263000000000005,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "navigate": 3,
+          "javascript_tool": 11,
+          "tabs_close_mcp": 3
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 22.944,
+            "p25": 21.761499999999998,
+            "p75": 22.9735,
+            "iqr": 1.2120000000000033,
+            "mean": 22.175333333333338
+          },
+          "first_tool_s": {
+            "median": 1.701,
+            "p25": 1.6425,
+            "p75": 1.7635,
+            "iqr": 0.121,
+            "mean": 1.7036666666666669
+          },
+          "api_s": {
+            "median": 20.292,
+            "p25": 19.0785,
+            "p75": 20.6445,
+            "iqr": 1.5660000000000025,
+            "mean": 19.718
+          },
+          "cost_usd": {
+            "median": 0.078991,
+            "p25": 0.0761848,
+            "p75": 0.0797442,
+            "iqr": 0.0035594000000000042,
+            "mean": 0.07762233333333333
+          },
+          "tool_calls": {
+            "median": 7,
+            "p25": 6.5,
+            "p75": 7,
+            "iqr": 0.5,
+            "mean": 6.666666666666667
+          },
+          "screenshots": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "turns": {
+            "median": 8,
+            "p25": 7.5,
+            "p75": 8,
+            "iqr": 0.5,
+            "mean": 7.666666666666667
+          },
+          "output_tokens": {
+            "median": 2217,
+            "p25": 2212,
+            "p75": 2348.5,
+            "iqr": 136.5,
+            "mean": 2301.3333333333335
+          },
+          "input_tokens": {
+            "median": 14,
+            "p25": 13,
+            "p75": 14,
+            "iqr": 1,
+            "mean": 13.333333333333334
+          },
+          "cache_read_tokens": {
+            "median": 69353,
+            "p25": 65135,
+            "p75": 71799,
+            "iqr": 6664,
+            "mean": 68171.66666666667
+          },
+          "cache_write_tokens": {
+            "median": 10511,
+            "p25": 9590.5,
+            "p75": 11020.5,
+            "iqr": 1430,
+            "mean": 10237
+          },
+          "total_input_tokens": {
+            "median": 78037,
+            "p25": 75248,
+            "p75": 81403.5,
+            "iqr": 6155.5,
+            "mean": 78422
+          },
+          "thinking_blocks": {
+            "median": 2,
+            "p25": 2,
+            "p75": 2,
+            "iqr": 0,
+            "mean": 2
+          },
+          "tool_errors": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "repeated_calls": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "retries_after_error": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "tool_result_kchars": {
+            "median": 8.974,
+            "p25": 7.5785,
+            "p75": 9.7765,
+            "iqr": 2.1980000000000004,
+            "mean": 8.578666666666667
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 2,
+            "p25": 2,
+            "p75": 2,
+            "iqr": 0,
+            "mean": 2
+          }
+        },
+        "pareto_score_cost": false,
+        "pareto_score_time": true
+      },
+      "claude-sonnet-5-5/medium": {
+        "n": 3,
+        "pass_rate": 1,
+        "mean_score": 1,
+        "timeouts": 0,
+        "total_cost_usd": 0.2396184,
+        "cost_per_success_usd": 0.07987280000000001,
+        "time_per_success_s": 23.615,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "navigate": 3,
+          "javascript_tool": 10,
+          "tabs_close_mcp": 3
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 23.108,
+            "p25": 22.7935,
+            "p75": 24.183,
+            "iqr": 1.3894999999999982,
+            "mean": 23.615
+          },
+          "first_tool_s": {
+            "median": 1.981,
+            "p25": 1.8365,
+            "p75": 2.2065,
+            "iqr": 0.3700000000000001,
+            "mean": 2.035
+          },
+          "api_s": {
+            "median": 20.46,
+            "p25": 20.116,
+            "p75": 21.485500000000002,
+            "iqr": 1.3695000000000022,
+            "mean": 20.91433333333333
+          },
+          "cost_usd": {
+            "median": 0.0833904,
+            "p25": 0.0775812,
+            "p75": 0.0839232,
+            "iqr": 0.006342,
+            "mean": 0.07987280000000001
+          },
+          "tool_calls": {
+            "median": 6,
+            "p25": 5.5,
+            "p75": 7,
+            "iqr": 1.5,
+            "mean": 6.333333333333333
+          },
+          "screenshots": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "turns": {
+            "median": 7,
+            "p25": 6.5,
+            "p75": 8,
+            "iqr": 1.5,
+            "mean": 7.333333333333333
+          },
+          "output_tokens": {
+            "median": 2446,
+            "p25": 2386.5,
+            "p75": 2486,
+            "iqr": 99.5,
+            "mean": 2433
+          },
+          "input_tokens": {
+            "median": 12,
+            "p25": 11,
+            "p75": 14,
+            "iqr": 3,
+            "mean": 12.666666666666666
+          },
+          "cache_read_tokens": {
+            "median": 64260,
+            "p25": 55105,
+            "p75": 74776,
+            "iqr": 19671,
+            "mean": 65167.333333333336
+          },
+          "cache_write_tokens": {
+            "median": 10260,
+            "p25": 10041.5,
+            "p75": 11020,
+            "iqr": 978.5,
+            "mean": 10621
+          },
+          "total_input_tokens": {
+            "median": 76052,
+            "p25": 65917.5,
+            "p75": 85810,
+            "iqr": 19892.5,
+            "mean": 75801
+          },
+          "thinking_blocks": {
+            "median": 2,
+            "p25": 2,
+            "p75": 2,
+            "iqr": 0,
+            "mean": 2
+          },
+          "tool_errors": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "repeated_calls": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "retries_after_error": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "tool_result_kchars": {
+            "median": 8.957,
+            "p25": 8.1685,
+            "p75": 9.653500000000001,
+            "iqr": 1.4850000000000012,
+            "mean": 8.895666666666667
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 2,
+            "p25": 2,
+            "p75": 2,
+            "iqr": 0,
+            "mean": 2
+          }
+        },
+        "pareto_score_cost": false,
+        "pareto_score_time": true
+      },
+      "claude-sonnet-5-5/high": {
+        "n": 3,
+        "pass_rate": 1,
+        "mean_score": 1,
+        "timeouts": 0,
+        "total_cost_usd": 0.24574980000000002,
+        "cost_per_success_usd": 0.0819166,
+        "time_per_success_s": 25.289666666666665,
+        "tool_calls_by_tool": {
+          "tabs_context_mcp": 3,
+          "navigate": 3,
+          "javascript_tool": 11,
+          "tabs_close_mcp": 3
+        },
+        "metrics": {
+          "wall_s": {
+            "median": 25.802,
+            "p25": 23.2905,
+            "p75": 27.545,
+            "iqr": 4.2545,
+            "mean": 25.289666666666665
+          },
+          "first_tool_s": {
+            "median": 1.858,
+            "p25": 1.824,
+            "p75": 1.9325,
+            "iqr": 0.10850000000000004,
+            "mean": 1.885
+          },
+          "api_s": {
+            "median": 23.499,
+            "p25": 20.856499999999997,
+            "p75": 24.664,
+            "iqr": 3.8075000000000045,
+            "mean": 22.514
+          },
+          "cost_usd": {
+            "median": 0.07616400000000001,
+            "p25": 0.07560120000000001,
+            "p75": 0.0853557,
+            "iqr": 0.0097545,
+            "mean": 0.0819166
+          },
+          "tool_calls": {
+            "median": 6,
+            "p25": 6,
+            "p75": 7,
+            "iqr": 1,
+            "mean": 6.666666666666667
+          },
+          "screenshots": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "turns": {
+            "median": 7,
+            "p25": 7,
+            "p75": 8,
+            "iqr": 1,
+            "mean": 7.666666666666667
+          },
+          "output_tokens": {
+            "median": 2655,
+            "p25": 2454.5,
+            "p75": 2921.5,
+            "iqr": 467,
+            "mean": 2699
+          },
+          "input_tokens": {
+            "median": 12,
+            "p25": 11,
+            "p75": 15,
+            "iqr": 4,
+            "mean": 13.333333333333334
+          },
+          "cache_read_tokens": {
+            "median": 59652,
+            "p25": 53061,
+            "p75": 79874.5,
+            "iqr": 26813.5,
+            "mean": 68739.66666666667
+          },
+          "cache_write_tokens": {
+            "median": 10136,
+            "p25": 10105.5,
+            "p75": 10394.5,
+            "iqr": 289,
+            "mean": 10288
+          },
+          "total_input_tokens": {
+            "median": 69800,
+            "p25": 63177.5,
+            "p75": 90284,
+            "iqr": 27106.5,
+            "mean": 79041
+          },
+          "thinking_blocks": {
+            "median": 2,
+            "p25": 2,
+            "p75": 2.5,
+            "iqr": 0.5,
+            "mean": 2.3333333333333335
+          },
+          "tool_errors": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0.5,
+            "iqr": 0.5,
+            "mean": 0.3333333333333333
+          },
+          "repeated_calls": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "retries_after_error": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0.5,
+            "iqr": 0.5,
+            "mean": 0.3333333333333333
+          },
+          "tool_result_kchars": {
+            "median": 9.587,
+            "p25": 8.769,
+            "p75": 9.751,
+            "iqr": 0.9819999999999993,
+            "mean": 9.151
+          },
+          "load_other_eval": {
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "iqr": 0,
+            "mean": 0
+          },
+          "load_siblings": {
+            "median": 2,
+            "p25": 2,
+            "p75": 2,
+            "iqr": 0,
+            "mean": 2
+          }
+        },
+        "pareto_score_cost": true,
+        "pareto_score_time": false
+      }
+    }
+  },
+  "effort_steps": [
+    {
+      "model": "claude-sonnet-5-5",
+      "from": "low",
+      "to": "medium",
+      "d_mean_score": 0.09938888888888886,
+      "d_pass_rate": 0.2777777777777778,
+      "d_median_cost_usd": 0.007641900000000007,
+      "d_median_wall_s": -8.177999999999997,
+      "d_median_output_tokens": -1354,
+      "usd_per_score_point": 0.0007688887646730026
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "from": "medium",
+      "to": "high",
+      "d_mean_score": -0.02038888888888879,
+      "d_pass_rate": -0.11111111111111105,
+      "d_median_cost_usd": 0.03913970000000003,
+      "d_median_wall_s": 14.206999999999994,
+      "d_median_output_tokens": 1539,
+      "usd_per_score_point": null
+    }
+  ]
+}

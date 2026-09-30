@@ -132,46 +132,6 @@ overall change isn't all from the restart. What each item measured:
 - **devtools on vs off**: the model never called devtools. Medians on/off: wall 0.97, calls 1.00,
   input tokens 1.02 (about the tool's definition), cost 0.94. Tool mix was the same.
 
-Seen in the traces, and fixed since (branch `fix/remeasure-regressions`). The unit tests cover
-the wording and the arithmetic; these need a Firefox restart and a rerun to confirm:
-
-- `computer:scroll_to` on a frame ref (`ref_1@f…`) reported the element's center in the frame's
-  own coordinates: "its center is now at (227, 10)" in all 6 MDN runs, where the select was at
-  about (590, 403) in the screenshot (one run clicked there and hit it). `read_page` on a frame
-  ref also labeled the frame's 698x71 viewport as "Viewport (screenshot frame)". Now the center
-  is moved into the top frame's viewport by where each viewport sits on screen, as `find` does,
-  after the frame's place stops changing (the page around a cross-process frame scrolls after
-  the frame answers), and `read_page` on a frame ref says "Frame viewport (a part of the page,
-  not the whole screenshot): WxH at (x, y) in the screenshot". **Check**: in gen-mdn-iframe,
-  scroll_to on the select's ref answers about where the screenshot shows it, and a click there
-  hits it. The settle loop is untested against real cross-process timing.
-- The made-up `left_click` calls: `find`'s header now names the tool, "(screenshot coordinates;
-  if off-screen, computer left_click its ref)". **Check**: calls to `mcp__firefox__left_click`
-  (or any tool not offered) right after a `find`, per find call; the target is the old
-  wording's 0 in 34.
-- 5 of 48 after runs and 4 of 48 devtools runs didn't close their tab (1 of 48 before). Their
-  answers say "I didn't open any tabs": the tab came from `tabs_context_mcp` with createIfEmpty.
-  Now `tabs_context_mcp` and `navigate` without a tabId say "Created tab N for this session;
-  close it with tabs_close_mcp when done." when they open the session's first tab. **Check**:
-  runs that end with their tab still open, against 9 of 96.
-- The fetch hint in `javascript_tool` led a data-hn-readability run to call the Algolia API 7
-  times; the task's median input tokens went from 58k to 111k. The description now adds "Fetch the pages you would have
-  navigated to, not the site's API." **Check**: API calls from `javascript_tool` in data tasks.
-
-Seen in the hard tier (round 2), and fixed since (branch `fix/typing-change-event`); these also
-need a restart and a rerun of `--tier hard`:
-
-- Typing with `computer` never fired `change`: in a background tab Gecko moves focus without
-  blur or focus events, and its text fields fire `change` from their blur. After the agent's
-  click, key or type moves focus in a document that doesn't have focus, the actor now dispatches
-  blur/focusout and focus/focusin itself (`experiment/focus.sys.mjs`). **Check**: uitp-no-js's
-  text-box goal passes without `form_input` (it was all 3 Sonnet misses on that task), and
-  todomvc-flow's rename still saves.
-- Sonnet called `mcp__firefox__screenshot` 13–15 times per 18 runs. The `computer` description
-  now opens with "Screenshots, clicks, typing and scrolling in a Firefox tab are all actions of
-  this one tool; there are no separate screenshot or click tools." **Check**: calls to tools not
-  offered, per config, against 13–15 per 18 runs for Sonnet.
-
 `scripts/test-firefox.mjs` has steps for frames and keys but runs on Linux under Xvfb, so it
 wasn't run here.
 
@@ -180,6 +140,62 @@ that more often (navigate then get_page_text or find in one turn), so their mean
 those two tools includes the page load. Traces now record `msg_calls` (calls in the same message)
 and `text_head` (the first 300 characters of the result), and `run.mjs --streams dir` keeps each
 run's raw stream-json.
+
+## Re-measured again (2026-09-30)
+
+The fixes the first re-measure's traces led to (branches `fix/remeasure-regressions` and
+`fix/typing-change-event`) loaded once Firefox restarted with main at c1ad4bb. The browser
+comparison's Firefox side ran again (16 tasks x 3, baseline arm) into
+`results/browsers-after-2.jsonl`, and Sonnet 5.5's hard tier at low, medium and high (54 runs)
+into `results/models-hard/sonnet-rerun.jsonl`. `report.mjs` compares the first in "Re-measure 2";
+the second is in `results/models-hard/analysis.md` under "Sonnet rerun after the restart".
+
+```sh
+node eval/run.mjs --browser firefox --arms baseline --concurrency 2 --out eval/results/browsers-after-2.jsonl --streams <dir>
+node eval/models.mjs --tier hard --configs sonnet:low,sonnet:medium,sonnet:high --out eval/results/models-hard/sonnet-rerun.jsonl
+node eval/models-report.mjs --in eval/results/models-hard/sonnet-rerun.jsonl --prefix sonnet-rerun-
+node eval/report.mjs
+```
+
+Browser comparison, first re-measure then this one: 48/48 passed both times; medians 16.6s to
+14.9s, 6 calls both, 55k to 56k input tokens, $0.060 to $0.058 ($2.88 to $2.63 for all 48).
+Chrome's first-run medians were 25.5s, 7 calls, 119k and $0.080. What each fix measured:
+
+- **Tabs left open: 9 of 96 to 0 of 48.** Every run's first `tabs_context_mcp` answered
+  "Created tab N for this session; close it with tabs_close_mcp when done." One side effect, in
+  the hard tier: a wc-tiebreak run gave its JSON, then closed its tab and ended on "I closed the
+  tab I opened. The answer is above." `models.mjs` now takes the last JSON from an earlier
+  message when the final one has none (`answer_source: "earlier_text"`).
+- **API calls from `javascript_tool` in data tasks: 7 to 0.** data-hn-readability's median input
+  tokens went from 111k back to 56k (58k before the fetch hint), with no `javascript_tool` call at
+  all.
+- **Made-up `left_click` after `find`: 8 in 96 runs to 2 in 48** (per find call, 8 in 39 to 2 in
+  21). Both are gen-pydocs-search's `find "search box"` then `mcp__firefox__left_click`, as before.
+  Fewer, not gone.
+- **uitp-no-js with Sonnet: 6 of 9 to 9 of 9.** Two runs typed into the text box with `computer`
+  and the button took the name without `form_input`; the other 7 used `form_input` first.
+  todomvc-flow's rename (round 1's task) wasn't rerun.
+- **Calls to tools not offered, Sonnet hard tier: 41 to 28 over 54 runs, but `screenshot` went
+  18 to 21.** The `computer` description didn't reach them: every one has empty input and is
+  followed by the same action through `computer`.
+
+Still open:
+
+- `computer:scroll_to` on a frame ref is still wrong: "its center is now at (227, -63) (in frame
+  …mdnplay.dev), outside the page's viewport" in all 3 MDN runs (it was (227, 10)), with the
+  select at about (590, 403) in the screenshot; two runs clicked there and hit it. `read_page` on
+  the frame ref says the frame viewport is "698x71 at (0, -73) in the screenshot". So the frame's
+  own `mozInnerScreenX/Y` is wrong in this out-of-process frame of a background tab: it sits at
+  the top frame's screen origin less 73px, not where the frame is. Every frame offset that uses
+  it (scroll_to, `read_page`'s frame place, `find`'s coordinates for frame matches) is wrong the
+  same way. Taking the offset from the embedding `<iframe>`'s content box, frame by frame up to
+  the top, would not depend on it.
+- The made-up `left_click` after `find "search box"` on docs.python.org (2 in 48).
+- `find` listed an element twice (heading "Text Input" [ref_1] twice for "text input" on
+  uitestingplayground.com/textinput; a recorded answer in `extension/test/fixtures` has the
+  same) and left out elements with the role the query named (`find "button"` there missed the
+  button). Fixed since on this branch (one entry per element; a query naming a role keeps up to 3
+  elements with that role); needs a restart to confirm.
 
 # Model x effort benchmark
 
@@ -260,3 +276,7 @@ bought score only for Sonnet, and only from medium to high (+0.064, up on 4 of 6
 down, x1.06 cost). Misses were slips (one misread star in 167, one miscounted row, a head-to-head
 goals total, a text box whose `change` event never fired after typing), not missing capability:
 every config solved the sudoku and drew the tldraw grid.
+
+Sonnet rerun after the typing fix (54 runs, $16.75; "Re-measured again" above): 0.891 (12) /
+0.991 (17) / 0.970 (15) at low / medium / high, and uitp-no-js 9 of 9. Over both rounds, 26 / 29 /
+32 passes of 36: high still best, low now weakest, and none of the steps is significant.
