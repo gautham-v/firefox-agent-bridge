@@ -1,0 +1,477 @@
+{
+  "generated_at": "2026-09-30T16:05:11.445Z",
+  "runs": 48,
+  "arms": [
+    "before",
+    "kept"
+  ],
+  "reference": "before",
+  "efforts": [
+    "low",
+    "high"
+  ],
+  "per": {
+    "low": {
+      "before": {
+        "n": 12,
+        "passes": 10,
+        "timeouts": 0,
+        "total_cost": 3.203685,
+        "pass_rate": 0.8333333333333334,
+        "score": {
+          "median": 1,
+          "mean": 0.9445
+        },
+        "wall_s": {
+          "median": 73.645,
+          "mean": 74.61691666666667
+        },
+        "calls": {
+          "median": 41,
+          "mean": 44.666666666666664
+        },
+        "actions": {
+          "median": 41,
+          "mean": 46.166666666666664
+        },
+        "shots": {
+          "median": 3.5,
+          "mean": 9.583333333333334
+        },
+        "in_tok": {
+          "median": 118862,
+          "mean": 340272.4166666667
+        },
+        "out_tok": {
+          "median": 9376,
+          "mean": 9207.416666666666
+        },
+        "cost": {
+          "median": 0.2137471,
+          "mean": 0.26697375
+        },
+        "errors": {
+          "median": 0,
+          "mean": 0.75
+        },
+        "nonexistent_per_run": 0.4166666666666667,
+        "batch_share": 0.016791044776119403,
+        "batch_per_run": 0.75
+      },
+      "kept": {
+        "n": 12,
+        "passes": 11,
+        "timeouts": 0,
+        "total_cost": 3.2613186,
+        "pass_rate": 0.9166666666666666,
+        "score": {
+          "median": 1,
+          "mean": 0.9833333333333334
+        },
+        "wall_s": {
+          "median": 82.815,
+          "mean": 73.46508333333334
+        },
+        "calls": {
+          "median": 24,
+          "mean": 44
+        },
+        "actions": {
+          "median": 42.5,
+          "mean": 56.916666666666664
+        },
+        "shots": {
+          "median": 4,
+          "mean": 10
+        },
+        "in_tok": {
+          "median": 153714.5,
+          "mean": 341720.3333333333
+        },
+        "out_tok": {
+          "median": 10431.5,
+          "mean": 9470.333333333334
+        },
+        "cost": {
+          "median": 0.26159999999999994,
+          "mean": 0.27177655
+        },
+        "errors": {
+          "median": 0,
+          "mean": 1.75
+        },
+        "nonexistent_per_run": 0.5,
+        "batch_share": 0.02462121212121212,
+        "batch_per_run": 1.0833333333333333,
+        "vs": {
+          "d_score": 0.038833333333333386,
+          "d_pass": 1,
+          "wall": 1.1245162604385905,
+          "wall_mean": 0.9845633753739936,
+          "calls": 0.5853658536585366,
+          "actions": 1.0365853658536586,
+          "shots": 1.1428571428571428,
+          "in_tok": 1.293218185795292,
+          "out_tok": 1.1125746587030716,
+          "cost": 1.2238762537596999,
+          "cost_mean": 1.0179897836397773
+        },
+        "geo": {
+          "wall_s": 1.0255147504930044,
+          "cost": 1.0623677444393946,
+          "calls": 1.030641805654777,
+          "actions": 1.1796841688406987,
+          "shots": 1.1211567085983536,
+          "in_tok": 1.1079296144435156,
+          "out_tok": 1.0524349340637837
+        },
+        "consistency": {
+          "wall_s": {
+            "down": 2,
+            "up": 3,
+            "flat": 1,
+            "p": 1
+          },
+          "cost": {
+            "down": 1,
+            "up": 4,
+            "flat": 1,
+            "p": 0.375
+          },
+          "calls": {
+            "down": 2,
+            "up": 2,
+            "flat": 2,
+            "p": 1
+          },
+          "actions": {
+            "down": 2,
+            "up": 3,
+            "flat": 1,
+            "p": 1
+          },
+          "shots": {
+            "down": 1,
+            "up": 1,
+            "flat": 4,
+            "p": 1
+          },
+          "score": {
+            "down": 1,
+            "up": 1,
+            "flat": 4,
+            "p": 1
+          }
+        }
+      }
+    },
+    "high": {
+      "before": {
+        "n": 12,
+        "passes": 9,
+        "timeouts": 0,
+        "total_cost": 4.445208,
+        "pass_rate": 0.75,
+        "score": {
+          "median": 1,
+          "mean": 0.9629166666666666
+        },
+        "wall_s": {
+          "median": 104.7585,
+          "mean": 90.60133333333334
+        },
+        "calls": {
+          "median": 36.5,
+          "mean": 52.5
+        },
+        "actions": {
+          "median": 91,
+          "mean": 69.91666666666667
+        },
+        "shots": {
+          "median": 8.5,
+          "mean": 12.833333333333334
+        },
+        "in_tok": {
+          "median": 232304.5,
+          "mean": 644314.3333333334
+        },
+        "out_tok": {
+          "median": 11637.5,
+          "mean": 10847.333333333334
+        },
+        "cost": {
+          "median": 0.2993169,
+          "mean": 0.370434
+        },
+        "errors": {
+          "median": 0,
+          "mean": 1.5
+        },
+        "nonexistent_per_run": 0.8333333333333334,
+        "batch_share": 0.01904761904761905,
+        "batch_per_run": 1
+      },
+      "kept": {
+        "n": 12,
+        "passes": 12,
+        "timeouts": 0,
+        "total_cost": 4.2312306,
+        "pass_rate": 1,
+        "score": {
+          "median": 1,
+          "mean": 1
+        },
+        "wall_s": {
+          "median": 104.426,
+          "mean": 91.09058333333333
+        },
+        "calls": {
+          "median": 38.5,
+          "mean": 51.583333333333336
+        },
+        "actions": {
+          "median": 92.5,
+          "mean": 71.66666666666667
+        },
+        "shots": {
+          "median": 10,
+          "mean": 12.5
+        },
+        "in_tok": {
+          "median": 312659,
+          "mean": 576721.4166666666
+        },
+        "out_tok": {
+          "median": 11494.5,
+          "mean": 11093.25
+        },
+        "cost": {
+          "median": 0.30852650000000004,
+          "mean": 0.35260255
+        },
+        "errors": {
+          "median": 0,
+          "mean": 1.6666666666666667
+        },
+        "nonexistent_per_run": 0.5833333333333334,
+        "batch_share": 0.024232633279483037,
+        "batch_per_run": 1.25,
+        "vs": {
+          "d_score": 0.03708333333333336,
+          "d_pass": 3,
+          "wall": 0.9968260332097157,
+          "wall_mean": 1.0054000309046223,
+          "calls": 1.0547945205479452,
+          "actions": 1.0164835164835164,
+          "shots": 1.1764705882352942,
+          "in_tok": 1.3459016075883161,
+          "out_tok": 0.9877121374865736,
+          "cost": 1.0307687270581782,
+          "cost_mean": 0.9518633548756325
+        },
+        "geo": {
+          "wall_s": 0.9881297772641721,
+          "cost": 0.9798873218016736,
+          "calls": 0.9148262985299296,
+          "actions": 0.9746513002262456,
+          "shots": 1.027804248664815,
+          "in_tok": 0.9516770136840312,
+          "out_tok": 1.0190023007166993
+        },
+        "consistency": {
+          "wall_s": {
+            "down": 1,
+            "up": 2,
+            "flat": 3,
+            "p": 1
+          },
+          "cost": {
+            "down": 3,
+            "up": 2,
+            "flat": 1,
+            "p": 1
+          },
+          "calls": {
+            "down": 2,
+            "up": 2,
+            "flat": 2,
+            "p": 1
+          },
+          "actions": {
+            "down": 1,
+            "up": 3,
+            "flat": 2,
+            "p": 0.625
+          },
+          "shots": {
+            "down": 1,
+            "up": 1,
+            "flat": 4,
+            "p": 1
+          },
+          "score": {
+            "down": 0,
+            "up": 3,
+            "flat": 3,
+            "p": 0.25
+          }
+        }
+      }
+    },
+    "all": {
+      "before": {
+        "n": 24,
+        "passes": 19,
+        "timeouts": 0,
+        "total_cost": 7.648892999999998,
+        "pass_rate": 0.7916666666666666,
+        "score": {
+          "median": 1,
+          "mean": 0.9537083333333333
+        },
+        "wall_s": {
+          "median": 95.418,
+          "mean": 82.609125
+        },
+        "calls": {
+          "median": 36.5,
+          "mean": 48.583333333333336
+        },
+        "actions": {
+          "median": 69.5,
+          "mean": 58.041666666666664
+        },
+        "shots": {
+          "median": 5.5,
+          "mean": 11.208333333333334
+        },
+        "in_tok": {
+          "median": 150825.5,
+          "mean": 492293.375
+        },
+        "out_tok": {
+          "median": 9960,
+          "mean": 10027.375
+        },
+        "cost": {
+          "median": 0.2850613,
+          "mean": 0.3187038749999999
+        },
+        "errors": {
+          "median": 0,
+          "mean": 1.125
+        },
+        "nonexistent_per_run": 0.625,
+        "batch_share": 0.018010291595197257,
+        "batch_per_run": 0.875
+      },
+      "kept": {
+        "n": 24,
+        "passes": 23,
+        "timeouts": 0,
+        "total_cost": 7.4925492,
+        "pass_rate": 0.9583333333333334,
+        "score": {
+          "median": 1,
+          "mean": 0.9916666666666667
+        },
+        "wall_s": {
+          "median": 86.523,
+          "mean": 82.2778333333333
+        },
+        "calls": {
+          "median": 25,
+          "mean": 47.791666666666664
+        },
+        "actions": {
+          "median": 77,
+          "mean": 64.29166666666667
+        },
+        "shots": {
+          "median": 8,
+          "mean": 11.25
+        },
+        "in_tok": {
+          "median": 248749.5,
+          "mean": 459220.875
+        },
+        "out_tok": {
+          "median": 11197.5,
+          "mean": 10281.791666666666
+        },
+        "cost": {
+          "median": 0.2753322,
+          "mean": 0.31218955
+        },
+        "errors": {
+          "median": 0,
+          "mean": 1.7083333333333333
+        },
+        "nonexistent_per_run": 0.5416666666666666,
+        "batch_share": 0.024411508282476024,
+        "batch_per_run": 1.1666666666666667,
+        "vs": {
+          "d_score": 0.03795833333333343,
+          "d_pass": 4,
+          "wall": 0.9067785952336036,
+          "wall_mean": 0.9959896480362587,
+          "calls": 0.684931506849315,
+          "actions": 1.1079136690647482,
+          "shots": 1.4545454545454546,
+          "in_tok": 1.6492536076459219,
+          "out_tok": 1.1242469879518073,
+          "cost": 0.9658701479295857,
+          "cost_mean": 0.9795599441644695
+        },
+        "geo": {
+          "wall_s": 1.006648728199552,
+          "cost": 1.0202944103871212,
+          "calls": 0.9710088713175399,
+          "actions": 1.0722782796536097,
+          "shots": 1.073466174835727,
+          "in_tok": 1.0268355013563297,
+          "out_tok": 1.035583709395635
+        },
+        "consistency": {
+          "wall_s": {
+            "down": 3,
+            "up": 5,
+            "flat": 4,
+            "p": 0.7265625
+          },
+          "cost": {
+            "down": 4,
+            "up": 6,
+            "flat": 2,
+            "p": 0.75390625
+          },
+          "calls": {
+            "down": 4,
+            "up": 4,
+            "flat": 4,
+            "p": 1
+          },
+          "actions": {
+            "down": 3,
+            "up": 6,
+            "flat": 3,
+            "p": 0.5078125
+          },
+          "shots": {
+            "down": 2,
+            "up": 2,
+            "flat": 8,
+            "p": 1
+          },
+          "score": {
+            "down": 1,
+            "up": 4,
+            "flat": 7,
+            "p": 0.375
+          }
+        }
+      }
+    }
+  }
+}

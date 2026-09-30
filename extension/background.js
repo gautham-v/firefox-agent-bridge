@@ -997,7 +997,7 @@ async function runTool(session, tool, args, client) {
       const tab = early?.tab ?? (await waitForLoad(tabId));
       let out = `Tab ${tabId}: ${tab.url}\nTitle: ${early?.title ?? tab.title}`;
       if (early ? !early.parsed : tab.status !== "complete") out += "\n(still loading after 30s)";
-      else if (tab.status !== "complete") out += "\n(returned once the page was parsed; it is still loading, so content its scripts add may be missing)";
+      else if (tab.status !== "complete") out += "\n(returned once the page was parsed; it is still loading. Read it as usual; if something is missing, read again.)";
       if (created) out += `\n${createdNote(created)}`;
       if (listTabs) out += `\n\nThis session's tabs:\n${JSON.stringify(await tabContext(session), null, 2)}`;
       return [text(out)];

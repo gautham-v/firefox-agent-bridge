@@ -220,50 +220,23 @@ if (DEVTOOLS) {
 // ---- experiments ----------------------------------------------------------------------------
 // Switches for A/B runs in the eval (eval/README.md, "Experiments"), so a change to what the model
 // sees can be measured without restarting Firefox. FIREFOX_BRIDGE_EXPERIMENTS is a comma-separated
-// list of flags, e.g. "batchHint,fewerShots" or "pageTextCap=4000". Unset, every definition and
-// result is exactly as without it (host/test/fixtures/tools-list.json).
-const EXPERIMENT_FLAGS = ["batchHint", "fewerShots", "screenshotAlias", "quietTabs", "pageTextCap", "fastNavigate"];
+// list of flags. Unset, the server behaves as shipped. Flags that were measured and kept became the
+// default; one flag turns that back off, for measuring against the old behavior:
+//   waitForLoad: navigate waits for the load event and the text to settle, as before 2026-09-30,
+//     instead of returning once the page is parsed.
+const EXPERIMENT_FLAGS = ["waitForLoad"];
 if (process.argv.includes("--list-experiments")) {
   console.log(EXPERIMENT_FLAGS.join("\n"));
   process.exit(0);
 }
-const EXPERIMENTS = new Map();
+const EXPERIMENTS = new Set();
 for (const item of (process.env.FIREFOX_BRIDGE_EXPERIMENTS ?? "").split(",")) {
-  const [name, value = ""] = item.trim().split("=");
+  const name = item.trim();
   if (!name) continue;
-  if (EXPERIMENT_FLAGS.includes(name)) EXPERIMENTS.set(name, value);
+  if (EXPERIMENT_FLAGS.includes(name)) EXPERIMENTS.add(name);
   else process.stderr.write(`firefox-agent-bridge: unknown experiment "${name}" ignored\n`);
 }
 const on = (flag) => EXPERIMENTS.has(flag);
-const PAGE_TEXT_CAP = Number(EXPERIMENTS.get("pageTextCap")) > 0 ? Math.floor(Number(EXPERIMENTS.get("pageTextCap"))) : 8000;
-const toolDef = (name) => TOOLS.find((t) => t.name === name);
-
-if (on("fewerShots")) {
-  toolDef("computer").description +=
-    "\n* Action results already say what changed (the element clicked, the text typed, where focus went and its value), so a screenshot to check each action is usually unnecessary. Take one when the page's appearance matters.";
-}
-if (on("batchHint")) toolDef("computer").description += "\n* Several clicks or keys on refs you already have go in one batch call.";
-if (on("quietTabs")) {
-  const nav = toolDef("navigate");
-  nav.description = nav.description.replace("the tab list is appended.", "the tab list is appended when it changed.");
-}
-if (on("pageTextCap")) {
-  const gpt = toolDef("get_page_text");
-  gpt.description += ` Returns at most ${PAGE_TEXT_CAP} characters per call; the last line says how many are left and the offset to read on from.`;
-  Object.assign(gpt.inputSchema.properties, {
-    offset: { type: "number", description: "Character to start from (default 0)." },
-    max_chars: { type: "number", description: `Most characters to return (default ${PAGE_TEXT_CAP}).` },
-  });
-}
-if (on("screenshotAlias")) {
-  const c = toolDef("computer");
-  c.description = c.description.replace("there are no separate screenshot or click tools", "there are no separate click tools (screenshot also has its own)");
-  TOOLS.push({
-    name: "screenshot",
-    description: "Screenshot of a tab; the same as computer's screenshot action.",
-    inputSchema: { type: "object", properties: { tabId: { type: "number" }, scale: { type: "number" } } },
-  });
-}
 
 const REPLAY_TIMEOUT_MS = 600_000;
 const MAX_REPLAY_BYTES = 1_000_000;
@@ -315,13 +288,6 @@ TOOLS.push({
     required: ["actions"],
   },
 });
-if (on("batchHint")) {
-  const b = toolDef("batch");
-  b.description = b.description.replace(
-    "Use it when you already know every step's arguments, e.g. navigate then get_page_text on the same tab, or several clicks/keys on refs you already have.",
-    "Use it whenever you know the next two or more steps: the clicks, typing and form_input on refs a find or read_page just returned, or navigate then get_page_text on the same tab.",
-  );
-}
 
 // ---- bridge connection --------------------------------------------------------------------
 
@@ -500,48 +466,8 @@ async function resolveTab() {
 
 const NO_TAB = new Set(["tabs_context_mcp", "tabs_create_mcp"]);
 
-// ---- experiments' result changes -----------------------------------------------------------
-
-// quietTabs: navigate's "This session's tabs" list is left out while the session's tab ids are
-// the ones the last result that showed a list had. noteTabs reads the list before it goes.
-let shownTabs = null;
-const TAB_LIST_TAIL = /\n\nThis session's tabs:\n\{[\s\S]*$/;
-function quietTabs(name, result) {
-  if (result.isError) return;
-  for (const c of result.content ?? []) {
-    if (c.type !== "text") continue;
-    const ids = tabListIn(c.text)?.join(",");
-    if (ids == null) continue;
-    if (name === "navigate" && ids === shownTabs && TAB_LIST_TAIL.test(c.text)) c.text = c.text.replace(TAB_LIST_TAIL, "");
-    else shownTabs = ids;
-  }
-}
-
-// pageTextCap: get_page_text's text from offset, at most max_chars of it, and how much is left.
-function capPageText(result, offset, maxChars) {
-  const c = result.content?.find((x) => x.type === "text");
-  if (result.isError || !c) return;
-  const start = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
-  const cap = Number.isFinite(maxChars) && maxChars >= 1 ? Math.floor(maxChars) : PAGE_TEXT_CAP;
-  const full = c.text;
-  if (start >= full.length && start > 0) {
-    c.text = `(offset ${start} is past the end: the text has ${full.length} chars.)`;
-    return;
-  }
-  const end = Math.min(full.length, start + cap);
-  c.text = full.slice(start, end);
-  if (end < full.length) c.text += `\n(${full.length - end} more chars; call get_page_text with offset ${end} to read on.)`;
-}
-
-const BATCH_HINT = "(The next clicks, typing and form_input on these refs can go in one batch call.)";
-
-async function runTool(name, args, { inBatch = false } = {}) {
+async function runTool(name, args) {
   args = { ...args };
-  // screenshotAlias: the screenshot tool is computer's screenshot action.
-  if (name === "screenshot" && on("screenshotAlias")) {
-    name = "computer";
-    args = { action: "screenshot", tabId: args.tabId, ...(args.scale != null ? { scale: args.scale } : {}) };
-  }
   if (typeof args.tabId === "string" && /^\s*\d+\s*$/.test(args.tabId)) args.tabId = Number(args.tabId);
   let filled = null;
   // navigate to a URL without a tab already picks the group's first tab (creating it if needed).
@@ -551,20 +477,12 @@ async function runTool(name, args, { inBatch = false } = {}) {
     if (typeof t !== "number") return t;
     args.tabId = filled = t;
   }
-  if (name === "navigate" && on("fastNavigate") && args.wait == null) args.wait = "interactive";
-  let page = null;
-  if (name === "get_page_text" && on("pageTextCap")) {
-    page = { offset: Number(args.offset), maxChars: Number(args.max_chars) };
-    delete args.offset;
-    delete args.max_chars;
-  }
+  // navigate returns once the page is parsed instead of after the load event and the text
+  // settling (0.6s a page against 1.9s in the eval, with the same text read right after). A call
+  // can still ask for wait: "load".
+  if (name === "navigate" && args.wait == null && !on("waitForLoad")) args.wait = "interactive";
   const result = name === "form_input" ? await formInput(args) : await callOne(name, args);
   noteTabs(name, args, result);
-  if (on("quietTabs")) quietTabs(name, result);
-  if (page) capPageText(result, page.offset, page.maxChars);
-  if (on("batchHint") && !inBatch && (name === "find" || name === "read_page") && !result.isError && /\bref_\d/.test(textOf(result))) {
-    result.content = [...(result.content ?? []), { type: "text", text: BATCH_HINT }];
-  }
   if (filled != null) result.content = [...(result.content ?? []), { type: "text", text: `(No tabId given; used tab ${filled}.)` }];
   return result;
 }
@@ -581,7 +499,7 @@ async function batch(args) {
     const head = `[${i + 1}/${actions.length}] ${a?.tool}`;
     const r = !BATCHABLE.includes(a?.tool)
       ? errorResult(`Unknown or unbatchable tool ${a?.tool}.`)
-      : await runTool(a.tool, a.args && typeof a.args === "object" ? a.args : {}, { inBatch: true });
+      : await runTool(a.tool, a.args && typeof a.args === "object" ? a.args : {});
     content.push({ type: "text", text: `${head}${r.isError ? " failed" : ""}:` });
     for (const c of r.content ?? []) content.push(c);
     if (r.isError) {

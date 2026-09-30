@@ -11,13 +11,13 @@
 //
 // When the rows come from more than one experiment arm (models.mjs --experiments), every config is
 // split by arm ("claude-sonnet-5-5/low · batchHint"), and an "Experiment arms" section compares
-// each arm with the reference arm: "none" if there is one, else the first. --by-arm splits even
-// when there is one arm.
+// each arm with the reference arm: "none" if there is one, else "before", else the first.
+// --by-arm splits even when there is one arm.
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { armOf } from "./lib/experiments.mjs";
+import { armOf, refFirst } from "./lib/experiments.mjs";
 
 const EVAL = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -34,7 +34,7 @@ const rows = fs
   .map((l) => JSON.parse(l))
   .filter((r) => !r.infra_error && r.tag !== "smoke");
 
-const ARMS = [...new Set(rows.map(armOf))].sort((a, b) => (a === "none" ? -1 : b === "none" ? 1 : 0));
+const ARMS = [...new Set(rows.map(armOf))].sort(refFirst);
 const BY_ARM = ARMS.length > 1 || argv.includes("--by-arm");
 const ARM_SEP = " · ";
 // A row's group: its config, or its config and arm.

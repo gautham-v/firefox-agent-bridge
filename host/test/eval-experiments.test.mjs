@@ -15,21 +15,21 @@ test("without --experiments there is one arm with no flags and no label", () => 
 });
 
 test("each --experiments is an arm, labeled by its flags unless --arm-label names it", () => {
-  const arms = parseArms(["--experiments", "none", "--experiments", "batchHint, fewerShots", "--experiments", "pageTextCap=4000"]);
+  const arms = parseArms(["--experiments", "none", "--experiments", " waitForLoad "]);
   assert.deepEqual(arms, [
     { flags: [], label: "none" },
-    { flags: ["batchHint", "fewerShots"], label: "batchHint+fewerShots" },
-    { flags: ["pageTextCap=4000"], label: "pageTextCap=4000" },
+    { flags: ["waitForLoad"], label: "waitForLoad" },
   ]);
-  assert.deepEqual(armEnv(arms[1]), { FIREFOX_BRIDGE_EXPERIMENTS: "batchHint,fewerShots" });
-  const named = parseArms(["--experiments", "none", "--arm-label", "off", "--experiments", "quietTabs", "--arm-label", "on"]);
-  assert.deepEqual(named.map((a) => a.label), ["off", "on"]);
+  assert.deepEqual(armEnv(arms[1]), { FIREFOX_BRIDGE_EXPERIMENTS: "waitForLoad" });
+  const named = parseArms(["--experiments", "waitForLoad", "--arm-label", "before", "--experiments", "none", "--arm-label", "kept"]);
+  assert.deepEqual(named.map((a) => a.label), ["before", "kept"]);
 });
 
 test("unknown flags, a label count that doesn't match and duplicate labels are refused", () => {
-  assert.throws(() => parseArms(["--experiments", "batchHnt"]), /unknown experiment batchHnt/);
-  assert.throws(() => parseArms(["--experiments", "none", "--experiments", "quietTabs", "--arm-label", "a"]), /1 --arm-label for 2/);
-  assert.throws(() => parseArms(["--experiments", "quietTabs", "--experiments", "quietTabs"]), /share a label/);
+  assert.throws(() => parseArms(["--experiments", "waitForLod"]), /unknown experiment waitForLod/);
+  assert.throws(() => parseArms(["--experiments", "batchHint"]), /unknown experiment batchHint/, "dropped flags are gone");
+  assert.throws(() => parseArms(["--experiments", "none", "--experiments", "waitForLoad", "--arm-label", "a"]), /1 --arm-label for 2/);
+  assert.throws(() => parseArms(["--experiments", "waitForLoad", "--experiments", "waitForLoad"]), /share a label/);
 });
 
 test("armOf groups rows by label, then flags, and old rows as none", () => {

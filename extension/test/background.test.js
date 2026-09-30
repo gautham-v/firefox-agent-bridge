@@ -2050,7 +2050,7 @@ test("navigate without wait is unchanged: it waits for the load and the text to 
 test('navigate wait "interactive" answers once the new page is parsed and quiet, with its URL and title', async () => {
   const env = await navEnv(loads);
   const { text, took } = await env.nav({ wait: "interactive" });
-  assert.equal(text, "Tab 2: https://b.example/\nTitle: New page\n(returned once the page was parsed; it is still loading, so content its scripts add may be missing)");
+  assert.equal(text, "Tab 2: https://b.example/\nTitle: New page\n(returned once the page was parsed; it is still loading. Read it as usual; if something is missing, read again.)");
   assert.ok(took >= 250 + 300 && took < 900, `took ${took}ms`);
   assert.ok(!env.ops.includes("textSize"), "the text isn't waited on");
 });
