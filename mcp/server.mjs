@@ -49,7 +49,7 @@ const TOOLS = [
   {
     name: "navigate",
     description:
-      'Navigate a tab to a URL, or "back"/"forward" in history, and wait for the page to load. If tabId is omitted for a URL, the first tab in this session\'s group is used (created if needed) and the tab list is appended.',
+      'Navigate a tab to a URL, or "back"/"forward" in history, and wait for the page to load. If tabId is omitted for a URL, the first tab in this session\'s group is used (created if needed) and the tab list is appended. Reading several pages? Don\'t spend a call per step: put each page\'s navigate and its read (get_page_text, or javascript_tool) into one batch call.',
     inputSchema: {
       type: "object",
       properties: {
@@ -380,7 +380,7 @@ async function handle(msg) {
         capabilities: { tools: {} },
         serverInfo: { name: "firefox-agent-bridge", version: VERSION },
         instructions:
-          "Browser tools for Firefox Developer Edition. Tabs live in the agent's own per-session tab group and run in the background; input is trusted and never moves the user's cursor.",
+          "Browser tools for Firefox Developer Edition. Tabs live in the agent's own per-session tab group and run in the background; input is trusted and never moves the user's cursor. Each tool call is a round trip: use batch to run several known steps (e.g. navigate + get_page_text for each of several pages) in one call, and form_input's fields to fill a form at once.",
       };
     }
     case "tools/list":
