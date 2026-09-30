@@ -382,6 +382,8 @@ const S = {
   prefs: {}, // remembered choices: {engine, claude: {model, effort}, codex: {...}}
   stopped: {}, // chat id -> true after the user stopped it, until it is sent to again
   attachments: [],
+  skill: null, // the skill picked for the next message: {name}
+  slash: null, // the open "/" menu: {items, index}
   unechoed: null, // what was just sent, kept until the host echoes it
   resumeNext: false,
   stick: true,
@@ -468,7 +470,7 @@ function applyEvent(ev, replay = false) {
       // that turn. Loaded history has no running turn to protect.
       if (replay) closeTurn(lastTurn(), now);
       const t = newTurn();
-      t.user = { text: ev.text ?? "", attachments: ev.attachments ?? [] };
+      t.user = { text: ev.text ?? "", attachments: ev.attachments ?? [], skill: ev.skill ?? null };
       t.queued = S.turns.some((x) => !x.done);
       t.t0 = t.queued ? null : now;
       S.turns.push(t);
@@ -552,6 +554,7 @@ function restoreUnechoed() {
   S.unechoed = null;
   if (!$("input").value) $("input").value = u.text;
   S.attachments = [...u.attachments, ...S.attachments];
+  S.skill ??= u.skill;
   autosize();
   renderAtts();
   syncSend();
@@ -593,6 +596,7 @@ function onMessage(m) {
       if (!m.engine) return;
       S.caps[m.engine] = m;
       if (S.ui.menu) renderMenu();
+      if (S.slash) updateSlash();
       return render("body", "notices", "dock");
     case "group": return onGroup(m);
     case "hostUp":
@@ -745,7 +749,7 @@ function fav(tab, cls = "") {
 }
 
 function userBubble(u) {
-  const files = u.attachments.map((a) => el("span", {}, icon(a.mime?.startsWith("image/") ? "file" : "clip"), el("b", { text: a.name ?? "file", title: a.name })));
+  const files = (u.skill ? [el("span", {}, icon("skills"), el("b", { text: u.skill, title: u.skill }))] : []).concat(u.attachments.map((a) => el("span", {}, icon(a.mime?.startsWith("image/") ? "file" : "clip"), el("b", { text: a.name ?? "file", title: a.name }))));
   return el("div", { class: "um" }, u.text, files.length ? el("div", { class: "files" }, files) : null);
 }
 
@@ -1158,6 +1162,7 @@ const effortLabel = (id) => EFFORT_LABELS[id] ?? (id ? id[0].toUpperCase() + id.
 
 function placeholder() {
   if (S.paused) return `Tell ${engine().short} what to do instead…`;
+  if (S.skill) return "Add details, or send to run it…";
   if (isRunning()) return "Add to the task…";
   if (!S.turns.length) {
     const { name } = activeSite();
@@ -1187,7 +1192,7 @@ function renderDock() {
   syncSend();
 }
 
-const hasDraft = () => !!$("input").value.trim() || S.attachments.length > 0;
+const hasDraft = () => !!$("input").value.trim() || S.attachments.length > 0 || !!S.skill;
 
 function syncSend() {
   const btn = $("send");
@@ -1220,8 +1225,17 @@ function setInput(text) {
 
 function renderAtts() {
   const box = $("atts");
-  box.hidden = !S.attachments.length;
+  box.hidden = !S.attachments.length && !S.skill;
   box.replaceChildren(
+    S.skill
+      ? el(
+          "span",
+          { class: "att", title: S.skill.name },
+          el("span", { class: "thumb" }, icon("skills")),
+          el("span", { class: "n", text: S.skill.name }),
+          el("button", { class: "x", "aria-label": `Remove ${S.skill.name}`, onclick: () => setSkill(null) }, icon("x")),
+        )
+      : null,
     ...S.attachments.map((a) =>
       el(
         "span",
@@ -1252,8 +1266,9 @@ function renderAtts() {
 
 function send() {
   const text = $("input").value.trim();
-  if ((!text && !S.attachments.length) || engineDown() || !S.chatId) return;
+  if ((!text && !S.attachments.length && !S.skill) || engineDown() || !S.chatId) return;
   const attachments = S.attachments;
+  const skill = S.skill?.name ?? null;
   // Typing after a pause is the way to carry on, and the new turn's Firefox calls would be refused if still paused.
   if (S.paused) {
     post("resume");
@@ -1266,11 +1281,14 @@ function send() {
     effort: effortsFor().includes(S.effort) ? S.effort : "",
     text,
     attachments: attachments.map(({ name, mime, data }) => ({ name, mime, data })),
+    skill,
     resume: S.resumeNext,
   });
   S.resumeNext = false;
-  S.unechoed = { text, attachments };
+  S.unechoed = { text, attachments, skill: skill && { name: skill } };
   S.attachments = [];
+  S.skill = null;
+  closeSlash();
   if (S.stopped[S.chatId]) {
     delete S.stopped[S.chatId];
     saveStopped();
@@ -1398,6 +1416,7 @@ const backRow = (title) =>
 const note = (t) => el("div", { class: "empty-note", text: t });
 
 function openMenu(id, anchor, extra = {}) {
+  closeSlash();
   if (S.ui.menu?.id === id && !extra.keep) return closeMenu();
   S.ui.menu = { id, view: "root", anchor, ...extra };
   if (id === "plus" || id === "model") {
@@ -1473,7 +1492,8 @@ function plusMenu() {
               sub: s.description ? shortText(s.description, 90) : null,
               onclick: () => {
                 closeMenu(false);
-                insertAtCaret(`/${s.name} `);
+                setSkill(s.name);
+                $("input").focus();
               },
             }),
           )
@@ -1607,13 +1627,110 @@ function renderMenu() {
   menu.focus({ preventScroll: true });
 }
 
-function insertAtCaret(text) {
-  const ta = $("input");
-  const at = ta.selectionStart ?? ta.value.length;
-  ta.setRangeText(text, at, ta.selectionEnd ?? at, "end");
+function setSkill(name) {
+  S.skill = name ? { name } : null;
+  renderAtts();
+  render("dock");
+}
+
+// ---- The "/" menu: typing / at the start of the box lists skills, the ones for this site first.
+
+// "linkedin.com" -> "linkedin", "bbc.co.uk" -> "bbc": the label a skill's name or description would use.
+function siteLabel(host) {
+  const labels = host.split(".").filter(Boolean);
+  if (labels.length < 2) return labels[0] ?? "";
+  let i = labels.length - 2;
+  if (labels.length > 2 && labels.at(-1).length === 2 && labels.at(-2).length <= 3) i = labels.length - 3;
+  return labels[i];
+}
+
+// A skill is for a site when its `sites:` names it, or, with no `sites:`, when the site's main
+// label appears in its name or description.
+function forSite(skill, host) {
+  if (!host) return false;
+  if (skill.sites?.length) return skill.sites.some((x) => host === x || host.endsWith(`.${x}`) || x === siteLabel(host));
+  const label = siteLabel(host).toLowerCase();
+  return label.length > 2 && `${skill.name} ${skill.description ?? ""}`.toLowerCase().includes(label);
+}
+
+function slashItems(query) {
+  const skills = S.caps[S.engine]?.skills ?? [];
+  const host = hostOf(activeSite().tab?.url ?? "");
+  const q = query.toLowerCase();
+  const shown = skills
+    .filter((s) => !q || s.name.toLowerCase().includes(q) || (s.description ?? "").toLowerCase().includes(q))
+    .sort((a, b) => Number(b.name.toLowerCase().startsWith(q)) - Number(a.name.toLowerCase().startsWith(q)));
+  const site = shown.filter((s) => forSite(s, host));
+  return { host, site, rest: shown.filter((s) => !site.includes(s)), loaded: !!S.caps[S.engine] };
+}
+
+function updateSlash() {
+  const m = /^\/([\w.:-]*)$/.exec($("input").value);
+  if (!m || S.ui.menu || S.ui.sheet || engineDown()) return closeSlash();
+  if (!S.caps[S.engine]) requestCaps(S.engine);
+  const { host, site, rest, loaded } = slashItems(m[1]);
+  const items = [...site, ...rest];
+  const index = Math.min(S.slash?.index ?? 0, Math.max(0, items.length - 1));
+  S.slash = { items, index };
+  const row = (s, i) =>
+    el(
+      "button",
+      {
+        class: `mi two${i === index ? " hi" : ""}`,
+        role: "option",
+        tabIndex: -1,
+        onmousedown: (e) => e.preventDefault(), // keep the caret in the box
+        onclick: () => pickSkill(s),
+      },
+      icon("skills"),
+      el("span", { class: "l" }, s.name, s.description ? el("span", { class: "sub", text: shortText(s.description, 90) }) : null),
+      i === index ? el("span", { class: "r", text: "↵" }) : null,
+    );
+  const rows = [];
+  if (site.length) rows.push(el("div", { class: "mcap fav-cap" }, fav(activeSite().tab), `For ${host}`), ...site.map(row), rest.length ? sep() : null);
+  if (rest.length) rows.push(caption(site.length ? "All skills" : "Skills"), ...rest.map((s, i) => row(s, site.length + i)));
+  if (!items.length) rows.push(note(loaded ? (m[1] ? "No matching skills." : `No ${engine().name} skills found.`) : "Loading…"));
+  const menu = el("div", { class: "menu slash", role: "listbox", "aria-label": "Skills" }, rows);
+  $("layer-menu").replaceChildren(menu);
+  const pr = $("app").getBoundingClientRect();
+  const cr = $("composer").getBoundingClientRect();
+  menu.style.left = "8px";
+  menu.style.width = `${pr.width - 16}px`;
+  menu.style.bottom = `${pr.bottom - cr.top + 6}px`;
+  menu.style.maxHeight = `${Math.max(120, cr.top - pr.top - 12)}px`;
+  menu.querySelector(".hi")?.scrollIntoView({ block: "nearest" });
+}
+
+function closeSlash() {
+  if (!S.slash) return;
+  S.slash = null;
+  if (!S.ui.menu) $("layer-menu").replaceChildren();
+}
+
+function pickSkill(s) {
+  closeSlash();
+  $("input").value = "";
   autosize();
-  syncSend();
-  ta.focus();
+  setSkill(s.name);
+  $("input").focus();
+}
+
+// Arrow keys, Enter or Tab and Esc while the "/" menu is open. Returns whether it took the key.
+function slashKey(e) {
+  const m = S.slash;
+  if (!m || e.isComposing) return false;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    if (!m.items.length) return false;
+    m.index = (m.index + (e.key === "ArrowDown" ? 1 : -1) + m.items.length) % m.items.length;
+    updateSlash();
+  } else if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+    if (!m.items.length) return false;
+    pickSkill(m.items[m.index]);
+  } else if (e.key === "Escape") closeSlash();
+  else return false;
+  e.preventDefault();
+  e.stopPropagation();
+  return true;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1742,8 +1859,12 @@ function wire() {
   input.addEventListener("input", () => {
     autosize();
     syncSend();
+    updateSlash();
   });
+  input.addEventListener("blur", closeSlash);
   input.addEventListener("keydown", (e) => {
+    if (slashKey(e)) return;
+    if (e.key === "Backspace" && S.skill && !input.value && !input.selectionStart) return setSkill(null);
     if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
     e.preventDefault();
     if (hasDraft()) send();

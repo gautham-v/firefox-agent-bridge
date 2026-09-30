@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyError, contextBlock, parseResetTime, stripContext, summarizePermission, summarizeToolResult, summarizeToolUse, toolTab } from "../chat-format.mjs";
+import { classifyError, contextBlock, parseResetTime, skillName, skillPrompt, skillSites, stripClaudeSkill, stripCodexSkill, stripContext, summarizePermission, summarizeToolResult, summarizeToolUse, toolTab } from "../chat-format.mjs";
 
 test("firefox tool summaries never include typed text, form values, script source, key sequences or queries in URLs", () => {
   const cases = [
@@ -99,4 +99,28 @@ test("tool_start names the tab only for Firefox tools with a numeric tabId", () 
   assert.deepEqual(toolTab("mcp__firefox__tabs_create_mcp", {}), {});
   assert.deepEqual(toolTab("mcp__firefox__navigate", { tabId: "42" }), {});
   assert.deepEqual(toolTab("Read", { tabId: 42 }), {});
+});
+
+test("skills: names are validated, sites read from frontmatter", () => {
+  assert.equal(skillName("job-application"), "job-application");
+  assert.equal(skillName("plugin:review"), "plugin:review");
+  for (const bad of ["../x", "a b", "", "-x", 5, null]) assert.equal(skillName(bad), null, String(bad));
+  assert.deepEqual(skillSites("---\nname: a\nsites: [LinkedIn.com, x.io]\n---\nsites: no.com"), ["linkedin.com", "x.io"]);
+  assert.deepEqual(skillSites("---\nname: a\nsites: [\"a.com\", 'b.com']\n---\n"), ["a.com", "b.com"]);
+  assert.deepEqual(skillSites("no frontmatter\nsites: a.com"), []);
+});
+
+test("skills: Claude gets /name and the typed text, Codex a line naming the skill's file, and both read back", () => {
+  const ctx = contextBlock([{ tabId: 1, title: "T", url: "https://a.example/", current: true }], []);
+  const claude = skillPrompt("claude", "job-application", "use the AI resume", ctx);
+  assert.match(claude, /^\/job-application use the AI resume\n\n<panel-context>/);
+  assert.equal(skillPrompt("claude", "tdd", "", ""), "/tdd");
+  const stored = `<command-message>job-application</command-message>\n<command-name>/job-application</command-name>\n<command-args>${claude.slice("/job-application ".length)}</command-args>`;
+  assert.deepEqual(stripClaudeSkill(stored), { skill: "job-application", text: "use the AI resume", files: [] });
+  assert.deepEqual(stripClaudeSkill(`<command-name>/tdd</command-name>\n<command-args>${ctx.trim()}</command-args>`), { skill: "tdd", text: "", files: [] });
+  assert.equal(stripClaudeSkill("just text"), null);
+  const codex = skillPrompt("codex", "tdd", "do it", ctx);
+  const { text } = stripContext(codex);
+  assert.deepEqual(stripCodexSkill(text), { skill: "tdd", text: "do it" });
+  assert.deepEqual(stripCodexSkill("plain"), { skill: null, text: "plain" });
 });

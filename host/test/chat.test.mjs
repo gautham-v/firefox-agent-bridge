@@ -398,7 +398,7 @@ test("claude capabilities come from the CLI's control protocol and cost no model
     assert.equal(caps.available, true);
     assert.equal(caps.version, "9.9.9");
     assert.equal(caps.error, null);
-    assert.deepEqual(caps.skills, [{ name: "tdd", description: "Test-driven development with a red-green loop." }, { name: "viz", description: "Turn a discussion into a visual." }]);
+    assert.deepEqual(caps.skills, [{ name: "tdd", description: "Test-driven development with a red-green loop.", sites: [] }, { name: "viz", description: "Turn a discussion into a visual.", sites: [] }]);
     assert.deepEqual(caps.plugins, [{ name: "swift-lsp" }]);
     assert.deepEqual(caps.connectors, [{ name: "Gmail", status: "connected" }, { name: "Stripe", status: "needs-auth" }], "waits for pending connectors and leaves out firefox itself");
     assert.deepEqual(caps.models.map((m) => [m.id, m.label]), [["claude-opus-5-5", "Opus 5.5"], ["claude-sonnet-5-5", "Sonnet 5.5"], ["claude-fable-5-1", "Fable 5.1"], ["claude-haiku-4-5-20251001", "Haiku 4.5"]]);
@@ -543,6 +543,8 @@ test("chat.load sends a terminal transcript in event shapes, with tool results r
       answer("Booked."),
       { type: "system", subtype: "turn_duration", durationMs: 4200 },
       { type: "user", uuid: "u2", message: { role: "user", content: "<panel-context>\nTabs in your Firefox tab group:\n- tab 1: \"X\" https://x.com\nFiles the user attached, saved on disk (read them by path):\n- a.pdf: /tmp/a.pdf\n</panel-context>\n\nsecond question" } },
+      { type: "user", uuid: "u3", message: { role: "user", content: "<command-message>tdd</command-message>\n<command-name>/tdd</command-name>\n<command-args>go\n\n<panel-context>\nTabs in your Firefox tab group:\n- tab 1: \"X\" https://x.com\n</panel-context></command-args>" } },
+      { type: "user", uuid: "u4", isMeta: true, message: { role: "user", content: [{ type: "text", text: "Base directory for this skill: /x" }] } },
     ]);
     const r = await t.ask("chat.load", { chatId: A, source: "terminal", path: file });
     assert.equal(r.type, "chat.transcript");
@@ -555,6 +557,9 @@ test("chat.load sends a terminal transcript in event shapes, with tool results r
       { kind: "text", messageId: "a-Booke", text: "Booked." },
       { kind: "result", ok: true, durationMs: 4200, numTurns: null, error: null },
       { kind: "user", text: "second question", attachments: [{ name: "a.pdf", mime: "application/pdf" }] },
+      { kind: "user", text: "go", attachments: [], skill: "tdd" },
+      { kind: "tool_start", toolUseId: "skill-7", name: "Skill", summary: "Use the tdd skill" },
+      { kind: "tool_end", toolUseId: "skill-7", ok: true, summary: "" },
     ]);
   } finally {
     t.done();
@@ -707,6 +712,51 @@ test("codex: usage limits are classified, and Stop ends the turn", async () => {
     assert.equal(t.results(id2)[0].error, "Interrupted");
     assert.equal(t.events(id2).filter((e) => e.kind === "error").length, 0);
     assert.equal(t.events(id2).at(-1).status, "idle");
+  } finally {
+    t.done();
+  }
+});
+
+test("claude capabilities carry the sites a skill's frontmatter names", async () => {
+  const t = setup();
+  try {
+    fs.mkdirSync(path.join(t.home, ".claude/skills/tdd"), { recursive: true });
+    fs.writeFileSync(path.join(t.home, ".claude/skills/tdd/SKILL.md"), "---\nname: tdd\nsites: linkedin.com, \"greenhouse.io\"\n---\nbody\n");
+    const caps = await t.ask("chat.capabilities", { engine: "claude" });
+    assert.deepEqual(caps.skills.map((s) => [s.name, s.sites]), [["tdd", ["linkedin.com", "greenhouse.io"]], ["viz", []]]);
+  } finally {
+    t.done();
+  }
+});
+
+test("claude: a skill picked in the panel runs as /name with the typed text as its arguments", async () => {
+  const t = setup();
+  try {
+    const id = newId();
+    await t.turn(id, "[env] use the Applied AI variant", { skill: "tdd", context: { tabs: [{ tabId: 4, title: "Job", url: "https://example.com/", current: true }] } });
+    const user = t.events(id).find((e) => e.kind === "user");
+    assert.equal(user.text, "[env] use the Applied AI variant");
+    assert.equal(user.skill, "tdd");
+    const step = t.events(id).find((e) => e.kind === "tool_start");
+    assert.deepEqual([step.name, step.summary], ["Skill", "Use the tdd skill"]);
+    assert.ok(t.events(id).some((e) => e.kind === "tool_end" && e.toolUseId === step.toolUseId && e.ok));
+    const sent = JSON.parse(/text=(".*")$/.exec(t.events(id).find((e) => e.kind === "text").text)[1]);
+    assert.match(sent, /^\/tdd \[env\] use the Applied AI variant\n\n<panel-context>\n/);
+    t.send(id, "plain", { skill: "../evil" });
+    await t.until("second result", () => t.results(id).length > 1);
+    assert.equal(t.events(id).filter((e) => e.kind === "user")[1].skill, undefined, "a bad skill name is dropped");
+  } finally {
+    t.done();
+  }
+});
+
+test("codex: a skill is named in the prompt with the path of its file", async () => {
+  const t = setup();
+  try {
+    const id = newId();
+    await t.turn(id, "hello [env]", { engine: "codex", skill: "tdd" });
+    assert.equal(t.events(id).find((e) => e.kind === "user").skill, "tdd");
+    assert.ok(t.events(id).some((e) => e.kind === "tool_start" && e.name === "Skill"));
   } finally {
     t.done();
   }

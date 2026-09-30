@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { HIDDEN_TOOLS, clip, mimeFromName, stripContext, summarizeToolResult, summarizeToolUse, toolTab } from "./chat-format.mjs";
+import { HIDDEN_TOOLS, clip, mimeFromName, stripClaudeSkill, stripCodexSkill, stripContext, summarizeToolResult, summarizeToolUse, toolTab } from "./chat-format.mjs";
 
 const HEAD_BYTES = 128 * 1024;
 const NEEDLE = '"name":"mcp__firefox__';
@@ -47,6 +47,8 @@ function userText(entry) {
   if (entry.type !== "user" || entry.isMeta || entry.isSidechain || entry.isCompactSummary) return null;
   const c = entry.message?.content;
   const text = typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b.type === "text").map((b) => b.text).join("\n") : "";
+  const ran = stripClaudeSkill(text);
+  if (ran) return ran.text || `/${ran.skill}`;
   const typed = stripContext(text).text.trim();
   if (!typed || typed.startsWith("<") || typed.startsWith("[Request interrupted")) return null;
   return typed;
@@ -208,8 +210,13 @@ export async function claudeTranscript(file, maxItems = 1500) {
       if (text === null) continue;
       const attachments = Array.isArray(c) ? c.filter((b) => b.type === "image").map((b) => ({ name: "image", mime: b.source?.media_type ?? "image/png" })) : [];
       const raw = typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b.type === "text").map((b) => b.text).join("\n") : "";
-      for (const name of stripContext(raw).files) attachments.push({ name, mime: mimeFromName(name) });
-      items.push({ kind: "user", text: cap(text), attachments });
+      const ran = stripClaudeSkill(raw);
+      for (const name of (ran ?? stripContext(raw)).files) attachments.push({ name, mime: mimeFromName(name) });
+      if (ran) {
+        items.push({ kind: "user", text: cap(ran.text), attachments, skill: ran.skill });
+        items.push({ kind: "tool_start", toolUseId: `skill-${items.length}`, name: "Skill", summary: summarizeToolUse("Skill", { skill: ran.skill }) });
+        items.push({ kind: "tool_end", toolUseId: `skill-${items.length - 1}`, ok: true, summary: "" });
+      } else items.push({ kind: "user", text: cap(text), attachments });
     } else if (e.type === "assistant" && !e.isApiErrorMessage) {
       for (const b of Array.isArray(e.message?.content) ? e.message.content : []) {
         if (b.type === "text" && b.text?.trim()) items.push({ kind: "text", messageId: e.uuid, text: cap(b.text) });
@@ -239,7 +246,12 @@ export async function codexTranscript(file, maxItems = 1500) {
     const text = (it.content ?? []).map((c) => c.text ?? "").join("");
     if (it.type === "UserMessage") {
       const typed = stripContext(text);
-      items.push({ kind: "user", text: cap(typed.text), attachments: typed.files.map((name) => ({ name, mime: mimeFromName(name) })) });
+      const ran = stripCodexSkill(typed.text);
+      items.push({ kind: "user", text: cap(ran.text), attachments: typed.files.map((name) => ({ name, mime: mimeFromName(name) })), ...(ran.skill ? { skill: ran.skill } : {}) });
+      if (ran.skill) {
+        items.push({ kind: "tool_start", toolUseId: `skill-${items.length}`, name: "Skill", summary: summarizeToolUse("Skill", { skill: ran.skill }) });
+        items.push({ kind: "tool_end", toolUseId: `skill-${items.length - 1}`, ok: true, summary: "" });
+      }
     } else if (it.type === "AgentMessage") {
       if (text.trim()) items.push({ kind: "text", messageId: it.id, text: cap(text) });
     } else if (it.type === "McpToolCall") {
