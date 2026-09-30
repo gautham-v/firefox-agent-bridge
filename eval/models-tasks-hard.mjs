@@ -39,11 +39,13 @@ export { score };
 
 const NO_JS = "Don't use javascript_tool at all in this task (a run that uses it scores 0); read and operate the pages with the other tools, as a user would.";
 
-// Wraps a check so that any javascript_tool call (or a view-source: page) zeroes every sub-goal
-// and adds a failed no_javascript field; a clean run's fields are the task's own.
-const noJs = (check) =>
+// Wraps a check so that any javascript_tool call, also inside a batch (and, with noSource, a
+// view-source: page, which only the sudoku prompt forbids), zeroes every sub-goal and adds a failed
+// no_javascript field; a clean run's fields are the task's own.
+const calls = (trace) => trace.flatMap((c) => (/batch$/.test(c.name) ? (c.input?.actions ?? []).map((x) => ({ name: String(x.tool ?? ""), input: x.args ?? {} })) : [c]));
+const noJs = (check, { noSource = false } = {}) =>
   function (a, state, trace = []) {
-    const used = trace.some((c) => /javascript_tool$/.test(c.name) || /^\s*view-source:/i.test(String(c.input?.url ?? "")));
+    const used = calls(trace).some((c) => /javascript_tool$/.test(c.name) || (noSource && /^\s*view-source:/i.test(String(c.input?.url ?? ""))));
     const fields = check.call(this, a, state, trace);
     if (!used) return fields;
     return { ...Object.fromEntries(Object.keys(fields).map((k) => [k, false])), no_javascript: false };
@@ -122,7 +124,7 @@ ${stateRules("Leave that tab open with the filled-in grid when you're done (don'
       const cells = String(state?.grid?.cells ?? "").split(",");
       const row = (r) => cells.length === 81 && Array.from({ length: 9 }, (_, c) => cells[r * 9 + c].trim() === SUDOKU_SOLUTION[r * 9 + c]).every(Boolean);
       return Object.fromEntries(Array.from({ length: 9 }, (_, r) => [`row_${r + 1}`, row(r)]));
-    }),
+    }, { noSource: true }),
   },
 
   // 2 ---------------------------------------------------------------------------------------
