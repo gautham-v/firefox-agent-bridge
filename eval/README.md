@@ -322,3 +322,60 @@ every config solved the sudoku and drew the tldraw grid.
 Sonnet rerun after the typing fix (54 runs, $16.75; "Re-measured again" above): 0.891 (12) /
 0.991 (17) / 0.970 (15) at low / medium / high, and uitp-no-js 9 of 9. Over both rounds, 26 / 29 /
 32 passes of 36: high still best, low now weakest, and none of the steps is significant.
+
+## Experiment arms on the hard tier (2026-09-30)
+
+168 runs: Sonnet 5.5 at low and high effort, the 6 hard tasks, 2 rounds, and 7 arms (`none` and one flag each). Each arm has 24 runs. The arms were shuffled together within each round at concurrency 2, and no run timed out, hit a rate limit or needed a retry. List-price spend was $53.10 ($7.18–$7.96 per arm). Main was at `a672d65`, with Firefox restarted on the new extension. The tables are in `results/models-hard/arms/`: `arms-report.md` (`models-arms-report.mjs`, with the numbers it reads from the streams kept in `arms-derived.jsonl`) and `experiments-report.md` (`models-report.mjs`).
+
+```sh
+node eval/models.mjs --tier hard --configs sonnet:low,sonnet:high --rounds 2 --concurrency 2 --out eval/results/models-hard/arms/runs.jsonl \
+  --experiments none --experiments batchHint --experiments fewerShots --experiments screenshotAlias \
+  --experiments quietTabs --experiments pageTextCap --experiments fastNavigate
+node eval/models-arms-report.mjs
+node eval/models-report.mjs --in eval/results/models-hard/arms/runs.jsonl --prefix experiments-
+```
+
+Only `fastNavigate` did what it should, and it is worth about 5% of wall time. Nothing else is separable from noise, and no flag lowered cost.
+
+Both efforts, against `none`. The ratios are the geometric mean over the 12 (task, effort) cells of the arm's cell median over `none`'s, so a few long tasks can't set them. Calls count `batch` as one; actions count its steps. Bad-tool calls are calls to tools the run wasn't offered.
+
+| arm | pass | mean score | wall, mean s | wall x | calls x | actions x | shots x | input tok x | output tok x | cost x | total cost | bad-tool calls/run |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| none | 18 (75%) | 0.945 | 81 | | | | | | | | $7.40 | 0.46 |
+| fastNavigate | 20 (83%) | 0.968 | 74 | **0.90** | 0.95 | 0.92 | 1.02 | 1.03 | 0.95 | 1.00 | $7.65 | 0.67 |
+| screenshotAlias | 21 (88%) | 0.981 | 77 | 0.94 | 1.05 | 0.97 | 1.06 | 1.00 | 0.95 | 1.01 | $7.62 | 0.71 |
+| quietTabs | 20 (83%) | 0.974 | 80 | 1.01 | 1.05 | 1.22 | 1.08 | 1.10 | 1.02 | 1.06 | $7.96 | 0.67 |
+| pageTextCap | 22 (92%) | 0.979 | 82 | 1.03 | 1.06 | 1.00 | 1.04 | 1.04 | 1.02 | 1.03 | $7.54 | 0.83 |
+| fewerShots | 19 (79%) | 0.925 | 80 | 1.01 | 1.10 | 1.23 | 0.99 | 1.18 | 0.99 | 1.04 | $7.75 | 0.88 |
+| batchHint | 21 (88%) | 0.965 | 78 | 0.96 | 1.02 | 1.13 | 1.16 | 1.07 | 0.95 | 0.98 | $7.18 | 0.50 |
+
+Task consistency: on how many of the 12 cells the arm's median was more than 5% lower or higher than `none`'s (score: lower or higher at all). 30 sign tests were run, so one or two p < 0.05 are expected by chance.
+
+| arm | wall lower / higher | cost lower / higher | calls lower / higher | score lower / higher |
+|---|---|---|---|---|
+| fastNavigate | 9 / 3 (p = 0.15) | 6 / 3 | 8 / 3 | 0 / 2 |
+| screenshotAlias | 6 / 4 | 5 / 6 | 5 / 4 | 1 / 5 |
+| quietTabs | 5 / 5 | 4 / 6 | 6 / 4 | 3 / 4 |
+| pageTextCap | 5 / 4 | 1 / 5 | 2 / 6 | 0 / 4 |
+| fewerShots | 4 / 5 | 3 / 5 | 4 / 6 | 3 / 3 |
+| batchHint | 5 / 6 | 5 / 4 | 6 / 3 | 1 / 5 |
+
+Pass rates: the best gap, `pageTextCap` at 22/24 against 18/24, has Fisher p = 0.24. Every miss was a known kind: books star averages (9 of 27 misses), wc-tiebreak (10, 9 of them at low), uitp scroll targets (3), sudoku rows (2), hockey counts (2), one tldraw label.
+
+Verdicts, with what the streams show:
+
+- **`fastNavigate`: keep.** Navigate took a median 523 ms with the flag and 1,496 ms without (76 and 65 calls that were the first call of their message). With 4.5 navigates a run that is about 4.4 s of an 81 s mean. Wall x0.90 (mean 74 s against 81 s), lower on 9 of 12 cells, and score did not drop. By effort it was x0.77 at low (6 of 6 tasks lower) and x1.05 at high; the expected saving is 5%, so the low figure is mostly noise. The "returned once the page was parsed" note never appeared: every test page was parsed when navigate returned, so a model has not yet seen it.
+- **`screenshotAlias`: unclear.** It does what it says: 246 calls to the new tool in 24 runs, and calls to a `screenshot` tool that doesn't exist went from 8 to 0. But wall (x0.94), cost (x1.01) and calls (x1.05) didn't move, and the other made-up names rose from 3 to 17 (key 5, scroll 4, left_click 3, triple_click 2, zoom 2, type 1), so total bad-tool calls went from 11 to 17. Its sentence ("screenshot also has its own") may prime other names.
+- **`batchHint`: drop.** The hint was on 68 of 68 `find` and `read_page` results, and Sonnet did not batch more. Runs that used `batch` at all: 4 of 24, the same as `none`. Batch calls per run 0.88 against 1.50, batch share of calls 2% against 3%, and parallel calls in one message 10.9 against 10.3 messages a run. The high-effort action count (x1.63) comes from a few runs that put many steps in one batch (18 per batch on sudoku, 16 on tldraw).
+- **`fewerShots`: drop.** Screenshot actions per run were 9.6 against 10.9, but per cell x0.99: only books fell (24 against 30.5 a run), uitp fell by 2 and tldraw did not move. Input tokens x1.18, and score 0.925 against 0.945 (not significant; two of its five misses are wc-tiebreak). Screenshots are how Sonnet reads star ratings and the tldraw canvas.
+- **`pageTextCap`: drop.** 4 results were capped and 6 calls used `offset`, in 24 runs; `get_page_text` returned 6.4k characters a run against 6.3k. The pages it returns here are 20–40k characters (books, hockey), and cost, wall and calls all came out x1.03–x1.06.
+- **`quietTabs`: drop for this suite, not measured elsewhere.** It could not have an effect: navigate lists the tabs only when it is called without a `tabId`, and every run called `tabs_context_mcp` first (0 of 115 navigate results had a list, in any arm). It is the noise reference. See below.
+
+Noise:
+
+- **`quietTabs` as a control.** An arm that changes nothing moved median wall by x0.77 at low and x1.21 at high, actions by x0.68 and x1.90, and pass rate to 11/12 and 9/12 against `none`'s 7/12 and 11/12. An arm inside that band has shown nothing.
+- **What varies most is whole-run behavior:** whether a books run reads every page with `get_page_text` (10 calls of 20–40k characters), whether tldraw is built in batches, whether sudoku is entered in batches. Those move calls, actions and input tokens by x1.5–2 with no relation to the flag, so pooled medians of calls and actions mislead and the per-cell geometric mean is the number to read.
+- **Load.** Sibling runs of this benchmark averaged 0.92–0.98 per arm. Other eval processes averaged 0.34 (`batchHint`, lightest) to 0.86 (`quietTabs`, heaviest), and 0.58 for `none`. Two other measurement agents shared the Firefox.
+- **Size.** A cell is 2 runs, an arm at one effort 12, an arm 24. An effect under about x1.15 in wall or cost can't be found this way.
+
+Not covered: Opus and Fable already batch (35–69% of calls in the hard-tier analysis), so `batchHint` may matter less there and `fewerShots` more; `pageTextCap` was run at the default 8000 only; `quietTabs` needs tasks that start with a bare `navigate`.
