@@ -61,8 +61,9 @@ date picker, a virtualized table and a dropdown inside an embedded frame.
 - **Background work.** Agent tabs run in their own tab group in the background, and screenshots
   work without the window on screen. Claude in Chrome needs its window visible to take
   screenshots.
-- **What Chrome has that this doesn't:** `gif_creator`, shortcuts, and a `find` that asks a
-  model to match elements. That model call isn't counted in Chrome's tokens or cost above, so its
+- **What Chrome has that this doesn't:** a `gif_creator` tool, shortcuts, and a `find` that asks
+  a model to match elements. Here, the [agent cam](#agent-cam) saves GIFs without a tool, and
+  [skills](#skills) and [Teach](#teach) do what shortcuts do. That model call isn't counted in Chrome's tokens or cost above, so its
   real numbers are a bit higher. Console and network reading is here as one opt-in tool,
   [`devtools`](#devtools), off by default; it wasn't part of the comparison.
 
