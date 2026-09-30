@@ -18,7 +18,7 @@ const event = () => {
 // noIcons: the experiment can't find the label element, so setGroupState answers false (or throws,
 // with iconsThrow), and states go in the title.
 function mockBrowser({ store = {}, groups: initialGroups = [], noIcons = false, iconsThrow = false } = {}) {
-  const tabs = new Map([[1, { id: 1, windowId: 10, groupId: -1, active: true, url: "https://user.example/", status: "complete", title: "user" }]]);
+  const tabs = new Map([[1, { id: 1, windowId: 10, groupId: -1, active: true, url: "https://user.example/", status: "complete", title: "user", width: 800 }]]);
   const groups = new Map(initialGroups.map((g) => [g.id, { ...g }]));
   let nextTab = 2;
   let nextGroup = 100;
@@ -93,6 +93,7 @@ function mockBrowser({ store = {}, groups: initialGroups = [], noIcons = false, 
         return gid;
       },
       remove: async (id) => tabs.delete(id),
+      captureTab: async (id, opts) => `data:image/jpeg;base64,${Buffer.from(`shot of ${id} at ${opts.scale}`).toString("base64")}`,
       ungroup: async (id) => {
         const gid = tabs.get(id).groupId;
         tabs.get(id).groupId = -1;
@@ -110,8 +111,12 @@ function mockBrowser({ store = {}, groups: initialGroups = [], noIcons = false, 
     },
     // group id -> the state icon showing in its label
     icons,
+    // tab id -> whether Teach is recording it
+    recorded: new Map(),
     claudePage: {
       onPick: event(),
+      record: async (tabId, on) => b.recorded.set(tabId, on),
+      onRecord: event(),
       setActive: async () => {},
       call: async (tabId, op) => (op === "textSize" ? 10 : "done"),
       broadcast: async () => [],
@@ -147,10 +152,10 @@ async function load(opts) {
   await wait(20);
   const replies = () => browser.native.sent.filter((m) => m.result);
   let n = 0;
-  const callTool = async (tool, args = {}, session = "s1", client = { id: 1, name: "Claude Code" }) => {
+  const callTool = async (tool, args = {}, session = "s1", client = { id: 1, name: "Claude Code" }, ms = 2000) => {
     const id = `${client.id}:${++n}`;
     await browser.native.onMessage.fire({ type: "call", id, session, tool, args, client });
-    for (let i = 0; i < 200 && !replies().some((r) => r.id === id); i++) await wait(10);
+    for (let i = 0; i < ms / 10 && !replies().some((r) => r.id === id); i++) await wait(10);
     return replies().find((r) => r.id === id);
   };
   const popup = () => {
@@ -1196,4 +1201,194 @@ test("an element link outlines the element in its tab, only in the chat's group;
   await a.send("mark", { tabId: 5, ref: "javascript:alert(1)", reveal: true });
   assert.deepEqual(a.of("markFailed").map((m) => m.error), ["That tab isn't in this chat's group.", "That element isn't on the page any more."]);
   assert.equal(calls.filter(([tabId]) => tabId === 6).length, 0);
+});
+
+// ---- Teach
+
+test("Teach records the viewed tab: numbered steps with a shot, one step per field, no secrets", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await a.send("teach.start");
+  const state = a.of("state").at(-1);
+  assert.equal(state.chatId, a.chatId, "an untouched chat is used as it is");
+  assert.equal(state.teach.site, "user.example");
+  assert.equal(state.teach.start, "https://user.example/");
+  assert.equal(env.browser.recorded.get(1), true);
+  assert.equal(env.browser.tabsMap.get(1).groupId, -1, "the user's tab isn't grouped");
+
+  const record = (step) => env.browser.claudePage.onRecord.fire(1, step);
+  await record({ action: "click", target: { role: "link", name: "Log in", css: "#login", near: "Welcome" }, url: "https://user.example/" });
+  await record({ action: "type", target: { role: "textbox", name: "Library card" }, field: "f1", value: "12" });
+  await record({ action: "type", target: { role: "textbox", name: "Library card" }, field: "f1", value: "1234" });
+  await record({ action: "type", target: { role: "textbox", name: "PIN" }, field: "f2", secret: "keychain", value: "leaked" });
+  await record({ action: "bogus" });
+  await env.browser.claudePage.onRecord.fire(99, { action: "click", target: { role: "button", name: "elsewhere" } });
+  await wait(30);
+  const steps = a.of("teach.step");
+  const last = new Map(steps.map((m) => [m.step.n, m.step]));
+  assert.deepEqual([...last.keys()], [1, 2, 3]);
+  assert.equal(last.get(2).value, "1234");
+  assert.equal(last.get(3).secret, "keychain");
+  assert.equal(last.get(3).value, undefined, "a secret field's value is never kept");
+  const shot = steps.find((m) => m.shot && m.step.n === 1).shot;
+  assert.match(Buffer.from(shot.split(",")[1], "base64").toString(), /shot of 1 at 0.5/, "400px wide from an 800px tab");
+
+  // A load that follows a click is the click's; one long after is its own step.
+  env.browser.tabsMap.get(1).status = "loading";
+  await env.browser.tabs.onUpdated.fire(1, { url: "https://user.example/account" }, { ...env.browser.tabsMap.get(1) });
+  await wait(3400);
+  await env.browser.tabs.onUpdated.fire(1, { url: "https://user.example/typed" }, { ...env.browser.tabsMap.get(1) });
+  await wait(350);
+  const navs = a.of("teach.step").filter((m) => m.step.action === "navigate");
+  assert.deepEqual([...new Set(navs.map((m) => m.step.url))], ["https://user.example/typed"]);
+
+  // Stop and draft: the panel that asked gets its request id back, and recording ends.
+  const b = await env.panel(10, a.chatId);
+  await a.send("teach.stop", { requestId: "r1", draft: true });
+  await wait(750);
+  const done = a.of("teach").at(-1);
+  assert.equal(done.requestId, "r1");
+  assert.equal(done.recording.stopped, true);
+  assert.equal(done.recording.drafted, true);
+  assert.equal(done.recording.steps.length, 4);
+  assert.equal(b.of("teach").at(-1).requestId, undefined, "only the asking panel drafts");
+  assert.equal(env.browser.recorded.get(1), false);
+  await record({ action: "click", target: { role: "button", name: "late" } });
+  await wait(30);
+  assert.equal(a.of("teach.step").filter((m) => m.step.n === 5).length, 0);
+});
+
+test("Teach starts a fresh chat when this one is in use, and refuses agent and non-web tabs", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await env.host({ type: "chat.event", chatId: a.chatId, event: { kind: "status", status: "idle" } });
+  await a.send("teach.start");
+  const state = a.of("state").at(-1);
+  assert.notEqual(state.chatId, a.chatId);
+  assert.ok(state.teach);
+
+  // New chat ends a recording that was never drafted.
+  await a.send("chat.new");
+  assert.equal(env.browser.recorded.get(1), false);
+  assert.equal(a.of("state").at(-1).teach, null);
+
+  env.browser.tabsMap.get(1).url = "about:preferences";
+  await a.send("teach.start");
+  assert.match(a.of("teach").at(-1).error, /Open the page/);
+  await env.callTool("tabs_create_mcp");
+  env.browser.tabsMap.get(1).active = false;
+  Object.assign(env.browser.tabsMap.get(2), { active: true, url: "https://agent.example/" });
+  await a.send("teach.start");
+  assert.match(a.of("teach").at(-1).error, /agent's tab group/);
+});
+
+test("Teach turns don't adopt the viewed tab; saving sends the draft, recording and shots to the host", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await a.send("teach.start");
+  const chatId = a.of("state").at(-1).chatId;
+  await env.browser.claudePage.onRecord.fire(1, { action: "click", target: { role: "button", name: "Renew all" } });
+  await wait(30);
+  await a.send("teach.stop", { requestId: "r", draft: true });
+  await wait(750);
+  const rec = a.of("teach").at(-1).recording;
+
+  await a.send("chat.send", { chatId, engine: "claude", text: "Teach: ...", attachments: [], teach: true });
+  assert.equal(env.browser.tabsMap.get(1).groupId, -1);
+  assert.deepEqual(env.sentToHost("chat.send")[0].context, { tabs: [] });
+
+  const draft = { name: "renew-books", steps: [{ from: 1, expect: { text: "Renewed" } }] };
+  await a.send("teach.save", { requestId: "s1", mode: "skill", draft, recording: rec, replay: false });
+  const [save] = env.sentToHost("teach.save");
+  assert.equal(save.chatId, chatId);
+  assert.equal(save.engine, "claude");
+  assert.equal(save.mode, "skill");
+  assert.equal(save.replay, false);
+  assert.equal(save.replace, false);
+  assert.deepEqual(save.draft, draft);
+  assert.match(Buffer.from(save.shots[1], "base64").toString(), /shot of 1/);
+  await env.host({ type: "teach.saved", requestId: save.requestId, ok: true, dir: "/h/.claude/skills/renew-books" });
+  assert.deepEqual(a.of("teach.saved"), [{ type: "teach.saved", requestId: "s1", ok: true, dir: "/h/.claude/skills/renew-books" }]);
+
+  await a.send("teach.discard");
+  assert.equal(a.of("teach").at(-1).recording, null);
+});
+
+test("teach.save without the host gets a failed answer", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await env.browser.native.onDisconnect.fire();
+  await a.send("teach.save", { requestId: "s", mode: "try", draft: { name: "x" }, recording: { id: "r", steps: [] } });
+  const reply = a.of("teach.saved")[0];
+  assert.equal(reply.ok, false);
+  assert.match(reply.error, /not connected/);
+});
+
+// A page for replay_steps: `locate` finds the names listed in `present`, and the page text is `text`.
+function replayPage(env, { present = [], text = "" } = {}) {
+  const ops = [];
+  env.browser.claudePage.call = async (tabId, op, args) => {
+    ops.push([op, args]);
+    if (op === "textSize") return 10;
+    if (op === "viewport") return { width: 1000, height: 800, dpr: 2, scrollX: 0, scrollY: 0, title: "t", url: "u" };
+    if (op === "locate") return present.includes(args.target.name) ? { ref: `ref_${present.indexOf(args.target.name) + 1}`, how: "role and name" } : { missing: true };
+    if (op === "contains") return text.includes(args.text);
+    if (op === "readPage") return 'link "Home" [ref_9]';
+    return "done";
+  };
+  return ops;
+}
+
+const REPLAY = {
+  site: "user.example",
+  start: "https://user.example/",
+  inputs: ["card", "pin:keychain"],
+  steps: [
+    { click: { role: "link", name: "Log in" } },
+    { type: { role: "textbox", name: "Card" }, text: "{card}" },
+    { type: { role: "textbox", name: "PIN", frame: [{ index: 0, url: "https://login.example/" }] }, text: "{pin}", shot: "/skills/x/steps/3.jpg" },
+    { key: "Enter" },
+    { click: { role: "button", name: "Renew all" }, expect: { text: "Renewed" } },
+  ],
+};
+
+test("replay_steps runs every step by ref, types inputs, checks expect, and never logs the values", async () => {
+  const env = await load();
+  await env.callTool("tabs_create_mcp");
+  env.browser.tabsMap.get(2).url = "https://user.example/home";
+  const ops = replayPage(env, { present: ["Log in", "Card", "PIN", "Renew all"], text: "3 items Renewed" });
+  const r = await env.callTool("replay_steps", { tabId: 2, replay: REPLAY, inputs: { card: "1234", pin: "s3cret" } });
+  assert.equal(r.result.isError, undefined, r.result.content[0].text);
+  assert.match(r.result.content[0].text, /^Replayed all 5 steps; 1 check\(s\) passed/);
+  const acts = ops.filter(([op]) => ["click", "fill", "key"].includes(op));
+  assert.deepEqual(plain(acts), [
+    ["click", { ref: "ref_1" }],
+    ["fill", { ref: "ref_2", text: "1234" }],
+    ["fill", { ref: "ref_3", frame: [{ index: 0, url: "https://login.example/" }], text: "s3cret" }],
+    ["key", { keys: "Enter" }],
+    ["click", { ref: "ref_4" }],
+  ]);
+  assert.equal(env.browser.tabsMap.get(2).url, "https://user.example/home", "already on the site: not sent back to the start");
+  const entry = env.popup().last().log.at(-1);
+  assert.equal(entry.tool, "replay_steps");
+  assert.equal(entry.detail, "5 step(s), 2 input(s)");
+  assert.doesNotMatch(JSON.stringify(env.popup().last()), /s3cret|1234/);
+});
+
+test("replay_steps stops at the first mismatch with the step, what was expected, its shot and the page", async () => {
+  const env = await load();
+  await env.callTool("tabs_create_mcp");
+  replayPage(env, { present: ["Log in", "Card"] });
+  const missing = await env.callTool("replay_steps", { tabId: 2, replay: REPLAY, inputs: { card: "1234" } });
+  assert.match(missing.result.content[0].text, /^Replay stopped at step 3 of 5: type into textbox "PIN"\.\nExpected: a value for the input "pin"/);
+  assert.equal(env.browser.tabsMap.get(2).url, "https://user.example/", "an empty tab is sent to the recording's start");
+
+  const gone = await env.callTool("replay_steps", { tabId: 2, replay: REPLAY, inputs: { card: "1234", pin: "x" } }, "s1", undefined, 12_000);
+  const out = gone.result.content[0].text;
+  assert.equal(gone.result.isError, undefined, "a mismatch is an answer, not an error");
+  assert.match(out, /^Replay stopped at step 3 of 5/);
+  assert.match(out, /Found: nothing like it on the page after 6s\./);
+  assert.match(out, /Screenshot of this step when it was recorded: \/skills\/x\/steps\/3\.jpg/);
+  assert.match(out, /Steps 1-2 ran\./);
+  assert.match(out, /Page \(interactive elements\):\nlink "Home" \[ref_9\]/);
 });

@@ -85,7 +85,7 @@ test("mcp server: without it, each server process gets its own random session", 
 test("host: chat messages reach chat.mjs and its replies come back over native messaging", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "fab-host-"));
   const host = spawn(process.execPath, [path.join(ROOT, "host/host.mjs")], {
-    env: { ...process.env, HOME: home, CLAUDE_BIN: path.join(HERE, "fake-claude.mjs"), CODEX_BIN: "/nonexistent/codex", SHELL: "/bin/false" },
+    env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", CLAUDE_BIN: path.join(HERE, "fake-claude.mjs"), CODEX_BIN: "/nonexistent/codex", SHELL: "/bin/false" },
     stdio: ["pipe", "pipe", "inherit"],
   });
   const got = [];
@@ -116,6 +116,13 @@ test("host: chat messages reach chat.mjs and its replies come back over native m
     toHost({ type: "chat.send", chatId, engine: "claude", model: "claude-opus-5-5", effort: "high", text: "hi", attachments: [], context: { tabs: [] } });
     await until("the turn's result", () => got.some((m) => m.type === "chat.event" && m.chatId === chatId && m.event.kind === "result"));
     assert.ok(got.some((m) => m.type === "chat.event" && m.event.kind === "text" && m.event.text.startsWith("Hello from the fake")));
+
+    // Teach's Save goes to teach.mjs, which writes the skill and says where.
+    const recording = { id: "r1", site: "a.example", start: "https://a.example/", steps: [{ n: 1, action: "click", target: { role: "button", name: "Go" } }] };
+    toHost({ type: "teach.save", requestId: "t1", chatId, engine: "claude", mode: "skill", draft: { name: "press-go" }, recording, replay: true, shots: {} });
+    const saved = await until("the save", () => got.find((m) => m.type === "teach.saved"));
+    assert.deepEqual(saved, { type: "teach.saved", requestId: "t1", ok: true, dir: path.join(home, ".claude/skills/press-go"), replayPath: path.join(home, ".claude/skills/press-go/replay.json") });
+    assert.ok(fs.existsSync(path.join(home, ".claude/skills/press-go/SKILL.md")));
 
     // The existing bridge still works alongside: an MCP-side call reaches the extension side.
     const sock = net.createConnection(path.join(home, ".firefox-agent-bridge/bridge.sock"));

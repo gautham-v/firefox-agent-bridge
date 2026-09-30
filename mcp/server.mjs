@@ -165,7 +165,47 @@ const TOOLS = [
     description: "The page's visible text as plain text (title and URL first). Good for reading job lists, articles and descriptions.",
     inputSchema: { type: "object", properties: { tabId: tabId() }, required: ["tabId"] },
   },
+  {
+    name: "replay_steps",
+    description:
+      "Run a recorded replay.json (saved by Teach in the Firefox panel, next to a skill's SKILL.md) in a tab, without reasoning about each step. Each step's element is found by role and name (then its CSS selector and nearby text), acted on, and its expected result checked. It stops at the first step that doesn't match and returns the step number, what was expected, the recorded screenshot of that step and the page's interactive elements; finish the task from there with the other tools.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Absolute path of the replay.json." },
+        inputs: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          description: 'Values for the replay\'s inputs by name, e.g. {"card_number": "1234"}, including secret ones (listed as "name:keychain" or "name:ask"). They are typed into the page and never logged.',
+        },
+        tabId: tabId("Tab to replay in. Omit to use the first tab in the agent's tab group (created if needed)"),
+      },
+      required: ["path"],
+    },
+  },
 ];
+
+const REPLAY_TIMEOUT_MS = 600_000;
+const MAX_REPLAY_BYTES = 1_000_000;
+
+// replay_steps reads the file here, where the path is meaningful, and sends Firefox the steps.
+// Screenshot paths in it are relative to the file.
+function loadReplay(args) {
+  const file = String(args.path ?? "");
+  if (!path.isAbsolute(file)) throw new Error("path must be the absolute path of a replay.json.");
+  let replay;
+  try {
+    if (fs.statSync(file).size > MAX_REPLAY_BYTES) throw new Error("it is over 1 MB");
+    replay = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (e) {
+    throw new Error(`Couldn't read ${file}: ${e.message}`);
+  }
+  if (!Array.isArray(replay?.steps)) throw new Error(`${file} has no steps.`);
+  for (const step of replay.steps) {
+    if (typeof step?.shot === "string") step.shot = path.resolve(path.dirname(file), step.shot);
+  }
+  return { replay, inputs: args.inputs, tabId: args.tabId };
+}
 
 // ---- bridge connection --------------------------------------------------------------------
 
@@ -227,11 +267,12 @@ async function callFirefox(tool, args) {
     );
   }
   const id = nextId++;
+  const timeout = tool === "replay_steps" ? REPLAY_TIMEOUT_MS : CALL_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       inflight.delete(id);
-      reject(new Error(`Firefox did not answer ${tool} within ${CALL_TIMEOUT_MS / 1000}s.`));
-    }, CALL_TIMEOUT_MS);
+      reject(new Error(`Firefox did not answer ${tool} within ${timeout / 1000}s.`));
+    }, timeout);
     inflight.set(id, {
       resolve: (r) => (clearTimeout(timer), resolve(r)),
       reject: (e) => (clearTimeout(timer), reject(e)),
@@ -283,7 +324,7 @@ async function handle(msg) {
       const { name, arguments: args = {} } = params;
       if (!TOOLS.some((t) => t.name === name)) throw Object.assign(new Error(`Unknown tool ${name}`), { code: -32602 });
       try {
-        const result = await callFirefox(name, args);
+        const result = await callFirefox(name, name === "replay_steps" ? loadReplay(args) : args);
         return args.save_to_disk ? saveImages(result) : result;
       } catch (e) {
         return { content: [{ type: "text", text: e.message }], isError: true };

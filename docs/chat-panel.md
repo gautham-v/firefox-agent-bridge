@@ -112,6 +112,7 @@ Extension to host:
 | `chat.history` | `requestId` |
 | `chat.load` | `requestId`, `chatId`, `source` (`panel` \| `terminal`), `path` for terminal sessions |
 | `chat.capabilities` | `requestId`, `engine` |
+| `teach.save` | Teach's Save and Try it once ([docs/teach.md](teach.md)): `requestId`, `chatId`, `engine`, `mode`, `draft`, `recording`, `replay`, `replace`, `shots` |
 
 Host to extension:
 
@@ -120,6 +121,7 @@ Host to extension:
 | `chat.event` | `chatId`, `event` (below) |
 | `chat.history` | `requestId`, `chats: [{id, title, updatedAt, engine, model, source, origin?, cwd, path, running}]`, newest first; `updatedAt` is epoch ms; `running` means a turn is in progress; `origin: "phone"` marks a chat-folder session with a `bridge-session` entry, i.e. one started by `claude remote-control` (the panel shows "From phone"); `source: "terminal"` for Claude Code sessions outside the chat folder that used `mcp__firefox__` tools in the last 14 days (at most 30; panel chats at most 100) |
 | `chat.transcript` | `requestId`, `chatId`, `items` (the same shapes as events, each with its `kind`: `user`, `text`, `tool_start`, `tool_end`, `result`), `done`; the last 1500 items, in chunks under 600 KB |
+| `teach.saved` | `requestId`, `ok`, `dir`, `replayPath`, or `error` (and `exists` when a skill of that name is there) |
 | `chat.capabilities` | `requestId`, `engine`, `available`, `version`, `error`, `skills: [{name, description, sites}]`, `plugins: [{name}]`, `connectors: [{name, status}]`, `models: [{id, label, efforts?, default?}]`, `efforts` |
 
 Capabilities cost no model tokens: for Claude Code the host asks a prompt-less `claude -p` for its
@@ -166,20 +168,20 @@ Claude's), `chat.send` (as above,
 without `context` but with `elements`, the picked elements; background adds the group's tabs and
 binds the chat first), `chat.interrupt`,
 `chat.permission`, `chat.history {requestId}`, `chat.capabilities {requestId, engine}`,
-`group.add {tabId}`,
+`group.add {tabId}`, `teach.start`, `teach.stop {requestId, draft}`, `teach.discard`, `teach.save` (Teach, [docs/teach.md](teach.md); a `chat.send` with `teach: true` doesn't adopt the viewed tab),
 `group.remove {tabId}`, `resume` (undoes Stop all agents: every paused session, and the pause on
 new ones), `stopAll` (pauses Firefox calls and also sends `chat.interrupt` for every chat whose
 turn is running; the Alt+Shift+X shortcut and the activity sheet's Stop do the same), `popout`,
 `mark {tabId, ref, label, reveal, clear}` (outline an element the agent linked; only tabs in the
 chat's group, and `reveal` switches to the tab), `point.clear` (Alt was let go in the panel).
 
-Background to panel: `state {windowId, chatId, events, group, activeTab, paused, engine, model, effort}`
+Background to panel: `state {windowId, chatId, events, group, activeTab, paused, engine, model, effort, teach}`
 on hello and on chat switches; `chat.event`, `chat.history`, `chat.transcript`,
 `chat.capabilities` relayed; `group {chatId, label, color, tabs: [{tabId, title, url, favIconUrl, active}]}`
 when membership or titles change (in `state`, a chat with no group yet has `label` and `color`
 null and `tabs` empty); `activeTab {tab}` (same tab shape as in `group`, or null) when the window's active tab changes or
 its title, URL or icon does;
-`paused {paused}` when the chat's session is paused or resumed; `hostUp` when the native host
+`paused {paused}` when the chat's session is paused or resumed; `teach {recording | error}` and `teach.step {recordingId, step, shot}` for a Teach recording; `hostUp` when the native host
 (re)connects, so a panel showing "not connected" asks for capabilities again; `pick {chatId,
 element: {tabId, ref, role, name, text, image}}` when the user Alt+clicks an element (`image` is a
 PNG data URL, or null); `markFailed {error}` when a clicked element link can't be shown.

@@ -24,6 +24,17 @@ const POINT_EVENTS = Object.fromEntries(
 const PICK_TOPIC = "firefox-agent-bridge:pick";
 // Refs made in a child frame name it (ref_7@f12), so ops on them start in that frame.
 const FRAME_REF = /@f(\d+)$/;
+// Teach (docs/teach.md): the browser ids of tabs being recorded, shared with every content
+// process, and the topic the parent actor reports recorded steps on.
+const RECORDING_KEY = "firefox-agent-bridge:recording";
+const RECORD_TOPIC = "firefox-agent-bridge:record";
+// The user input the child actor records. Capturing at the top of the chain, the actor sees
+// each event before the page does, whatever the page does with it. A page going away only
+// matters to an actor that is holding typing.
+const RECORD_EVENTS = { click: { capture: true }, input: { capture: true }, change: { capture: true }, keydown: { capture: true }, pagehide: { createActor: false } };
+// The actor registers for both sets. Teach needs an actor made for its events in any tab (the
+// recording flag is checked there); point and ask only acts where it already armed one.
+const ACTOR_EVENTS = { ...POINT_EVENTS, ...RECORD_EVENTS, pagehide: { capture: true, createActor: false } };
 
 const MIME = {
   pdf: "application/pdf",
@@ -65,6 +76,27 @@ function armFrames(browser, on) {
 
 function browserWindows() {
   return [...Services.wm.getEnumerator("navigator:browser")];
+}
+
+function setRecording(browserId, on) {
+  const ids = new Set(Services.ppmm.sharedData.get(RECORDING_KEY) ?? []);
+  if (on) ids.add(browserId);
+  else ids.delete(browserId);
+  Services.ppmm.sharedData.set(RECORDING_KEY, [...ids]);
+  Services.ppmm.sharedData.flush();
+}
+
+// The frame a recorded step happened in: at each level, the child at the recorded index if it
+// still shows the same page, else the first that does, else the one at that index.
+function frameAt(top, path) {
+  let bc = top;
+  for (const { index, url } of path) {
+    const kids = bc.children ?? [];
+    const same = (c) => (c?.currentWindowGlobal?.documentURI?.spec ?? "").replace(/[?#].*$/, "") === url;
+    bc = (same(kids[index]) ? kids[index] : kids.find(same)) ?? kids[index];
+    if (!bc) throw new Error("The frame this step happened in isn't on the page.");
+  }
+  return bc;
 }
 
 // An extension tab group id is the internal id ("<13 digit ms>-<n>") without its hyphen, as in
@@ -142,7 +174,7 @@ this.claudePage = class extends ExtensionAPI {
     unregisterActor();
     ChromeUtils.registerWindowActor(ACTOR, {
       parent: { esModuleURI: `resource://${RES_HOST}/actor-parent.sys.mjs` },
-      child: { esModuleURI: `resource://${RES_HOST}/actor-child.sys.mjs`, events: POINT_EVENTS },
+      child: { esModuleURI: `resource://${RES_HOST}/actor-child.sys.mjs`, events: ACTOR_EVENTS },
       allFrames: true,
       safeForUntrustedWebProcess: true,
     });
@@ -153,6 +185,7 @@ this.claudePage = class extends ExtensionAPI {
     Services.obs.removeObserver(this.frameObserver, "window-global-created");
     for (const browser of this.pointing.values()) armFrames(browser, false);
     this.removeSheets();
+    Services.ppmm.sharedData.delete(RECORDING_KEY);
     unregisterActor();
     resHandler().setSubstitution(RES_HOST, null);
   }
@@ -169,11 +202,12 @@ this.claudePage = class extends ExtensionAPI {
     // Runs op in the tab's top frame. When the child answers { descend: { id, args } } the
     // target lives in a child frame (possibly another process), so the op is re-sent there.
     // A frame that answers { bubble } couldn't act (a scroll over a frame that can't scroll),
-    // so the op goes back to the frame that descended, with noDescend set.
+    // so the op goes back to the frame that descended, with noDescend set. An op with a `frame`
+    // path (a Teach step's) starts in that frame instead of the top one.
     async function run(tabId, op, args) {
       await self.ready;
       const top = topContext(tabId);
-      let bc = top;
+      let bc = Array.isArray(args?.frame) && args.frame.length ? frameAt(top, args.frame) : top;
       let current = args ?? {};
       const framed = FRAME_REF.exec(current.ref ?? current.refId ?? "");
       if (framed) {
@@ -208,6 +242,14 @@ this.claudePage = class extends ExtensionAPI {
         throw new ExtensionError(e?.message ?? String(e));
       }
     };
+
+    function tabIdOf(browserId) {
+      for (const win of browserWindows()) {
+        const tab = (win.gBrowser?.tabs ?? []).find((t) => t.linkedBrowser?.browserId === browserId);
+        if (tab) return tabManager.getWrapper(tab)?.id ?? null;
+      }
+      return null;
+    }
 
     return {
       claudePage: {
@@ -295,6 +337,32 @@ this.claudePage = class extends ExtensionAPI {
             };
             Services.obs.addObserver(observer, PICK_TOPIC);
             return () => Services.obs.removeObserver(observer, PICK_TOPIC);
+          },
+        }).api(),
+
+        // Starts or stops recording the user's input in a tab (Teach). Steps arrive on onRecord.
+        record: surfaced(async (tabId, on) => {
+          await self.ready;
+          setRecording(tabManager.get(tabId).nativeTab.linkedBrowser.browserId, !!on);
+          return true;
+        }),
+
+        onRecord: new ExtensionCommon.EventManager({
+          context,
+          name: "claudePage.onRecord",
+          register: (fire) => {
+            const observer = (subject, topic, data) => {
+              let msg;
+              try {
+                msg = JSON.parse(data);
+              } catch {
+                return;
+              }
+              const tabId = tabIdOf(msg.browserId);
+              if (tabId != null) fire.async(tabId, msg.step);
+            };
+            Services.obs.addObserver(observer, RECORD_TOPIC);
+            return () => Services.obs.removeObserver(observer, RECORD_TOPIC);
           },
         }).api(),
 

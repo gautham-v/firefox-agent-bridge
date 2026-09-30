@@ -134,7 +134,7 @@ try {
     agent.notify("notifications/initialized");
     const { result } = await agent.request("tools/list");
     const names = result.tools.map((t) => t.name).sort();
-    assert.deepEqual(names, ["computer", "file_upload", "find", "form_input", "get_page_text", "javascript_tool", "navigate", "read_page", "tabs_close_mcp", "tabs_context_mcp", "tabs_create_mcp"]);
+    assert.deepEqual(names, ["computer", "file_upload", "find", "form_input", "get_page_text", "javascript_tool", "navigate", "read_page", "replay_steps", "tabs_close_mcp", "tabs_context_mcp", "tabs_create_mcp"]);
     assert.doesNotMatch(JSON.stringify(result), /Claude/);
   });
 

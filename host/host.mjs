@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { createChat } from "./chat.mjs";
 import { createRedactRules } from "./redact.mjs";
+import { createTeach } from "./teach.mjs";
 
 const DIR = path.join(os.homedir(), ".firefox-agent-bridge");
 const SOCKET = path.join(DIR, "bridge.sock");
@@ -20,6 +21,8 @@ const log = (...a) => fs.appendFileSync(LOG, `${new Date().toISOString()} ${a.jo
 
 // The sidebar chat: `chat.*` messages are handled by chat.mjs, which runs Claude Code and Codex.
 const chat = createChat({ send: (msg) => send(msg), log });
+// Teach: `teach.*` messages write a drafted skill to disk (teach.mjs).
+const teach = createTeach({ send: (msg) => send(msg), log });
 
 // Redaction rules go to the extension when it says hello, and again before the next call after
 // the file changes, so an edit applies without restarting Firefox.
@@ -67,7 +70,7 @@ const clients = new Map(); // client id -> { socket, info: {name, version, pid, 
 let nextClient = 1;
 
 function onExtensionMessage(msg) {
-  if (chat.handle(msg)) return;
+  if (chat.handle(msg) || teach.handle(msg)) return;
   if (msg.type === "hello") {
     log("extension connected, version", msg.version);
     send({ type: "redact", rules: redact.load() });

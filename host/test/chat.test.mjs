@@ -109,6 +109,17 @@ test("claude: a turn streams text and pins the chat's session, model, effort and
   }
 });
 
+test("claude: a Teach recording sent to draft a skill is titled New skill", async () => {
+  const t = setup();
+  try {
+    const id = newId();
+    await t.turn(id, 'Teach: draft a skill.\n<teach-recording id="r1">\n{"steps":[]}\n</teach-recording>');
+    assert.equal(t.events(id).find((e) => e.kind === "title").title, "New skill");
+  } finally {
+    t.done();
+  }
+});
+
 test("claude: the user's tabs and files reach the model as a context block, not as the echoed text", async () => {
   const t = setup();
   try {

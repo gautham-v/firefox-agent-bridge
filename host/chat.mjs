@@ -805,7 +805,8 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     const attachments = (Array.isArray(msg.attachments) ? msg.attachments : []).map((a) => ({ name: clip(a?.name ?? "file", 200), mime: clip(a?.mime ?? "", 100) }));
     const skill = skillName(msg.skill);
     emitText(c, null, "user", text, { attachments, ...(skill ? { skill } : {}) });
-    if (!c.title && (text.trim() || skill)) setTitle(c, clip(text.trim() || `/${skill}`, 60));
+    // A Teach recording sent to draft a skill from is titled for what it makes.
+    if (!c.title && (text.trim() || skill)) setTitle(c, text.includes("<teach-recording ") ? "New skill" : clip(text.trim() || `/${skill}`, 60));
     c.turns++;
     c.turnError = false;
     // Sends run one at a time so a spawn in progress isn't raced by the next message.

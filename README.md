@@ -62,6 +62,11 @@ These have the same names and arguments as Claude in Chrome: `tabs_context_mcp`,
 `form_input`, `javascript_tool`, `file_upload` and `get_page_text`. In Claude Code they show up
 as `mcp__firefox__<name>`; Codex lists them under `mcp__firefox`.
 
+`replay_steps {path, inputs, tabId}` is this bridge's own: it runs a `replay.json` saved by
+[Teach](#chat-panel) step by step without the model, and at the first step that doesn't match it
+stops and returns the step, what was expected, the recorded screenshot of it and the page's
+interactive elements, so the agent finishes from there.
+
 Differences from Chrome:
 
 - `find` matches keywords over element names, roles, labels and attributes. It doesn't call a
@@ -113,6 +118,15 @@ Nothing is billed beyond your existing subscription, and nothing runs until you 
   more. If the sidebar is closed while a card waits, the toolbar button shows a `!`. Codex chats
   run in a read-only sandbox, since `codex exec` can't ask; it can still read files, so it is the
   less contained engine.
+- **Teach.** **Teach Claude a task** in the + menu records you doing a task in the tab you're on
+  (it isn't grouped): each click, field you type in, select and Enter is a step, found again later
+  by its role and accessible name, with a CSS selector and nearby text as fallbacks, and a small
+  screenshot. Values typed into password and other secret fields are never recorded; the step
+  says "from Keychain" or "ask". Stop and draft sends the steps to the chat's engine, which drafts
+  a skill: name, trigger, inputs (the typed values that change between runs), checks. Save writes
+  `~/.claude/skills/<name>/SKILL.md` and `replay.json`; with "Replay without Claude when steps
+  match" on, the skill runs `replay_steps` first. Try it once runs the draft in a tab of the
+  agent's own. The formats are in [docs/teach.md](docs/teach.md).
 - **History.** The clock button lists recent tasks: chats from the panel, and Claude Code sessions
   from your terminal that used the Firefox tools in the last 14 days. Opening one loads its
   transcript and the next message resumes it. Claude Code chats are ordinary sessions in
@@ -365,6 +379,7 @@ Codex can run on either of these instead:
 ## Further reading
 
 - [The chat panel's protocol and engine handling](docs/chat-panel.md)
+- [Teach: the recording, replay.json and replay_steps](docs/teach.md)
 - [What WebDriver BiDi would need to cover this bridge](docs/bidi-gap-map.md)
 
 ## License
