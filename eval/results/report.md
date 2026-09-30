@@ -1,6 +1,6 @@
 # Eval report
 
-Generated 2026-09-30T02:56:52.290Z from `results/runs.jsonl` (48 runs).
+Generated 2026-09-30T03:38:13.005Z from `results/runs.jsonl` (48 runs).
 
 Tokens are summed over every model in a run (sub-agents included). "Input tokens (incl. cache)" is input + cache writes + cache reads. Spread is [min–max]. Tool result chars is the text the tools returned into the context.
 
@@ -241,3 +241,113 @@ Output sizes (read_page):
 | bbc.com/news | plain | 115 (0) | 119 | 4 | 0 | 1 (1) | edigitalsurvey.com | 0 | 3.1k | 6.1k |
 | npmjs.com/package/express | plain | 146 (0) | 146 | 23 | 11 | 0 (0) |  | 0 | 2.1k | 5.0k |
 | excalidraw.com/ | app | 25 (0) | 25 | 2 | 1 | 0 (0) |  | 0 | 270 | 380 |
+
+## Browser comparison: Firefox tools vs Claude in Chrome (baseline arm)
+
+Source: `results/browsers.jsonl`. Same tasks, model and prompt (the prompt names "the Firefox browser tools" or "the Chrome browser tools"); Firefox runs get only the mcp__firefox__* tools, Chrome runs only mcp__claude-in-chrome__* (`claude -p --chrome` with an empty strict MCP config). Tools are compared by name without the server prefix. Tasks in the tables: those with runs in both browsers (16).
+
+**Known confounds.** Claude in Chrome's `find` calls a model server-side to match elements; those tokens and that cost don't appear in these counts, so Chrome's token and cost numbers are a lower bound whenever it uses `find` (its time is included in wall time and in `find`'s per-call time). Claude in Chrome also offers tools the Firefox server doesn't have (browser_batch, gif_creator, console/network readers, shortcuts, resize_window, upload_image, browser selection), and its `scroll` returns a screenshot, so compare "images returned" as well as screenshot actions. Chrome needs its window visible for screenshots; Firefox tabs run in the background.
+
+### Overall
+
+| metric | firefox | chrome | chrome / firefox (medians) |
+| --- | --- | --- | --- |
+| runs | 48 | 48 | |
+| success | 100% (48/48) | 98% (47/48) | |
+| wall time (s) | 19.1 [7.9–252.1] | 25.5 [10.2–211.0] | 1.34 |
+| tool calls | 7 [3–107] | 7 [3–67] | 1.00 |
+| screenshot/zoom actions | 0 [0–34] | 0 [0–25] | – |
+| images returned to the model | 0 [0–34] | 0 [0–29] | – |
+| turns | 8 [4–108] | 8 [4–68] | 1.00 |
+| input tokens (incl. cache) | 60k [38k–2507k] | 119k [48k–1146k] | 1.97 |
+| uncached input tokens | 8.4k [3.7k–65k] | 11k [5.9k–47k] | 1.30 |
+| output tokens | 1.2k [493–19k] | 1.5k [548–11k] | 1.26 |
+| tool result KB (text + images) | 13.7 [0.4–1415.0] | 22.0 [1.3–1275.0] | 1.60 |
+| cost (USD) | 0.062 [0.028–0.935] | 0.080 [0.041–0.514] | 1.29 |
+
+Median [min–max] per run.
+
+### Per task
+
+| task | browser | runs | success | wall s | tool calls | shots | images | input tok | output tok | tool result KB |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| art-ars-dragon | firefox | 3 | 100% (3/3) | 12.3 [10.1–13.8] | 4 [4–4] | 0 [0–0] | 0 [0–0] | 48k [40k–48k] | 594 [579–600] | 13.6 [13.6–13.6] |
+| art-ars-dragon | chrome | 3 | 100% (3/3) | 12.2 [11.0–13.2] | 4 [4–4] | 0 [0–0] | 0 [0–0] | 72k [72k–72k] | 597 [590–627] | 13.3 [13.3–13.3] |
+| art-ars-firefox | firefox | 3 | 100% (3/3) | 12.1 [7.9–12.7] | 4 [4–4] | 0 [0–0] | 0 [0–0] | 54k [46k–54k] | 524 [493–546] | 25.9 [25.9–25.9] |
+| art-ars-firefox | chrome | 3 | 100% (3/3) | 12.3 [10.5–13.4] | 4 [3–4] | 0 [0–0] | 0 [0–0] | 79k [55k–79k] | 617 [581–662] | 25.7 [25.6–25.7] |
+| art-guardian-tang | firefox | 3 | 100% (3/3) | 10.2 [9.8–15.5] | 4 [3–4] | 0 [0–0] | 0 [0–0] | 58k [40k–58k] | 654 [609–690] | 29.5 [29.5–29.5] |
+| art-guardian-tang | chrome | 3 | 100% (3/3) | 12.9 [10.6–13.9] | 4 [4–4] | 0 [0–0] | 0 [0–0] | 83k [83k–83k] | 573 [548–672] | 29.6 [29.6–29.6] |
+| data-hn-readability | firefox | 3 | 100% (3/3) | 19.2 [17.1–19.4] | 7 [6–7] | 0 [0–0] | 0 [0–0] | 58k [57k–58k] | 1.2k [1.2k–1.5k] | 11.3 [11.1–11.3] |
+| data-hn-readability | chrome | 3 | 100% (3/3) | 36.7 [36.6–99.1] | 11 [10–13] | 0 [0–2] | 0 [0–2] | 203k [195k–210k] | 3.1k [2.6k–3.3k] | 9.4 [8.6–261.5] |
+| data-crates-html | firefox | 3 | 100% (3/3) | 16.1 [14.9–16.5] | 6 [6–6] | 0 [0–0] | 0 [0–0] | 59k [51k–60k] | 819 [779–1.0k] | 5.0 [5.0–5.0] |
+| data-crates-html | chrome | 3 | 100% (3/3) | 20.5 [19.7–25.9] | 8 [6–8] | 0 [0–0] | 0 [0–0] | 87k [85k–104k] | 1.1k [735–1.2k] | 6.8 [5.9–6.8] |
+| data-ashby-ramp | firefox | 3 | 100% (3/3) | 13.0 [12.9–13.3] | 4 [4–4] | 0 [0–0] | 0 [0–0] | 58k [58k–58k] | 848 [831–881] | 23.7 [23.7–23.7] |
+| data-ashby-ramp | chrome | 3 | 100% (3/3) | 15.9 [14.9–17.0] | 4 [4–4] | 0 [0–0] | 0 [0–0] | 100k [85k–100k] | 916 [897–964] | 25.2 [25.2–25.2] |
+| cmp-pypi | firefox | 3 | 100% (3/3) | 38.7 [35.9–40.3] | 13 [13–14] | 0 [0–0] | 0 [0–0] | 93k [92k–114k] | 2.2k [2.0k–2.2k] | 4.6 [0.8–4.8] |
+| cmp-pypi | chrome | 3 | 100% (3/3) | 29.4 [25.6–87.0] | 6 [4–7] | 0 [0–0] | 0 [0–0] | 121k [84k–123k] | 2.4k [1.8k–2.6k] | 2.3 [1.9–4.7] |
+| cmp-npm | firefox | 3 | 100% (3/3) | 29.7 [27.3–32.8] | 12 [12–13] | 0 [0–0] | 0 [0–0] | 114k [106k–116k] | 1.8k [1.8k–2.1k] | 5.6 [5.6–5.7] |
+| cmp-npm | chrome | 3 | 100% (3/3) | 48.2 [35.9–211.0] | 8 [5–14] | 0 [0–1] | 0 [0–1] | 191k [129k–242k] | 3.1k [2.1k–4.4k] | 25.3 [21.1–38.2] |
+| gen-wiki-chain | firefox | 3 | 100% (3/3) | 23.1 [19.3–24.5] | 11 [11–12] | 0 [0–1] | 0 [0–1] | 123k [95k–176k] | 1.4k [1.3k–1.5k] | 27.8 [24.6–80.1] |
+| gen-wiki-chain | chrome | 3 | 100% (3/3) | 35.7 [31.8–38.1] | 13 [12–13] | 0 [0–0] | 0 [0–0] | 176k [156k–182k] | 2.3k [2.0k–2.5k] | 5.1 [4.2–7.0] |
+| gen-pydocs-search | firefox | 3 | 100% (3/3) | 18.0 [16.9–19.8] | 11 [11–11] | 0 [0–0] | 0 [0–0] | 94k [87k–94k] | 1.1k [1.1k–1.2k] | 13.8 [13.8–13.8] |
+| gen-pydocs-search | chrome | 3 | 100% (3/3) | 30.0 [16.4–34.2] | 18 [6–20] | 3 [0–3] | 3 [0–3] | 198k [103k–225k] | 2.0k [722–2.2k] | 103.0 [11.0–112.9] |
+| gen-elements-table | firefox | 3 | 100% (3/3) | 12.4 [10.6–13.2] | 4 [4–4] | 0 [0–0] | 0 [0–0] | 41k [41k–43k] | 764 [752–782] | 3.7 [3.1–3.7] |
+| gen-elements-table | chrome | 3 | 100% (3/3) | 12.7 [10.2–20.5] | 4 [3–5] | 0 [0–0] | 0 [0–0] | 65k [48k–84k] | 857 [708–1.2k] | 2.1 [2.1–2.6] |
+| gen-quotes-scroll | firefox | 3 | 100% (3/3) | 25.6 [24.1–29.3] | 4 [4–5] | 0 [0–0] | 0 [0–0] | 38k [38k–46k] | 673 [673–1.0k] | 0.4 [0.4–0.5] |
+| gen-quotes-scroll | chrome | 3 | 100% (3/3) | 55.7 [48.4–122.6] | 8 [5–15] | 0 [0–1] | 1 [0–19] | 135k [81k–347k] | 1.6k [1.2k–5.1k] | 22.9 [1.3–1275.0] |
+| gen-httpbin-form | firefox | 3 | 100% (3/3) | 19.0 [17.9–22.3] | 15 [14–15] | 1 [0–1] | 1 [0–1] | 73k [69k–73k] | 1.6k [1.5k–1.7k] | 15.1 [2.0–15.1] |
+| gen-httpbin-form | chrome | 3 | 100% (3/3) | 23.1 [20.2–24.0] | 8 [7–8] | 2 [1–2] | 1 [1–1] | 122k [103k–122k] | 1.8k [1.2k–1.8k] | 15.6 [15.5–16.2] |
+| gen-mdn-iframe | firefox | 3 | 100% (3/3) | 114.5 [82.3–252.1] | 71 [44–107] | 21 [10–34] | 20 [10–34] | 1315k [782k–2507k] | 12k [7.3k–19k] | 848.1 [506.5–1415.0] |
+| gen-mdn-iframe | chrome | 3 | 67% (2/3) | 99.3 [95.1–138.2] | 41 [39–67] | 15 [14–25] | 16 [15–29] | 675k [527k–1146k] | 6.4k [6.3k–11k] | 833.5 [823.9–1123.9] |
+| gen-apg-datepicker | firefox | 3 | 100% (3/3) | 23.3 [22.4–31.9] | 15 [15–16] | 2 [2–3] | 2 [2–3] | 81k [76k–89k] | 1.9k [1.8k–1.9k] | 167.1 [166.9–212.9] |
+| gen-apg-datepicker | chrome | 3 | 100% (3/3) | 31.2 [26.1–40.8] | 17 [12–17] | 4 [3–4] | 4 [3–4] | 153k [134k–182k] | 2.2k [1.7k–2.4k] | 297.7 [251.7–307.7] |
+| gen-datatables-scroll | firefox | 3 | 100% (3/3) | 22.2 [18.6–25.6] | 8 [7–11] | 0 [0–2] | 0 [0–2] | 64k [61k–79k] | 1.3k [1.1k–1.6k] | 5.0 [0.8–180.4] |
+| gen-datatables-scroll | chrome | 3 | 100% (3/3) | 25.1 [17.0–25.5] | 7 [6–7] | 1 [0–1] | 1 [0–1] | 116k [98k–132k] | 1.2k [1.0k–1.3k] | 45.9 [1.7–46.7] |
+
+### By tool (all tasks above)
+
+Calls, KB and images are per run (total / runs of that browser); ms is the mean per call, from the tool_use event to its tool_result on the stream.
+
+| tool | ff calls | chrome calls | ff KB | chrome KB | ff images | chrome images | ff ms/call | chrome ms/call | ff errors | chrome errors |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| computer | 4.5 | 4.1 | 72.7 | 89.0 | 1.6 | 1.8 | 402 | 1411 | 10 | 3 |
+| javascript_tool | 1.6 | 1.7 | 0.5 | 0.8 | 0.0 | 0.0 | 710 | 3707 | 8 | 6 |
+| navigate | 1.8 | 1.1 | 0.2 | 0.6 | 0.0 | 0.0 | 1904 | 2986 | 0 | 1 |
+| tabs_context_mcp | 1.0 | 1.0 | 0.1 | 0.4 | 0.0 | 0.0 | 55 | 1937 | 0 | 0 |
+| tabs_close_mcp | 1.0 | 0.9 | 0.0 | 0.1 | 0.0 | 0.0 | 29 | 141 | 0 | 0 |
+| get_page_text | 1.0 | 0.7 | 9.1 | 6.8 | 0.0 | 0.0 | 335 | 3661 | 0 | 0 |
+| find | 0.7 | 0.3 | 0.8 | 0.1 | 0.0 | 0.0 | 264 | 3135 | 0 | 5 |
+| form_input | 0.5 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 12 | – | 0 | – |
+| browser_batch | 0.0 | 0.5 | 0.0 | 26.6 | 0.0 | 0.4 | – | 11233 | – | 5 |
+| read_page | 0.1 | 0.1 | 1.3 | 0.6 | 0.0 | 0.0 | 457 | 1423 | 0 | 0 |
+| screenshot | 0.1 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 308 | – | 4 | – |
+| tabs_create_mcp | 0.1 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 38 | – | 0 | – |
+| scroll_to | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0 | – | 1 | – |
+| read_network_requests | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | – | 400 | – | 0 |
+
+### Tool mix per task
+
+| task | firefox (calls over all runs) | chrome (calls over all runs) |
+| --- | --- | --- |
+| art-ars-dragon | tabs_context_mcp 3, navigate 3, get_page_text 3, tabs_close_mcp 3 | tabs_context_mcp 3, navigate 3, get_page_text 3, tabs_close_mcp 3 |
+| art-ars-firefox | tabs_context_mcp 3, navigate 3, get_page_text 3, tabs_close_mcp 3 | tabs_context_mcp 3, navigate 3, get_page_text 3, tabs_close_mcp 2 |
+| art-guardian-tang | tabs_context_mcp 3, navigate 3, get_page_text 3, tabs_close_mcp 2 | tabs_context_mcp 3, navigate 3, get_page_text 3, tabs_close_mcp 3 |
+| data-hn-readability | navigate 8, get_page_text 6, tabs_context_mcp 3, tabs_close_mcp 3 | javascript_tool 15, navigate 7, tabs_context_mcp 3, get_page_text 3, tabs_close_mcp 3, computer 2, read_page 1 |
+| data-crates-html | navigate 6, get_page_text 6, tabs_context_mcp 3, tabs_close_mcp 3 | get_page_text 7, navigate 6, tabs_context_mcp 3, tabs_close_mcp 3, computer 3 |
+| data-ashby-ramp | tabs_context_mcp 3, navigate 3, get_page_text 3, tabs_close_mcp 3 | tabs_context_mcp 3, navigate 3, get_page_text 3, tabs_close_mcp 3 |
+| cmp-pypi | javascript_tool 17, navigate 15, tabs_context_mcp 3, tabs_close_mcp 3, get_page_text 2 | browser_batch 6, tabs_context_mcp 3, javascript_tool 3, tabs_close_mcp 3, get_page_text 1, navigate 1 |
+| cmp-npm | navigate 15, javascript_tool 13, tabs_context_mcp 3, get_page_text 3, tabs_close_mcp 3 | browser_batch 8, javascript_tool 7, tabs_context_mcp 3, computer 3, navigate 3, tabs_close_mcp 3 |
+| gen-wiki-chain | computer 10, find 9, tabs_context_mcp 3, navigate 3, get_page_text 3, tabs_close_mcp 3, javascript_tool 3 | javascript_tool 26, tabs_context_mcp 3, navigate 3, find 3, tabs_close_mcp 3 |
+| gen-pydocs-search | computer 12, find 6, get_page_text 6, tabs_context_mcp 3, navigate 3, tabs_close_mcp 3 | computer 23, get_page_text 7, navigate 4, find 4, tabs_context_mcp 3, tabs_close_mcp 3 |
+| gen-elements-table | tabs_context_mcp 3, navigate 3, javascript_tool 3, tabs_close_mcp 3 | javascript_tool 4, tabs_context_mcp 3, navigate 3, tabs_close_mcp 2 |
+| gen-quotes-scroll | javascript_tool 4, tabs_context_mcp 3, navigate 3, tabs_close_mcp 3 | javascript_tool 10, computer 5, tabs_context_mcp 3, navigate 3, tabs_close_mcp 3, browser_batch 3, read_network_requests 1 |
+| gen-httpbin-form | form_input 24, computer 5, tabs_context_mcp 3, navigate 3, read_page 3, get_page_text 3, tabs_close_mcp 3 | browser_batch 5, tabs_context_mcp 3, navigate 3, read_page 3, computer 3, get_page_text 3, tabs_close_mcp 3 |
+| gen-mdn-iframe | computer 155, javascript_tool 22, find 15, navigate 7, read_page 4, get_page_text 4, tabs_close_mcp 4, tabs_context_mcp 3, tabs_create_mcp 3, form_input 2, screenshot 2, scroll_to 1 | computer 124, javascript_tool 6, find 5, tabs_context_mcp 4, navigate 3, read_page 3, get_page_text 1, tabs_close_mcp 1 |
+| gen-apg-datepicker | computer 30, tabs_context_mcp 3, navigate 3, find 3, javascript_tool 3, tabs_close_mcp 3, screenshot 1 | computer 31, tabs_context_mcp 3, navigate 3, find 3, javascript_tool 3, tabs_close_mcp 2, browser_batch 1 |
+| gen-datatables-scroll | javascript_tool 10, computer 4, tabs_context_mcp 3, navigate 3, tabs_close_mcp 3, find 1, get_page_text 1, screenshot 1 | javascript_tool 9, tabs_context_mcp 3, navigate 3, tabs_close_mcp 3, computer 2 |
+
+### Failed runs
+
+| task | browser | run | failed fields | errors | trace |
+| --- | --- | --- | --- | --- | --- |
+| gen-mdn-iframe | chrome | 3 | displayed_text, option_count |  | results/traces/gen-mdn-iframe.baseline.chrome.3.2026-09-30T03-23-42-164Z.jsonl |
