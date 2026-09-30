@@ -181,27 +181,15 @@ Chrome's first-run medians were 25.5s, 7 calls, 119k and $0.080. What each fix m
 
 Still open:
 
-- `computer:scroll_to` on a frame ref is still wrong: "its center is now at (227, -63) (in frame
-  …mdnplay.dev), outside the page's viewport" in all 3 MDN runs (it was (227, 10)), with the
-  select at about (590, 403) in the screenshot; two runs clicked there and hit it. `read_page` on
-  the frame ref says the frame viewport is "698x71 at (0, -73) in the screenshot". So the frame's
-  own `mozInnerScreenX/Y` is wrong in this out-of-process frame of a background tab: it sits at
-  the top frame's screen origin less 73px, not where the frame is. Every frame offset that uses
-  it (scroll_to, `read_page`'s frame place, `find`'s coordinates for frame matches) is wrong the
-  same way. Taking the offset from the embedding `<iframe>`'s content box, frame by frame up to
-  the top, would not depend on it. Fixed since on `fix/frame-offsets`
-  (`experiment/frame-offset.sys.mjs`, used by find, scroll_to, `read_page`, point-and-ask crops
-  and the agent cam's masks); needs a restart to confirm. Before it, live on the MDN select page
-  (1422x809 screenshot): `find` put the select "(off-screen)" and `scroll_to` at (120, -8) while
-  it was at about (905, 404), and `read_page` placed the frame at (0, -73) while its `<iframe>`
-  was at (785, 339). Re-measure: the MDN task's `scroll_to` should answer about (905, 404) (or
-  wherever the screenshot shows the select), and `find` should give the same point.
 - The made-up `left_click` after `find "search box"` on docs.python.org (2 in 48).
-- `find` listed an element twice (heading "Text Input" [ref_1] twice for "text input" on
-  uitestingplayground.com/textinput; a recorded answer in `extension/test/fixtures` has the
-  same) and left out elements with the role the query named (`find "button"` there missed the
-  button). Fixed since on this branch (one entry per element; a query naming a role keeps up to 3
-  elements with that role); needs a restart to confirm.
+Checked by hand after the next restart (2026-09-30, live on the MDN select page, 1422x809
+screenshot):
+
+- **Frame offsets:** `find` put the "Choose a pet" select at (905, 478), where a zoom of that
+  region shows it. `scroll_to` on the multi-select's frame ref answered (607, 404), and the
+  screenshot shows it at about (610, 410). Before: "(off-screen)" and (120, -8).
+- **`find` duplicates and role queries** (uitestingplayground.com/textinput): `find "text input"`
+  lists the heading once, and `find "button"` returns the button first.
 
 # Model x effort benchmark
 
