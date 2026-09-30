@@ -202,17 +202,29 @@ screenshot):
 
 Some changes to what the model sees can be switched per run in `mcp/server.mjs`, so they can be
 A/B tested without restarting Firefox. The server reads a comma-separated list from
-`FIREFOX_BRIDGE_EXPERIMENTS`. Unset, tools/list and every result are as before
-(`host/test/fixtures/tools-list.json`). `node mcp/server.mjs --list-experiments` prints the flags.
+`FIREFOX_BRIDGE_EXPERIMENTS`; unknown names are ignored with a warning. tools/list is the same
+with or without flags (`host/test/fixtures/tools-list.json`). `node mcp/server.mjs
+--list-experiments` prints the flags.
+
+Six flags were measured on 2026-09-30 (below, and in "Kept and dropped" at the end). One,
+`fastNavigate`, became the default, and the other five were removed, so the commands in the
+two arms sections below run only at `a672d65`. The one flag left turns the kept change back
+off, so a new change can still be measured against the old behavior:
 
 | flag | what changes |
 | --- | --- |
-| `batchHint` | `find` and `read_page` results with refs end with "(The next clicks, typing and form_input on these refs can go in one batch call.)", except inside a batch. The `batch` description says to use it whenever the next two or more steps are known; `computer` says several clicks or keys on known refs go in one batch. |
-| `fewerShots` | `computer`'s description says action results already report what changed (element, text typed, focus and its value), so a checking screenshot after each action is usually unnecessary; take one when the page's appearance matters. |
-| `screenshotAlias` | Adds a `screenshot` tool ({tabId?, scale?}) that runs `computer`'s screenshot action, also inside `batch`; `computer` no longer says there is no screenshot tool. Sonnet calls this name with empty input about 0.4 times a run. |
-| `quietTabs` | `navigate` leaves out "This session's tabs: {…}" while the session's tab ids are the ones the last result that showed a list had (`tabs_context_mcp`, `tabs_create_mcp`, or an earlier `navigate`). The created-tab note stays. |
-| `pageTextCap` | `get_page_text` returns at most 8000 characters (`pageTextCap=4000` sets another default), then a line with how many are left and the `offset` to read on from. Adds optional `offset` and `max_chars`. The server slices the full text. |
-| `fastNavigate` | `navigate` sends `wait: "interactive"` to the extension unless the call set `wait`. Until Firefox loads an extension that knows `wait`, it is ignored and this arm is the same as none. |
+| `waitForLoad` | `navigate` goes to Firefox without `wait`, so it waits for the load event and for the text to settle, as before. Without it the server sends `wait: "interactive"` unless the call set `wait`. |
+
+The six that were measured:
+
+| flag | what it changed | now |
+| --- | --- | --- |
+| `batchHint` | `find` and `read_page` results with refs ended with "(The next clicks, typing and form_input on these refs can go in one batch call.)", except inside a batch. The `batch` description said to use it whenever the next two or more steps are known; `computer` said several clicks or keys on known refs go in one batch. | removed |
+| `fewerShots` | `computer`'s description said action results already report what changed, so a checking screenshot after each action is usually unnecessary. | removed |
+| `screenshotAlias` | Added a `screenshot` tool ({tabId?, scale?}) that ran `computer`'s screenshot action. | removed |
+| `quietTabs` | `navigate` left out "This session's tabs: {…}" while the session's tab ids hadn't changed since a result last showed them. | removed |
+| `pageTextCap` | `get_page_text` returned at most 8000 characters, then how many were left and the `offset` to read on from. | removed |
+| `fastNavigate` | `navigate` sent `wait: "interactive"` unless the call set `wait`. | the default |
 
 Both runners take `--experiments <flags>` for the MCP server they start. Given more than once,
 each is an arm: `run.mjs` runs every Firefox cell once per arm, and `models.mjs` shuffles every
@@ -223,21 +235,23 @@ arms with different labels share one `--out` file. Without `--experiments`, cell
 as before.
 
 ```sh
-node eval/run.mjs --browser firefox --arms baseline --concurrency 2 --out eval/results/experiments.jsonl \
-  --experiments none --experiments batchHint,fewerShots,screenshotAlias --arm-label none --arm-label hints
-node eval/report.mjs --experiments eval/results/experiments.jsonl   # "Experiment arms (Firefox)"
+node eval/run.mjs --browser firefox --arms baseline --concurrency 3 --runs 1 --out eval/results/browsers-confirm.jsonl \
+  --experiments waitForLoad --arm-label before --experiments none --arm-label kept
+node eval/report.mjs --experiments eval/results/browsers-confirm.jsonl   # "Experiment arms (Firefox)"
+node eval/arms-analysis.mjs --in eval/results/browsers-confirm.jsonl --out eval/results/browsers-confirm-report.md
 
-node eval/models.mjs --tier hard --configs sonnet:medium --out eval/results/models-hard/experiments.jsonl \
-  --experiments none --experiments batchHint --experiments fewerShots,screenshotAlias
-node eval/models-report.mjs --in eval/results/models-hard/experiments.jsonl --prefix experiments-
+node eval/models.mjs --tier hard --configs sonnet:low,sonnet:high --rounds 2 --concurrency 3 --out eval/results/models-hard/confirm/runs.jsonl \
+  --experiments waitForLoad --arm-label before --experiments none --arm-label kept
+node eval/models-arms-report.mjs --in eval/results/models-hard/confirm/runs.jsonl --prefix confirm-
 ```
 
-Run each again until it says complete. `report.mjs` groups rows by arm ("none" first) and adds
-batch share, actions per run, screenshot actions, calls to the screenshot tool and result sizes
-for `navigate` and `get_page_text`. `models-report.mjs` splits every config by arm when the file
-has more than one (`--by-arm` forces it) and adds an "Experiment arms" table against "none".
-Models rows now also carry `screenshot_actions` (screenshots and zooms inside batches too); the
-older `screenshots` counts top-level calls only.
+Run each again until it says complete. The reports compare every arm with a reference arm:
+"none" if there is one, else "before". `report.mjs` adds batch share, actions per run,
+screenshot actions, calls to the screenshot tool and result sizes for `navigate` and
+`get_page_text`. `models-report.mjs` splits every config by arm when the file has more than one
+(`--by-arm` forces it) and adds an "Experiment arms" table against the reference. Models rows
+also carry `screenshot_actions` (screenshots and zooms inside batches too); the older
+`screenshots` counts top-level calls only.
 
 ### All six flags on the browser-comparison tasks (2026-09-30)
 
@@ -255,10 +269,13 @@ node eval/arms-analysis.mjs --in eval/results/browsers-arms.jsonl --out analysis
 ```
 
 Result: 222 of 224 runs passed (two wrong answer shapes on gen-httpbin-form, unrelated to the
-flags). `batchHint` and `screenshotAlias` stay: 11% fewer tool calls with `batchHint`, and no calls to a screenshot tool that isn't offered. `fastNavigate` cut `navigate` from
-1.9s to 0.6s and wall time about 3% (inside noise), with one case of an unrendered single-page app.
-`pageTextCap` at 8000 was the slowest arm (wall x1.10, p 0.01): the model reads the rest anyway.
-`fewerShots` changed nothing. `quietTabs` had nothing to act on, since no task opens a tab.
+flags). On these tasks alone, `batchHint` looked worth keeping (11% fewer tool calls) and
+`screenshotAlias` removed the 1 to 2 calls a run set to a screenshot tool that isn't offered.
+`fastNavigate` cut `navigate` from 1.9s to 0.6s and wall time about 3% (inside noise), with one
+case of an unrendered single-page app. `pageTextCap` at 8000 was the slowest arm (wall x1.10,
+p 0.01): the model reads the rest anyway. `fewerShots` changed nothing. `quietTabs` had nothing
+to act on, since no task opens a tab. The hard tier (below) didn't bear out `batchHint` or
+`screenshotAlias`; "Kept and dropped" at the end has the decisions.
 
 # Model x effort benchmark
 
@@ -400,3 +417,57 @@ Noise:
 - **Size.** A cell is 2 runs, an arm at one effort 12, an arm 24. An effect under about x1.15 in wall or cost can't be found this way.
 
 Not covered: Opus and Fable already batch (35–69% of calls in the hard-tier analysis), so `batchHint` may matter less there and `fewerShots` more; `pageTextCap` was run at the default 8000 only; `quietTabs` needs tasks that start with a bare `navigate`.
+
+## Kept and dropped (2026-09-30)
+
+A flag was kept only if it lowered neither pass rate nor score on either suite, and lowered
+time, cost or calls on most tasks: on both suites, or clearly on one without hurting the other.
+The noise reference on both suites is `quietTabs`, which had nothing to act on.
+
+| flag | decision | why |
+| --- | --- | --- |
+| `fastNavigate` | kept, now the default | `navigate` 1.9s to 0.6s on the comparison tasks and 1.5s to 0.5s on the hard tier. Wall x0.90 on the hard tier (lower on 9 of 12 cells) and x0.96 on the comparison tasks (6 tasks lower, 3 higher). Pass 20/24 against 18/24 and 32/32 against 32/32. |
+| `batchHint` | dropped | Comparison tasks: calls x0.89 (5 tasks lower, none higher), but actions x0.98, wall x0.98 and cost x0.98, so the same steps were only grouped; the do-nothing `quietTabs` got calls x0.95 (4 lower, none higher). Hard tier: runs using `batch` 4 of 24 in both arms, calls x1.02, input tokens x1.07. |
+| `screenshotAlias` | dropped | Calls to the missing `screenshot` tool went to 0, but on the hard tier other made-up names rose from 3 to 17, so bad-tool calls went from 11 to 17. Wall, cost and calls didn't move on either suite. |
+| `fewerShots` | dropped | Screenshot actions 12 to 11 on the comparison tasks and x0.99 per cell on the hard tier. Input tokens x1.18 and score 0.925 against 0.945 on the hard tier. |
+| `pageTextCap` | dropped | Slowest arm on the comparison tasks: wall x1.10 (10 tasks slower, 1 faster, p 0.01), calls x1.08. The model reads the rest of the page anyway. |
+| `quietTabs` | dropped | No task in either suite got a tab list from `navigate`, so there was nothing to measure. |
+
+The five dropped flags' code is removed. `FIREFOX_BRIDGE_EXPERIMENTS` stays, with one flag,
+`waitForLoad`, which turns the kept change back off. With it, tools/list and every call
+the server sends Firefox are what they were at `a672d65` without flags, so it serves as the
+pre-change baseline without a second checkout.
+
+The still-loading note on `navigate` was reworded afterwards. Twice (hn.algolia.com in the
+arms run, npmjs.com/package/koa in the check below), a model given "content its scripts add may
+be missing" added 1.5–2s sleeps to its scripts or reloaded the page, and both pages already had
+their content. The note now says "Read it as usual; if something is missing, read again." That
+is an extension change, so it takes effect after Firefox restarts, and no run has measured it
+yet.
+
+### Check: everything kept against the old behavior
+
+`kept` (no flags) against `before` (`waitForLoad`), same checkout, arms interleaved, concurrency
+3: the 16 comparison tasks once each, and the 6 hard tasks at Sonnet low and high, 2 rounds
+($16.88 list; commands under "Experiments"). Results are in `results/browsers-confirm.jsonl`
+(tables in `results/browsers-confirm-report.md` and in `results/report.md` under "Experiment arms
+(Firefox)") and `results/models-hard/confirm/` (`confirm-report.md`).
+
+| suite | arm | runs | pass | score | wall s, mean (median) | calls, mean | cost, mean | navigate ms, median |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| comparison | before | 16 | 15 | 0.938 | 15.1 (15.0) | 6.9 | $0.053 | 1903 |
+| comparison | kept | 16 | 16 | 1.000 | 13.7 (12.9) | 7.6 | $0.056 | 597 |
+| hard tier | before | 24 | 19 | 0.954 | 82.6 (95) | 48.6 | $0.319 | 1491 |
+| hard tier | kept | 24 | 23 | 0.992 | 82.3 (87) | 47.8 | $0.312 | 502 |
+
+- **It holds up.** No pass or score was lost on either suite. On the comparison tasks wall was
+  x0.91 by mean and lower on 9 of 16 tasks (2 higher, p 0.07). On the hard tier the saving
+  (about 1s on each of 4.75 navigates, 6% of a run) is inside the noise: wall x1.01 by the
+  per-cell geometric mean.
+- **Cost on the comparison tasks was x1.05** (4 tasks higher, none lower), mostly from two
+  runs. The kept cmp-npm run read the five pages one call at a time instead of in two batches
+  (16 calls against 4); its koa page got the still-loading note, and from then on it slept
+  1.5s in each script. The kept gen-pydocs-search run called the made-up `left_click` and typed
+  before clicking the box. Both arms have the same tool text.
+- The failures were the usual kinds: wc-tiebreak (3, all `before`), books star averages, uitp
+  scroll targets, and one hockey count (the only `kept` miss).

@@ -10,7 +10,7 @@
 //                        [--experiments eval/results/experiments.jsonl]
 //                        [--out eval/results/report.md]
 //
-// --experiments: rows from run.mjs --experiments arms, compared arm by arm ("none" first).
+// --experiments: rows from run.mjs --experiments arms, compared arm by arm ("none", else "before", first).
 
 import fs from "node:fs";
 import path from "node:path";

@@ -69,6 +69,10 @@ Its extension hasn't changed since, so it wasn't run again.
   - **Clicks** took 0.70s each, because a click waited 500ms for a tab it might open. In the
     rerun it waited 100ms (longer only for a link that opens a new tab) and skipped the cursor
     animation in background tabs, so a click took 0.12s. It now waits only when it opened a tab.
+- **Page loads.** `navigate` now returns once the page is parsed, not after the load event. In
+  a later check of the same 16 tasks (1 run each, against the old navigate on the same day), it
+  took 0.6s against 1.9s, and the median run went from 15.0s to 12.9s, with 16 of 16 passing.
+  Chrome's `navigate` took 3.0s in the first run.
 - **Background work.** Agent tabs run in their own tab group in the background, and screenshots
   work without the window on screen. Claude in Chrome needs its window visible to take
   screenshots.
@@ -81,8 +85,9 @@ Its extension hasn't changed since, so it wasn't run again.
   called it, and time, calls and tokens stayed within a few percent.
 
 Tasks, per-task tables and per-tool timings are in the
-[browser comparison](eval/results/report.md#browser-comparison-firefox-tools-vs-claude-in-chrome-baseline-arm)
-and the [rerun](eval/results/report.md#re-measure-after-restart-firefox-before-firefox-after-chrome-baseline-arm);
+[browser comparison](eval/results/report.md#browser-comparison-firefox-tools-vs-claude-in-chrome-baseline-arm),
+the [rerun](eval/results/report.md#re-measure-after-restart-firefox-before-firefox-after-chrome-baseline-arm)
+and the [navigate check](eval/results/report.md#experiment-arms-firefox);
 run it yourself with [eval/README.md](eval/README.md).
 
 ## How it works
@@ -153,12 +158,15 @@ Differences from Chrome:
   reach into any frame; a scroll over a frame that can't scroll scrolls the page around it.
   Typing and keys go to the frame the last click landed in, and their result names the element
   that got them and its value.
-- `navigate` waits for the load event and then for the page's text to stop growing (up to 5s).
-  With `wait: "interactive"` it returns once the new page is parsed and no other page has
-  replaced it for 300ms, and says when the page is still loading. A read right after it
-  (`get_page_text`, `find`) gets the page as parsed so far: the HTML is all there, but content
-  that scripts add later may not be. A redirect that lands later replaces the page, and a read
-  caught in the switch fails; reading again reads the new page.
+- `navigate` returns once the new page is parsed and no other page has replaced it for 300ms,
+  and says when the page is still loading. That takes about 0.6s a page, against 1.9s for
+  waiting on the load event. A read right after it (`get_page_text`, `find`) gets the page as
+  parsed so far: the HTML is all there, but content that scripts add later may not be. A
+  redirect that lands later replaces the page, and a read caught in the switch fails; reading
+  again reads the new page. `wait: "load"` waits for the load event and then for the page's
+  text to stop growing (up to 5s), as navigate did before. The MCP server sets
+  `wait: "interactive"` when a call leaves `wait` out; `scripts/ffctl.mjs` talks to Firefox
+  directly, so there the default is still `"load"`.
 - A click waits only when it opened a tab, to name that tab in its result. A click that opened
   nothing answers at once, so keys and typing sent right after it aren't held up.
 - `read_page` names elements as the accessibility tree would: labels, an image's alt, an icon's
@@ -591,6 +599,12 @@ of them (tasks, arms and how to run it in [eval/README.md](eval/README.md); resu
   tree was compared.
 
 There were no infrastructure failures or flaky-task confounds in the eval runs.
+
+Six smaller changes were then tried as MCP server flags, each against no flags, on the 16
+comparison tasks and on the hard tier below (392 runs; [eval/README.md](eval/README.md#kept-and-dropped-2026-09-30)).
+Only the faster `navigate` was kept. A batching hint, a `screenshot` tool alias, advice to take
+fewer screenshots, a cap on `get_page_text` and a shorter tab list in `navigate` results were
+dropped: none lowered time, cost or calls on both suites, and the cap made runs slower.
 
 **Model and effort.** A second harness (`eval/models.mjs`) ran 6 complex tasks on Haiku 4.5 and
 on Sonnet 5.5, Opus 5.5 and Fable 5.1 at low, medium and high effort (180 runs; analysis in

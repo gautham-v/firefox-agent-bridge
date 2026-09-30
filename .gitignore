@@ -15,3 +15,7 @@ eval/results/models-hard/arms/streams/
 eval/results/models-hard/arms/logs/
 eval/results/models-hard/arms/inflight/
 eval/results/models-hard/arms/scheduler.lock
+eval/results/models-hard/confirm/streams/
+eval/results/models-hard/confirm/logs/
+eval/results/models-hard/confirm/inflight/
+eval/results/models-hard/confirm/scheduler.lock
