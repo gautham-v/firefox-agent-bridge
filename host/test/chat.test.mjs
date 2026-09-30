@@ -181,7 +181,7 @@ test("claude: model and effort from the panel can't smuggle in flags", async () 
   try {
     await t.turn(newId(), "hi", { model: "--dangerously-skip-permissions", effort: "--bogus" });
     const [run] = t.runs();
-    assert.equal(flagValue(run.argv, "--model"), "claude-opus-5-5");
+    assert.equal(flagValue(run.argv, "--model"), "claude-sonnet-5-5");
     assert.equal(flagValue(run.argv, "--effort"), "high");
     assert.ok(!run.argv.includes("--dangerously-skip-permissions"));
   } finally {
@@ -484,7 +484,7 @@ test("claude capabilities come from the CLI's control protocol and cost no model
     assert.deepEqual(caps.skills, [{ name: "tdd", description: "Test-driven development with a red-green loop.", sites: [] }, { name: "viz", description: "Turn a discussion into a visual.", sites: [] }]);
     assert.deepEqual(caps.plugins, [{ name: "swift-lsp" }]);
     assert.deepEqual(caps.connectors, [{ name: "Gmail", status: "connected" }, { name: "Stripe", status: "needs-auth" }], "waits for pending connectors and leaves out firefox itself");
-    assert.deepEqual(caps.models.map((m) => [m.id, m.label]), [["claude-opus-5-5", "Opus 5.5"], ["claude-sonnet-5-5", "Sonnet 5.5"], ["claude-fable-5-1", "Fable 5.1"], ["claude-haiku-4-5-20251001", "Haiku 4.5"]]);
+    assert.deepEqual(caps.models.map((m) => [m.id, m.label]), [["claude-sonnet-5-5", "Sonnet 5.5"], ["claude-opus-5-5", "Opus 5.5"], ["claude-fable-5-1", "Fable 5.1"], ["claude-haiku-4-5-20251001", "Haiku 4.5"]]);
     assert.equal(caps.models[0].default, true);
     assert.deepEqual(caps.efforts, ["low", "medium", "high", "xhigh", "max"]);
     assert.ok(!t.runs().some((r) => r.argv.includes("--model")), "the probe never sends a prompt");
@@ -884,7 +884,7 @@ test("an empty model or effort resets to the engine's default; a stored one from
     await t.turn(a, "two", { model: "", effort: "" });
     const [first, second] = t.runs();
     assert.equal(flagValue(first.argv, "--model"), "claude-haiku-4-5-20251001");
-    assert.equal(flagValue(second.argv, "--model"), "claude-opus-5-5", "the empty model is the default, not the old one");
+    assert.equal(flagValue(second.argv, "--model"), "claude-sonnet-5-5", "the empty model is the default, not the old one");
     assert.equal(flagValue(second.argv, "--effort"), "high");
 
     // Codex with its own model and effort, then Claude with both empty.
@@ -892,7 +892,7 @@ test("an empty model or effort resets to the engine's default; a stored one from
     await t.turn(b, "x", { engine: "codex", model: "gpt-5.5", effort: "high" });
     await t.turn(b, "y", { engine: "claude", model: "", effort: "" });
     const claude = t.runs().at(-1);
-    assert.equal(flagValue(claude.argv, "--model"), "claude-opus-5-5", "gpt-5.5 isn't a Claude model");
+    assert.equal(flagValue(claude.argv, "--model"), "claude-sonnet-5-5", "gpt-5.5 isn't a Claude model");
     assert.equal(flagValue(claude.argv, "--effort"), "high");
 
     // Claude's "max" isn't a Codex effort; an empty one clears it.

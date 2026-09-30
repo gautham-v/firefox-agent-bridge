@@ -16,9 +16,11 @@ import { chunkItems, claudeSessionMeta, claudeTitle, claudeTranscript, codexTran
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
+// Sonnet 5.5 at high effort is the default: in the model benchmark it matched Opus 5.5 at any
+// effort for about 0.7x the cost (eval/results/models-hard/analysis.md).
 export const CLAUDE_MODELS = [
-  { id: "claude-opus-5-5", label: "Opus 5.5", default: true },
-  { id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
+  { id: "claude-sonnet-5-5", label: "Sonnet 5.5", default: true },
+  { id: "claude-opus-5-5", label: "Opus 5.5" },
   { id: "claude-fable-5-1", label: "Fable 5.1" },
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", efforts: [] }, // Haiku has no effort setting
 ];

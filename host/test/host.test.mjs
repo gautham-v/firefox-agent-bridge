@@ -110,7 +110,7 @@ test("host: chat messages reach chat.mjs and its replies come back over native m
     const caps = await until("capabilities", () => got.find((m) => m.type === "chat.capabilities"));
     assert.equal(caps.requestId, "c1");
     assert.equal(caps.available, true);
-    assert.equal(caps.models[0].id, "claude-opus-5-5");
+    assert.equal(caps.models[0].id, "claude-sonnet-5-5");
 
     const chatId = "00000000-0000-4000-8000-0000000000aa";
     toHost({ type: "chat.send", chatId, engine: "claude", model: "claude-opus-5-5", effort: "high", text: "hi", attachments: [], context: { tabs: [] } });
