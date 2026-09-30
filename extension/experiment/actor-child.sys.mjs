@@ -7,6 +7,7 @@ import { barLabel, fieldKind, marker, markLabels, scrub, selectorKind, siteSelec
 import { focusEvents } from "resource://firefox-agent-bridge/focus.sys.mjs";
 import { rankFind } from "resource://firefox-agent-bridge/find-rank.sys.mjs";
 import { contentBox, rectToTop, toParent } from "resource://firefox-agent-bridge/frame-offset.sys.mjs";
+import { accessibleName, focusableEntry, labelText } from "resource://firefox-agent-bridge/names.sys.mjs";
 
 const INTERACTIVE_ROLES = new Set([
   "button", "link", "textbox", "searchbox", "combobox", "checkbox", "radio", "switch", "slider",
@@ -143,46 +144,9 @@ function roleOf(el) {
   return fn ? fn(el) : null;
 }
 
+// The accessible name (names.sys.mjs), with content read through shadow roots and slots.
 function nameOf(el, role) {
-  const doc = el.ownerDocument;
-  const labelledBy = el.getAttribute("aria-labelledby");
-  if (labelledBy) {
-    const text = labelledBy.split(/\s+/).map((id) => doc.getElementById(id)?.textContent ?? "").join(" ");
-    if (clean(text)) return clean(text);
-  }
-  const aria = el.getAttribute("aria-label");
-  if (aria && aria.trim()) return clean(aria);
-  if (el.labels?.length) {
-    const text = Array.from(el.labels).map(labelText).join(" ");
-    if (clean(text)) return clean(text);
-  }
-  if (el.tagName === "IMG" || (el.tagName === "INPUT" && el.type === "image")) {
-    const alt = el.getAttribute("alt");
-    if (alt) return clean(alt);
-  }
-  if (el.tagName === "INPUT" && ["button", "submit", "reset"].includes(el.type)) return clean(el.value);
-  if (role && (NAME_FROM_CONTENT.has(role) || role === "heading")) {
-    const text = clean(el.textContent);
-    if (text) return text;
-  }
-  const title = el.getAttribute("title");
-  if (title) return clean(title);
-  const placeholder = el.getAttribute("placeholder");
-  if (placeholder) return clean(placeholder);
-  return "";
-}
-
-// A label's own text, leaving out the text of controls nested inside it (like a select's options).
-function labelText(label) {
-  const parts = [];
-  const walk = (node) => {
-    for (const child of node.childNodes) {
-      if (child.nodeType === 3) parts.push(child.data);
-      else if (child.nodeType === 1 && !["SELECT", "TEXTAREA", "INPUT", "BUTTON", "SCRIPT", "STYLE"].includes(child.tagName)) walk(child);
-    }
-  };
-  walk(label);
-  return parts.join(" ");
+  return accessibleName(el, { fromContent: !!role && NAME_FROM_CONTENT.has(role), children: renderedChildren });
 }
 
 function isRendered(el) {
@@ -196,7 +160,9 @@ function isRendered(el) {
 
 function isInteractive(el, role) {
   if (role && INTERACTIVE_ROLES.has(role)) return true;
-  if (el.isContentEditable) return true;
+  // Only an editor's editing host is a target: the lines and spans inside it are its content
+  // (Square's code sample listed 100 of them, all without names).
+  if (el.isContentEditable && !el.parentElement?.isContentEditable) return true;
   if (el.hasAttribute("onclick")) return true;
   const tabindex = el.getAttribute("tabindex");
   return tabindex !== null && Number(tabindex) >= 0 && el.tagName !== "IFRAME";
@@ -600,9 +566,20 @@ function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, fr
         for (const child of renderedChildren(node)) walk(child, level + 1, depthLeft - 1, true);
         return;
       }
+      let listed = include;
       if (include) {
         if (depthLeft <= 0) return;
-        if (!push(`${"  ".repeat(level)}${describe(el, role, nameOf(el, role), red)}`)) return;
+        let name = nameOf(el, role);
+        // Focusable or clickable without an interactive role (a div with tabindex or onclick):
+        // named by its text, or left out when it only wraps other controls (names.sys.mjs).
+        if (interactive && !(role && INTERACTIVE_ROLES.has(role)) && !el.isContentEditable) {
+          const entry = focusableEntry(el, role, { name, interactiveOnly, children: renderedChildren });
+          name = entry.name;
+          listed = !entry.skip;
+        }
+        if (listed && !push(`${"  ".repeat(level)}${describe(el, role, name, red)}`)) return;
+      }
+      if (listed) {
         nextLevel = level + 1;
         nextDepth = depthLeft - 1;
         if (role && NAME_FROM_CONTENT.has(role)) named = true;

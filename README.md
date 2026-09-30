@@ -153,6 +153,9 @@ Differences from Chrome:
   reach into any frame; a scroll over a frame that can't scroll scrolls the page around it.
   Typing and keys go to the frame the last click landed in, and their result names the element
   that got them and its value.
+- `read_page` names elements as the accessibility tree would: labels, an image's alt, an icon's
+  svg title, the title of a child with no text. An editor is one textbox, not a line per span.
+  A focusable wrapper that only holds other controls is left out; they are listed.
 - There is no `gif_creator` or shortcuts. Console and network reading is one opt-in tool,
   `devtools`, below.
 
