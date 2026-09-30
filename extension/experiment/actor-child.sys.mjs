@@ -837,17 +837,24 @@ function modifierInit(modifiers) {
 
 // Event coordinates. Events dispatched through the pres shell take their position from
 // screenX/screenY, read as device pixels, so clientX/clientY alone are overwritten.
+// mozInnerScreenX/Y is right here even in an out-of-process frame, where it is wrong as a place
+// on screen (frame-offset.sys.mjs): nsDOMWindowUtils turns screenX/Y back into a point in the
+// frame by subtracting its root widget's WidgetToScreenOffset, and in a frame with no parent in
+// its process mozInnerScreenX/Y is that same offset, so the two cancel and (x, y) is what lands.
+// The measured frame offset would not cancel, and would move events by the frame's position.
 function at(win, x, y) {
   const dpr = win.devicePixelRatio;
   return { clientX: x, clientY: y, screenX: (win.mozInnerScreenX + x) * dpr, screenY: (win.mozInnerScreenY + y) * dpr };
 }
 
 // Events go through the pres shell, as real input does, so default actions run (focus, :active,
-// a click after mousedown and mouseup, wheel scrolling). Where that dispatch fails (it has thrown
-// NS_ERROR_UNEXPECTED over MDN's live-sample frame, which sits in shadow roots and runs out of
-// process), the same event is dispatched on the target instead. The pres shell dispatch marks an
-// event trusted before it checks for a pres shell, so it should stay trusted. That path skips the
-// default actions, so directDispatches counts it, and click sends the click event itself.
+// a click after mousedown and mouseup, wheel scrolling). Where that dispatch fails, the same event
+// is dispatched on the target instead. It fails with NS_ERROR_UNEXPECTED for any target inside a
+// shadow root (it wants the target's uncomposed document, which a shadow tree has none of), which
+// is what MDN's pages hit, their live samples being in shadow roots; the frame's position has
+// nothing to do with it. The pres shell dispatch marks an event trusted before that check, so it
+// should stay trusted. That path skips the default actions, so directDispatches counts it, and
+// click sends the click event itself.
 let directDispatches = 0;
 
 function fire(win, target, Ctor, type, init) {
