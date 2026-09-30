@@ -84,6 +84,21 @@
         ]
       },
       {
+        "name": "setPointTabs",
+        "type": "function",
+        "async": true,
+        "description": "Turn point and ask (Alt to outline an element, Alt+click to pick it) on in these tabs and off everywhere else.",
+        "parameters": [
+          {
+            "name": "tabIds",
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          }
+        ]
+      },
+      {
         "name": "setActive",
         "type": "function",
         "async": true,
@@ -96,6 +111,23 @@
           {
             "name": "active",
             "type": "boolean"
+          }
+        ]
+      }
+    ],
+    "events": [
+      {
+        "name": "onPick",
+        "type": "function",
+        "description": "The user Alt+clicked an element in a tab where point and ask is on.",
+        "parameters": [
+          {
+            "name": "tabId",
+            "type": "integer"
+          },
+          {
+            "name": "pick",
+            "type": "any"
           }
         ]
       }

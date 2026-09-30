@@ -111,6 +111,7 @@ function mockBrowser({ store = {}, groups: initialGroups = [], noIcons = false, 
     // group id -> the state icon showing in its label
     icons,
     claudePage: {
+      onPick: event(),
       setActive: async () => {},
       call: async (tabId, op) => (op === "textSize" ? 10 : "done"),
       setGroupState: async (groupId, state) => {
@@ -1092,4 +1093,100 @@ test("the host's rules go to every page op, and a masked result gets its own lin
   await env.host({ type: "redact", rules: { always: "password" } });
   await env.callTool("get_page_text", { tabId: 2 });
   assert.deepEqual(env.calls.findLast((c) => c.op === "text").args.redact, rules);
+});
+
+test("an open panel arms the tab its window is showing for point and ask; closing it disarms", async () => {
+  const env = await load();
+  const armed = [];
+  env.browser.claudePage.setPointTabs = async (ids) => armed.push([...ids]);
+  const a = await env.panel();
+  await wait(100);
+  assert.deepEqual(armed.at(-1), [1]);
+  // Another tab comes forward. Pages that aren't web pages aren't armed.
+  env.browser.tabsMap.get(1).active = false;
+  env.browser.tabsMap.set(5, { id: 5, windowId: 10, groupId: -1, active: true, url: "about:preferences", status: "complete", title: "Settings" });
+  await env.browser.tabs.onActivated.fire({ tabId: 5, windowId: 10 });
+  await wait(100);
+  assert.deepEqual(armed.at(-1), []);
+  env.browser.tabsMap.get(5).url = "https://five.example/";
+  await env.browser.tabs.onUpdated.fire(5, { url: "https://five.example/" }, { ...env.browser.tabsMap.get(5) });
+  await wait(100);
+  assert.deepEqual(armed.at(-1), [5]);
+  // Alt let go in the panel arms again, which takes a leftover outline down.
+  const before = armed.length;
+  await a.send("point.clear");
+  await wait(100);
+  assert.equal(armed.length, before + 1);
+  a.close();
+  await wait(100);
+  assert.deepEqual(armed.at(-1), []);
+});
+
+test("an Alt+click becomes an attachment: a crop of the element, and its ref in the message's context", async () => {
+  const env = await load();
+  const calls = [];
+  env.browser.claudePage.call = async (tabId, op, args) => {
+    calls.push(plain([tabId, op, args]));
+    return op === "viewport" ? { width: 1000, height: 800, dpr: 2, scrollX: 0, scrollY: 300, screenX: 100, screenY: 50 } : "done";
+  };
+  const captures = [];
+  env.browser.tabs.captureTab = async (tabId, opts) => {
+    captures.push([tabId, plain(opts)]);
+    return "data:image/png;base64,AAAA";
+  };
+  const a = await env.panel();
+  // An element in a child frame whose viewport is 20px right of and 40px below the tab's.
+  const pick = { ref: "ref_3@f12", role: "figure", name: "Weekly signups", text: "Nov Jan Mar", rect: { x: 10, y: 20, width: 200, height: 100 }, frame: { x: 120, y: 90 }, url: "https://user.example/", title: "user" };
+  await env.browser.claudePage.onPick.fire(1, pick);
+  await wait(50);
+  assert.deepEqual(captures, [[1, { format: "png", scale: 2, rect: { x: 30, y: 360, width: 200, height: 100 } }]]);
+  const element = { tabId: 1, ref: "ref_3@f12", role: "figure", name: "Weekly signups", text: "Nov Jan Mar" };
+  assert.deepEqual(a.of("pick"), [{ type: "pick", chatId: a.chatId, element: { ...element, image: "data:image/png;base64,AAAA" } }]);
+  assert.equal(env.browser.tabsMap.get(1).groupId, 100, "the tab starts the chat's group");
+  const ops = calls.map(([, op, args]) => (op === "cursorVisible" ? `${op} ${args.visible}` : op));
+  assert.deepEqual(ops, ["viewport", "cursorVisible false", "cursorVisible true", "pointAdded"]);
+  assert.equal(calls.at(-1)[2].ref, "ref_3@f12", "the outline comes back in the element's frame");
+
+  await a.send("chat.send", { engine: "claude", text: "why did this drop?", elements: [a.of("pick")[0].element, { tabId: 1, ref: "javascript:x" }] });
+  assert.deepEqual(env.sentToHost("chat.send")[0].context.elements, [element]);
+
+  // A window without a panel, and a ref that isn't one, go nowhere.
+  env.browser.tabsMap.set(7, { id: 7, windowId: 12, groupId: -1, active: true, url: "https://seven.example/", status: "complete", title: "seven" });
+  await env.browser.claudePage.onPick.fire(7, pick);
+  await env.browser.claudePage.onPick.fire(1, { ...pick, ref: "<b>" });
+  await wait(50);
+  assert.equal(a.of("pick").length, 1);
+  assert.equal(captures.length, 1);
+});
+
+test("an element link outlines the element in its tab, only in the chat's group; a click brings the tab forward", async () => {
+  const env = await load();
+  const calls = [];
+  env.browser.claudePage.call = async (tabId, op, args) => {
+    if (op !== "mark") return op === "textSize" ? 10 : "done";
+    calls.push(plain([tabId, args]));
+    if (args.ref === "ref_9") throw new Error("ref_9 is gone");
+    return true;
+  };
+  const a = await env.panel();
+  await a.send("chat.send", { engine: "claude", text: "hi" });
+  env.browser.tabsMap.set(5, { id: 5, windowId: 10, groupId: 100, active: false, url: "https://five.example/", status: "complete", title: "five" });
+  await a.send("mark", { tabId: 5, ref: "ref_2", label: "Mar 4 annotation" });
+  await a.send("mark", { tabId: 5, ref: "ref_2", clear: true });
+  assert.deepEqual(calls, [
+    [5, { ref: "ref_2", label: "Mar 4 annotation", reveal: false, clear: false }],
+    [5, { ref: "ref_2", label: "", reveal: false, clear: true }],
+  ]);
+  assert.equal(env.browser.tabsMap.get(5).active, false, "pointing doesn't switch tabs");
+  await a.send("mark", { tabId: 5, ref: "ref_2", label: "Mar 4 annotation", reveal: true });
+  assert.equal(env.browser.tabsMap.get(5).active, true);
+  assert.equal(calls.at(-1)[1].reveal, true);
+
+  env.browser.tabsMap.set(6, { id: 6, windowId: 10, groupId: -1, active: false, url: "https://six.example/", status: "complete", title: "six" });
+  await a.send("mark", { tabId: 6, ref: "ref_2", reveal: true });
+  await a.send("mark", { tabId: 5, ref: "ref_9", reveal: true });
+  await a.send("mark", { tabId: 5, ref: "ref_9" });
+  await a.send("mark", { tabId: 5, ref: "javascript:alert(1)", reveal: true });
+  assert.deepEqual(a.of("markFailed").map((m) => m.error), ["That tab isn't in this chat's group.", "That element isn't on the page any more."]);
+  assert.equal(calls.filter(([tabId]) => tabId === 6).length, 0);
 });

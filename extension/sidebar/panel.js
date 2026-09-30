@@ -152,9 +152,18 @@ function formatShortcut(key) {
 // an unclosed fence or emphasis just renders as it stands.
 
 const SAFE_URL = /^(https?:|mailto:)/i;
+// The agent pointing at an element: [label](ref:ref_12), or ref:<tabId>/ref_12 for another tab.
+const ELEMENT_LINK = /^ref:(?:(\d+)\/)?(ref_\d+(?:@f\d+)?)$/;
+// The tab an element link without one points into: the turn's, set while it renders.
+let refTab = null;
 const INLINE = /(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)|\*\*(\S(?:[\s\S]*?\S)?)\*\*|__(\S(?:[\s\S]*?\S)?)__|\[([^\]\n]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>]+)|\*(\S(?:[^*\n]*?\S)?)\*|(?<![\w])_(\S(?:[^_\n]*?\S)?)_(?![\w])/g;
 
 function linkNode(url, kids) {
+  const ref = ELEMENT_LINK.exec(url);
+  if (ref) {
+    const tabId = ref[1] ? Number(ref[1]) : refTab;
+    return el("button", { class: "eref", type: "button", "data-ref": ref[2], "data-tab": tabId, title: "Show on the page" }, icon("pointer"), el("span", {}, kids));
+  }
   return SAFE_URL.test(url) ? el("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, kids) : el("span", {}, kids);
 }
 
@@ -609,6 +618,11 @@ function onMessage(m) {
       S.paused = !!m.paused;
       for (const t of S.turns) t.dirty = true;
       return render("head", "title", "body", "notices");
+    case "pick":
+      if (m.chatId === S.chatId && m.element) addPicked(m.element);
+      return;
+    case "markFailed":
+      return toast(m.error ?? "Couldn't show that element.", "warn");
   }
 }
 
@@ -960,6 +974,7 @@ function copyButton(text) {
 
 function renderTurn(t) {
   const node = el("div", { class: "turn" });
+  refTab = workSite(t).tab?.tabId ?? null;
   if (t.user) node.append(userBubble(t.user));
   for (const b of t.blocks) {
     if (b.type === "text") {
@@ -1247,8 +1262,8 @@ function renderAtts() {
     ...S.attachments.map((a) =>
       el(
         "span",
-        { class: "att", title: a.name },
-        a.url ? el("img", { src: a.url, alt: "" }) : el("span", { class: "thumb" }, icon("file")),
+        { class: "att", title: a.title ?? a.name },
+        a.url ? el("img", { src: a.url, alt: "" }) : el("span", { class: "thumb" }, icon(a.element ? "pointer" : "file")),
         el("span", { class: "n", text: a.name }),
         el(
           "button",
@@ -1288,7 +1303,8 @@ function send() {
     model: S.model,
     effort: effortsFor().includes(S.effort) ? S.effort : "",
     text,
-    attachments: attachments.map(({ name, mime, data }) => ({ name, mime, data })),
+    attachments: attachments.filter((a) => a.data != null).map(({ name, mime, data }) => ({ name, mime, data })),
+    elements: attachments.filter((a) => a.element).map((a) => a.element),
     skill,
     resume: S.resumeNext,
   });
@@ -1376,10 +1392,10 @@ function openLink(url) {
   (browser.tabs?.create(opts) ?? Promise.reject()).catch(() => window.open(url, "_blank", "noopener"));
 }
 
-function toast(text) {
+function toast(text, iconName = "check") {
   const main = $("main");
   main.querySelector(".toast")?.remove();
-  const node = el("div", { class: "toast", role: "status" }, icon("check"), el("span", { text }));
+  const node = el("div", { class: "toast", role: "status" }, icon(iconName), el("span", { text }));
   main.append(node);
   setTimeout(() => node.remove(), TOAST_MS);
 }
@@ -1402,6 +1418,19 @@ async function addFiles(files) {
   }
   renderAtts();
   syncSend();
+}
+
+// An element the user Alt+clicked in the page. Its crop goes as an image attachment, and its
+// tab, ref, role, name and text go in the message's context (`elements`) so the agent can act
+// on it. Picking the same element again doesn't add it twice.
+function addPicked(e) {
+  const { image, ...element } = e;
+  const name = shortText(element.name || element.role || "Element", 60);
+  S.attachments = S.attachments.filter((a) => !(a.element?.tabId === element.tabId && a.element.ref === element.ref));
+  S.attachments.push({ name, mime: "image/png", data: image?.split(",")[1] ?? null, url: image ?? null, element, title: element.name ? `${element.role} · ${element.name}` : element.role });
+  renderAtts();
+  syncSend();
+  $("input").focus();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1915,6 +1944,11 @@ function wire() {
     if (S.ui.menu) closeMenu();
     else if (S.ui.sheet) closeSheet();
   });
+  // Alt held over the page while typing here outlines what is under the pointer there; the page
+  // never hears it let go, so the panel says so.
+  document.addEventListener("keyup", (e) => {
+    if (e.key === "Alt") post("point.clear");
+  });
 
   // Stay at the bottom while text streams in, unless the user scrolled up to read.
   const scroll = $("scroll");
@@ -1924,7 +1958,33 @@ function wire() {
   new ResizeObserver(() => {
     if (S.stick) scroll.scrollTop = scroll.scrollHeight;
   }).observe($("msgs"));
+  // Element links: pointing at one outlines the element in its tab, and a click brings the tab
+  // forward and scrolls to it. The clicked outline stays up a moment, past the pointer leaving.
+  const markRef = (b, extra) => {
+    const tabId = Number(b.dataset.tab);
+    if (!Number.isInteger(tabId)) return extra.reveal && toast("That element's tab isn't known.", "warn");
+    post("mark", { tabId, ref: b.dataset.ref, label: b.textContent, ...extra });
+  };
+  const eref = (e) => {
+    const b = e.target.closest?.(".eref");
+    return b && !b.contains(e.relatedTarget) ? b : null;
+  };
+  $("msgs").addEventListener("mouseover", (e) => {
+    const b = eref(e);
+    if (b) markRef(b, {});
+  });
+  $("msgs").addEventListener("mouseout", (e) => {
+    const b = eref(e);
+    if (!b) return;
+    if (!b.dataset.revealed) markRef(b, { clear: true });
+    delete b.dataset.revealed;
+  });
   $("msgs").addEventListener("click", (e) => {
+    const b = e.target.closest(".eref");
+    if (b) {
+      b.dataset.revealed = "1";
+      return markRef(b, { reveal: true });
+    }
     const a = e.target.closest("a[href]");
     if (!a) return;
     e.preventDefault();

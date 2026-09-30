@@ -1,4 +1,4 @@
-/* global ExtensionAPI, ExtensionUtils, ChromeUtils, Services, IOUtils, PathUtils, Ci */
+/* global ExtensionAPI, ExtensionCommon, ExtensionUtils, ChromeUtils, Services, IOUtils, PathUtils, Ci */
 "use strict";
 
 const { ExtensionError } = ExtensionUtils;
@@ -16,6 +16,14 @@ const MAX_FRAME_HOPS = 8;
 const STATE_ATTR = "fab-state";
 const GROUP_STATES = new Set(["idle", "working", "needs", "paused", "done", "disconnected", "earlier"]);
 const STATE_SHEET = "experiment/group-state.css";
+// Point and ask: the actor hears these (capture, so before the page) in documents it already
+// has an actor in, and acts on them only where pointArm armed it. Picks arrive on PICK_TOPIC.
+const POINT_EVENTS = Object.fromEntries(
+  ["mousemove", "keydown", "keyup", "pointerdown", "mousedown", "pointerup", "mouseup", "click", "dblclick", "blur", "pagehide"].map((type) => [type, { capture: true, createActor: false }]),
+);
+const PICK_TOPIC = "firefox-agent-bridge:pick";
+// Refs made in a child frame name it (ref_7@f12), so ops on them start in that frame.
+const FRAME_REF = /@f(\d+)$/;
 
 const MIME = {
   pdf: "application/pdf",
@@ -44,6 +52,17 @@ function unregisterActor() {
   }
 }
 
+// Tells every frame in a tab's <browser> whether point and ask is on.
+function armFrames(browser, on) {
+  for (const bc of browser.browsingContext?.getAllBrowsingContextsInSubtree() ?? []) {
+    try {
+      bc.currentWindowGlobal?.getActor(ACTOR).sendAsyncMessage("pointArm", { on });
+    } catch {
+      // frame going away
+    }
+  }
+}
+
 function browserWindows() {
   return [...Services.wm.getEnumerator("navigator:browser")];
 }
@@ -60,6 +79,19 @@ this.claudePage = class extends ExtensionAPI {
     this.ready = this.registerActor();
     this.ready.catch((e) => console.error("firefox-agent-bridge: actor registration failed", e));
     this.watchWindows();
+    this.watchFrames();
+  }
+
+  // Documents that load in an armed tab (a navigation, a late iframe) are armed as they appear.
+  watchFrames() {
+    this.pointing = new Map(); // browserId -> <browser>, the tabs armed for point and ask
+    this.frameObserver = {
+      observe: (wgp) => {
+        if (!this.pointing.has(wgp?.browsingContext?.browserId)) return;
+        this.ready.then(() => wgp.getActor(ACTOR).sendAsyncMessage("pointArm", { on: true })).catch(() => {});
+      },
+    };
+    Services.obs.addObserver(this.frameObserver, "window-global-created");
   }
 
   // Every browser window, existing and future, gets the state stylesheet.
@@ -110,7 +142,7 @@ this.claudePage = class extends ExtensionAPI {
     unregisterActor();
     ChromeUtils.registerWindowActor(ACTOR, {
       parent: { esModuleURI: `resource://${RES_HOST}/actor-parent.sys.mjs` },
-      child: { esModuleURI: `resource://${RES_HOST}/actor-child.sys.mjs` },
+      child: { esModuleURI: `resource://${RES_HOST}/actor-child.sys.mjs`, events: POINT_EVENTS },
       allFrames: true,
       safeForUntrustedWebProcess: true,
     });
@@ -118,6 +150,8 @@ this.claudePage = class extends ExtensionAPI {
 
   onShutdown(isAppShutdown) {
     if (isAppShutdown) return;
+    Services.obs.removeObserver(this.frameObserver, "window-global-created");
+    for (const browser of this.pointing.values()) armFrames(browser, false);
     this.removeSheets();
     unregisterActor();
     resHandler().setSubstitution(RES_HOST, null);
@@ -141,6 +175,11 @@ this.claudePage = class extends ExtensionAPI {
       const top = topContext(tabId);
       let bc = top;
       let current = args ?? {};
+      const framed = FRAME_REF.exec(current.ref ?? current.refId ?? "");
+      if (framed) {
+        bc = top.getAllBrowsingContextsInSubtree().find((c) => c.id === Number(framed[1]));
+        if (!bc) throw new Error(`${current.ref ?? current.refId} is gone (its frame closed or navigated). Call find or read_page again for a fresh ref.`);
+      }
       const path = [];
       for (let hop = 0; hop <= 2 * MAX_FRAME_HOPS; hop++) {
         const wg = bc?.currentWindowGlobal;
@@ -224,6 +263,40 @@ this.claudePage = class extends ExtensionAPI {
           }
           return false;
         }),
+
+        // Arms point and ask in these tabs (the ones chat panels are showing) and disarms the rest.
+        // Arming again also takes down an outline left up.
+        setPointTabs: surfaced(async (tabIds) => {
+          await self.ready;
+          const next = new Map();
+          for (const id of tabIds) {
+            try {
+              const browser = tabManager.get(id).nativeTab.linkedBrowser;
+              next.set(browser.browserId, browser);
+            } catch {
+              // tab closed
+            }
+          }
+          const before = self.pointing;
+          self.pointing = next;
+          for (const [id, browser] of before) if (!next.has(id)) armFrames(browser, false);
+          for (const browser of next.values()) armFrames(browser, true);
+        }),
+
+        // An Alt+click in an armed tab: (tabId, {ref, role, name, text, rect, frame, url, title}).
+        onPick: new ExtensionCommon.EventManager({
+          context,
+          name: "claudePage.onPick",
+          register: (fire) => {
+            const observer = (browser, topic, data) => {
+              if (!self.pointing.has(browser?.browserId)) return;
+              const tab = browser.ownerGlobal?.gBrowser?.getTabForBrowser(browser);
+              if (tab) fire.async(tabManager.getWrapper(tab).id, JSON.parse(data));
+            };
+            Services.obs.addObserver(observer, PICK_TOPIC);
+            return () => Services.obs.removeObserver(observer, PICK_TOPIC);
+          },
+        }).api(),
 
         upload: surfaced(async (tabId, ref, paths) => {
           const files = [];

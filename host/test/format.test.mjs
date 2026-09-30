@@ -87,6 +87,20 @@ test("the context block round-trips: what the model got is stripped back to what
   assert.deepEqual(stripContext("plain"), { text: "plain", files: [] });
 });
 
+test("elements the user pointed at are listed by tab and ref, one line each, and never read back as files", () => {
+  const elements = [
+    { tabId: 4, ref: "ref_12", role: "figure", name: "Weekly signups", text: "Nov\n  Jan\nMar 4: /pricing v3" },
+    { tabId: 4, ref: "ref_3@f9", role: "button", name: "", text: "" },
+  ];
+  const block = contextBlock([{ tabId: 4, title: "Growth", url: "https://x.example/", current: true }], [{ name: "a.pdf", path: "/tmp/up/a.pdf" }], elements);
+  assert.match(block, /Elements the user pointed at with Alt\+click/);
+  assert.match(block, /^- tab 4, ref_12: figure "Weekly signups", text: "Nov Jan Mar 4: \/pricing v3"$/m);
+  assert.match(block, /^- tab 4, ref_3@f9: button$/m);
+  const { text, files } = stripContext(`${block}why did this drop?`);
+  assert.equal(text, "why did this drop?");
+  assert.deepEqual(files, ["a.pdf"]);
+});
+
 test("reset times are read from the CLIs' wording", () => {
   assert.equal(parseResetTime("Claude AI usage limit reached|1790725800"), 1790725800 * 1000);
   const codex = parseResetTime("You've hit your usage limit. Upgrade to Plus, or try again at Oct 3rd, 2026 1:16 PM.");

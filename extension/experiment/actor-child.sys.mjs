@@ -85,14 +85,17 @@ const NAMED_KEYS = {
 const MAX_REFS_PER_DOC = 50000;
 
 // ---------------------------------------------------------------------------------------------
-// Element refs. Each document keeps its own ref_N numbering; refs die with the document.
+// Element refs. Each document keeps its own ref_N numbering; refs die with the document. Refs
+// made in a child frame name it (ref_7@f12, after its browsing context id), so api.js can send
+// ops on them straight to that frame.
 
 const docStates = new WeakMap();
 
 function docState(doc) {
   let s = docStates.get(doc);
   if (!s) {
-    s = { next: 1, byRef: new Map(), byEl: new WeakMap() };
+    const bc = doc.defaultView?.browsingContext;
+    s = { next: 1, byRef: new Map(), byEl: new WeakMap(), suffix: bc?.parent ? `@f${bc.id}` : "" };
     docStates.set(doc, s);
   }
   return s;
@@ -106,7 +109,7 @@ function refFor(el) {
       s.byRef.clear();
       s.byEl = new WeakMap();
     }
-    ref = `ref_${s.next++}`;
+    ref = `ref_${s.next++}${s.suffix}`;
     s.byEl.set(el, ref);
     s.byRef.set(ref, el);
   }
@@ -909,10 +912,13 @@ function pressCursor(doc, down) {
   }
 }
 
-// Hidden while a screenshot is taken, so the agent sees the page as it is.
+// Hidden while a screenshot is taken, so the agent sees the page as it is. Outlines and the
+// point-and-ask hint go too.
 function cursorVisible(doc, { visible }) {
   const c = cursors.get(doc);
   if (c) c.arrow.style.visibility = visible ? "" : "hidden";
+  const m = marks.get(doc);
+  if (m) m.layer.style.visibility = visible ? "" : "hidden";
   return true;
 }
 
@@ -1418,6 +1424,348 @@ async function upload(doc, { ref, files }) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Point and ask. While the chat panel is open, api.js arms the tab its window shows (pointArm,
+// in every frame). Holding Alt there outlines the element under the pointer in ink, and
+// Alt+click attaches it to the chat instead of reaching the page. The other way, mark draws the
+// agent's purple outline and label on an element by ref. Both are anonymous content, like the
+// cursor. Frames coordinate through the parent actor ("point" messages come back to every frame
+// as pointSync): the top frame shows the hint, and only the frame under the pointer an outline.
+
+const MARK_PAD = 3;
+const MARK_HOVER_MS = 10000; // a hover whose end never arrived (the panel closed) still clears
+const MARK_REVEAL_MS = 2500;
+const ADDED_MS = 1200;
+const CROP_HOLD_MS = 1000;
+const FRAME_TAGS = new Set(["IFRAME", "FRAME", "EMBED", "OBJECT"]);
+// What an Alt+click keeps from the page; the pick itself happens on pointerdown.
+const PICK_EVENTS = new Set(["pointerdown", "mousedown", "pointerup", "mouseup", "click", "dblclick"]);
+// Roles an Alt+click stops at on its way up from what is under the pointer, when no control is.
+const PICK_ROLES = new Set([
+  "img", "figure", "heading", "paragraph", "listitem", "list", "cell", "columnheader", "row", "table",
+  "article", "form", "group", "dialog", "alertdialog", "region", "navigation", "complementary",
+  "tabpanel", "toolbar", "search", "status", "alert", "canvas", "video", "audio",
+]);
+const PICK_TAGS = { FIGURE: "figure", CANVAS: "canvas", VIDEO: "video", AUDIO: "audio", PICTURE: "img", svg: "img" };
+const HINT = Services.appinfo.OS === "Darwin" ? "⌥ Click to add to chat" : "Alt+click to add to chat";
+
+const points = new WeakMap(); // document -> { armed, x, y, shown, owner, hold }
+const marks = new WeakMap(); // document -> { win, layer, hint, pick, agent, raf }
+
+// Ink is the page's text color: near-black, or near-white on a dark page. The agent's is purple.
+const MARK_CSS = `
+  :host { all: initial; }
+  .layer {
+    position: fixed; inset: 0; pointer-events: none; z-index: 2147483647; overflow: hidden;
+    --ink: #15141a; --paper: #fbfbfe;
+    font: 12px/16px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  .layer.dark { --ink: #fbfbfe; --paper: #15141a; }
+  .hint {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%); padding: 3px 10px;
+    border-radius: 6px; background: var(--ink); color: var(--paper); white-space: nowrap;
+  }
+  .box { position: absolute; border-radius: 6px; box-shadow: 0 0 0 2px var(--ink), 0 0 0 3px var(--paper); }
+  .box.agent { box-shadow: 0 0 0 2px #7542e5, 0 0 0 3px #fff; }
+  .tag {
+    position: absolute; left: -2px; bottom: calc(100% + 5px); max-width: min(320px, 90vw);
+    padding: 1px 6px; border-radius: 4px; background: var(--ink); color: var(--paper);
+    font-size: 11px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .box.agent .tag { background: #7542e5; color: #fff; }
+  .box.below .tag { bottom: auto; top: calc(100% + 5px); }
+  [hidden] { display: none; }
+`;
+
+function marksFor(doc) {
+  let m = marks.get(doc);
+  if (m) return m;
+  let content;
+  try {
+    content = doc.insertAnonymousContent();
+  } catch {
+    return null; // no pres shell (still loading, or display: none)
+  }
+  const div = (cls, text = "") => {
+    const n = doc.createElement("div");
+    n.className = cls;
+    n.textContent = text;
+    return n;
+  };
+  const box = (cls) => {
+    const node = div(`box ${cls}`);
+    const tag = div("tag");
+    node.append(tag);
+    node.hidden = true;
+    return { node, tag, el: null, timer: null };
+  };
+  const style = doc.createElement("style");
+  style.textContent = MARK_CSS;
+  const layer = div("layer");
+  const hint = div("hint", HINT);
+  hint.hidden = true;
+  m = { win: doc.defaultView, layer, hint, pick: box("pick"), agent: box("agent"), raf: 0 };
+  layer.append(hint, m.pick.node, m.agent.node);
+  content.root.append(style, layer);
+  marks.set(doc, m);
+  return m;
+}
+
+function pageIsDark(doc) {
+  const win = doc.defaultView;
+  for (const node of [doc.body, doc.documentElement]) {
+    if (!node) continue;
+    const [r, g, b, a] = (win.getComputedStyle(node).backgroundColor.match(/[\d.]+/g) ?? []).map(Number);
+    if (r != null && (a == null || a > 0.5)) return 0.2126 * r + 0.7152 * g + 0.0722 * b < 128;
+  }
+  return win.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+function placeBox(box) {
+  const r = box.el.getBoundingClientRect();
+  const s = box.node.style;
+  s.left = `${r.left - MARK_PAD}px`;
+  s.top = `${r.top - MARK_PAD}px`;
+  s.width = `${r.width + 2 * MARK_PAD}px`;
+  s.height = `${r.height + 2 * MARK_PAD}px`;
+  box.node.classList.toggle("below", r.top - MARK_PAD < 26);
+}
+
+// Shown boxes follow their element through scrolling and layout changes.
+function follow(m) {
+  if (m.raf) return;
+  const tick = () => {
+    m.raf = 0;
+    for (const b of [m.pick, m.agent]) {
+      if (b.el && !b.el.isConnected) hideBox(b);
+      else if (b.el) placeBox(b);
+    }
+    if (m.pick.el || m.agent.el) m.raf = m.win.requestAnimationFrame(tick);
+  };
+  m.raf = m.win.requestAnimationFrame(tick);
+}
+
+function showBox(m, box, el, label) {
+  clearTimeout(box.timer);
+  box.el = el;
+  box.tag.textContent = label;
+  box.node.hidden = false;
+  placeBox(box);
+  follow(m);
+}
+
+function hideBox(box) {
+  clearTimeout(box.timer);
+  box.el = null;
+  box.node.hidden = true;
+}
+
+// What an Alt+click picks: the nearest control around the point, else the nearest element that
+// stands for something (an image, a figure, a paragraph, a table...), else what is under the
+// pointer. One that covers most of the viewport is too broad, and the element itself wins.
+function pickTarget(hit) {
+  const doc = hit.ownerDocument;
+  const win = doc.defaultView;
+  const up = (node) => node.parentElement ?? node.getRootNode()?.host ?? null;
+  const within = (node) => node && node !== doc.body && node !== doc.documentElement;
+  const fit = (node) => {
+    const r = node.getBoundingClientRect();
+    return r.width * r.height > win.innerWidth * win.innerHeight * 0.6 ? hit : node;
+  };
+  for (let node = hit; within(node); node = up(node)) {
+    if (isInteractive(node, roleOf(node))) return fit(node);
+  }
+  for (let node = hit; within(node); node = up(node)) {
+    if (node.tagName === "svg" && node.ownerSVGElement) continue;
+    if (PICK_ROLES.has(roleOf(node) ?? PICK_TAGS[node.tagName])) return fit(node);
+  }
+  return hit;
+}
+
+const pickRole = (el) => roleOf(el) ?? PICK_TAGS[el.tagName] ?? el.tagName.toLowerCase();
+
+function pickName(el, role) {
+  const own = nameOf(el, role);
+  if (own) return own;
+  const caption = el.querySelector?.("figcaption, caption, legend, h1, h2, h3, h4, h5, h6, [role=heading], title");
+  return clean(caption?.textContent || el.innerText || el.textContent, 60);
+}
+
+function pickLabel(el) {
+  const role = pickRole(el);
+  const name = pickName(el, role);
+  return name ? `${role} · ${clean(name, 60)}` : role;
+}
+
+function visibleText(el) {
+  if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") return el.type === "password" ? "" : clean(el.value, 1000);
+  return clean(el.innerText ?? el.textContent, 1000);
+}
+
+// A frame starts pointing (asks for the hint) or takes the outline over from another frame.
+function aim(actor, doc, p) {
+  if (Date.now() < p.hold) return;
+  const hit = deepElementFromPoint(doc, p.x, p.y);
+  // Over a child frame, that frame draws the outline.
+  const target = hit && !FRAME_TAGS.has(hit.tagName) && hit !== doc.body && hit !== doc.documentElement ? pickTarget(hit) : null;
+  if (!p.shown || (target && !p.owner)) actor.sendAsyncMessage("point", { hint: true, owner: target ? actor.browsingContext.id : null });
+  p.shown = true;
+  p.owner = !!target;
+  const m = marksFor(doc);
+  if (!m) return;
+  if (!target) return hideBox(m.pick);
+  if (target === m.pick.el) return;
+  m.layer.classList.toggle("dark", pageIsDark(doc));
+  showBox(m, m.pick, target, pickLabel(target));
+}
+
+function endPoint(actor, doc, p) {
+  p.shown = false;
+  p.owner = false;
+  clearPoint(doc);
+  actor.sendAsyncMessage("point", { clear: true });
+}
+
+function clearPoint(doc) {
+  const m = marks.get(doc);
+  if (!m) return;
+  m.hint.hidden = true;
+  hideBox(m.pick);
+}
+
+// The element goes to the extension (through the parent actor) with where it is, so background
+// can crop it out of a capture of the tab. The outline is hidden meanwhile; pointAdded brings it
+// back once the capture is done.
+function pick(actor, doc, p, x, y) {
+  const hit = deepElementFromPoint(doc, x, y);
+  if (!hit || FRAME_TAGS.has(hit.tagName) || hit === doc.body || hit === doc.documentElement) return;
+  const el = pickTarget(hit);
+  const win = doc.defaultView;
+  const role = pickRole(el);
+  const r = el.getBoundingClientRect();
+  const x0 = Math.max(0, r.left);
+  const y0 = Math.max(0, r.top);
+  p.hold = Date.now() + CROP_HOLD_MS;
+  const m = marks.get(doc);
+  if (m) hideBox(m.pick);
+  actor.sendAsyncMessage("pick", {
+    ref: refFor(el),
+    role,
+    name: pickName(el, role),
+    text: visibleText(el),
+    rect: { x: x0, y: y0, width: Math.max(0, Math.min(win.innerWidth, r.right) - x0), height: Math.max(0, Math.min(win.innerHeight, r.bottom) - y0) },
+    frame: { x: win.mozInnerScreenX, y: win.mozInnerScreenY },
+    url: doc.location?.href ?? "",
+    title: doc.title,
+  });
+}
+
+// Alt alone: Alt with Cmd, Ctrl or Shift is some other shortcut.
+const altOnly = (e) => e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey;
+
+function onPointEvent(actor, doc, p, e) {
+  if (PICK_EVENTS.has(e.type)) {
+    if (!altOnly(e) || e.button !== 0) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.type === "pointerdown") pick(actor, doc, p, e.clientX, e.clientY);
+    return;
+  }
+  switch (e.type) {
+    case "mousemove":
+      p.x = e.clientX;
+      p.y = e.clientY;
+      if (altOnly(e)) aim(actor, doc, p);
+      else if (p.shown) endPoint(actor, doc, p);
+      break;
+    case "keydown":
+      if (e.key === "Alt" && altOnly(e) && !e.repeat) {
+        if (p.x != null) aim(actor, doc, p);
+        else if (!p.shown) {
+          p.shown = true;
+          actor.sendAsyncMessage("point", { hint: true, owner: null });
+        }
+      } else if (e.key === "Escape" && p.shown) endPoint(actor, doc, p);
+      break;
+    case "keyup":
+      if (e.key !== "Alt" || !p.shown) break;
+      e.preventDefault(); // on Windows and Linux, a lone Alt would show the menu bar
+      endPoint(actor, doc, p);
+      break;
+    case "blur":
+      if (e.target === doc.defaultView && p.shown) endPoint(actor, doc, p);
+      break;
+    case "pagehide":
+      p.shown = false;
+      clearPoint(doc);
+      break;
+  }
+}
+
+function pointArm(doc, { on }) {
+  const p = points.get(doc) ?? { armed: false, x: null, y: null, shown: false, owner: false, hold: 0 };
+  Object.assign(p, { armed: !!on, shown: false, owner: false });
+  points.set(doc, p);
+  clearPoint(doc);
+  return true;
+}
+
+// What another frame (or this one) said, relayed by the parent actor.
+function pointSync(doc, { hint, owner, clear }) {
+  const p = points.get(doc);
+  if (!p?.armed) return false;
+  const bc = doc.defaultView.browsingContext;
+  if (clear) {
+    Object.assign(p, { shown: false, owner: false });
+    clearPoint(doc);
+    return true;
+  }
+  if (hint && !bc.parent) {
+    const m = marksFor(doc);
+    if (m) {
+      m.layer.classList.toggle("dark", pageIsDark(doc));
+      m.hint.hidden = false;
+      p.shown = true;
+    }
+  }
+  if (owner !== bc.id) {
+    p.owner = false;
+    const m = marks.get(doc);
+    if (m) hideBox(m.pick);
+  }
+  return true;
+}
+
+function pointAdded(doc, { ref }) {
+  const p = points.get(doc);
+  if (p) p.hold = 0;
+  const el = resolveRef(doc, ref);
+  const m = marksFor(doc);
+  if (!m) return false;
+  showBox(m, m.pick, el, "Added to chat");
+  m.pick.timer = setTimeout(() => {
+    if (m.pick.el === el && !p?.shown) hideBox(m.pick);
+  }, ADDED_MS);
+  return true;
+}
+
+// The agent pointing at an element (a hover or click on its link in the panel). A click
+// scrolls it into view, and its outline stays up a moment; clear takes a hover's down.
+function mark(doc, { ref, label, reveal, clear }) {
+  if (clear) {
+    const m = marks.get(doc);
+    if (m?.agent.el && m.agent.el === docState(doc).byRef.get(ref)) hideBox(m.agent);
+    return true;
+  }
+  const el = resolveRef(doc, ref);
+  const m = marksFor(doc);
+  if (!m) return false;
+  if (reveal) el.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+  showBox(m, m.agent, el, clean(label, 80) || ref);
+  m.agent.timer = setTimeout(() => hideBox(m.agent), reveal ? MARK_REVEAL_MS : MARK_HOVER_MS);
+  return true;
+}
+
+// ---------------------------------------------------------------------------------------------
 
 // Size of the rendered text, polled by navigate to wait out single-page-app loading.
 function textSize(doc) {
@@ -1432,6 +1780,9 @@ function viewport(doc) {
     dpr: win.devicePixelRatio,
     scrollX: win.scrollX,
     scrollY: win.scrollY,
+    // where the viewport sits on screen, to place a child frame's rect in the tab
+    screenX: win.mozInnerScreenX,
+    screenY: win.mozInnerScreenY,
     title: doc.title,
     url: doc.location?.href,
   };
@@ -1455,6 +1806,10 @@ const OPS = {
   formInput,
   evaluate,
   upload,
+  pointArm,
+  pointSync,
+  pointAdded,
+  mark,
 };
 
 export class ClaudePageChild extends JSWindowActorChild {
@@ -1464,5 +1819,18 @@ export class ClaudePageChild extends JSWindowActorChild {
     const doc = this.document;
     if (!doc) throw new Error("No document in this frame.");
     return op(doc, data ?? {});
+  }
+
+  // Point and ask: the events api.js registers the actor for (without creating it), acted on in
+  // armed documents only.
+  handleEvent(event) {
+    let doc;
+    try {
+      doc = this.document;
+    } catch {
+      return; // the window is going away
+    }
+    const p = doc && points.get(doc);
+    if (p?.armed && event.isTrusted) onPointEvent(this, doc, p, event);
   }
 }

@@ -34,7 +34,9 @@ Out of scope for now: turning connectors on and off per chat, and voice input.
   Environment: `FIREFOX_AGENT_BRIDGE_SESSION=<chatId>` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (an
   agent steered by a page shouldn't be able to write memory that outlives the chat). An appended system prompt says the agent runs in the
   Firefox sidebar, that the user's tabs are in its tab group (use `tabs_context_mcp`, work in those
-  tabs rather than opening new ones unless needed), and to keep answers short. The firefox MCP
+  tabs rather than opening new ones unless needed), that it can link a page element as
+  `[label](ref:ref_N)` (or `ref:<tabId>/ref_N` for a tab other than the one it last used), and to
+  keep answers short. The firefox MCP
   server is passed explicitly with `--mcp-config` (the host's node, this checkout's
   `mcp/server.mjs`, session env pinned); an entry there replaces a user-scope server of the same
   name, so there is no duplicate and chats work even if the server was never registered with
@@ -48,7 +50,8 @@ Out of scope for now: turning connectors on and off per chat, and voice input.
   itself for the steps card. A skill's `sites` are read from the `sites:` line of the frontmatter
   in `~/.claude/skills/<name>/SKILL.md` (or Codex's folder); the panel does the matching.
 - Every user message is prefixed with a `<panel-context>...</panel-context>` block (the group's
-  tabs, and the paths of attached files that weren't sent inline). It is stripped again when a
+  tabs, the elements the user Alt+clicked as `- tab <id>, <ref>: <role> "<name>", text: "..."`,
+  and the paths of attached files that weren't sent inline). It is stripped again when a
   transcript is loaded. Images (png, jpeg, gif, webp, up to about 3.5 MB) go inline as base64
   image blocks; other attachments are written to `uploads/<chatId>/`.
 - Permissions: only the firefox MCP tools, Skill and TodoWrite are pre-allowed. Everything else
@@ -102,7 +105,7 @@ Extension to host:
 
 | Message | Fields |
 | --- | --- |
-| `chat.send` | `chatId` (`[\w-]{1,64}`), `engine` (`claude` \| `codex`), `model`, `effort` (empty string: the default), `text`, `attachments: [{name, mime, data}]` (base64), `skill` (name of a skill picked in the panel, else null), `context: {tabs: [{tabId, title, url, current}]}`, `resume` (true when reopening a chat from history) |
+| `chat.send` | `chatId` (`[\w-]{1,64}`), `engine` (`claude` \| `codex`), `model`, `effort` (empty string: the default), `text`, `attachments: [{name, mime, data}]` (base64), `skill` (name of a skill picked in the panel, else null), `context: {tabs: [{tabId, title, url, current}], elements?: [{tabId, ref, role, name, text}]}` (`elements` only when the user picked some), `resume` (true when reopening a chat from history) |
 | `chat.interrupt` | `chatId` |
 | `chat.permission` | `chatId`, `requestId`, `decision` (`allow` \| `allow_always` \| `deny`) |
 | `chat.close` | `chatId` (kill its process) |
@@ -160,12 +163,15 @@ list of events (capped), so a panel that closes and reopens gets the chat back.
 Panel to background: `hello`, `chat.new`, `chat.open {chatId, source, path, engine, model}` (the
 history row's own; the chat continues on that engine and model, and a terminal session is always
 Claude's), `chat.send` (as above,
-without `context`; background adds the group's tabs and binds the chat first), `chat.interrupt`,
+without `context` but with `elements`, the picked elements; background adds the group's tabs and
+binds the chat first), `chat.interrupt`,
 `chat.permission`, `chat.history {requestId}`, `chat.capabilities {requestId, engine}`,
 `group.add {tabId}`,
 `group.remove {tabId}`, `resume` (undoes Stop all agents: every paused session, and the pause on
 new ones), `stopAll` (pauses Firefox calls and also sends `chat.interrupt` for every chat whose
-turn is running; the Alt+Shift+X shortcut and the activity sheet's Stop do the same), `popout`.
+turn is running; the Alt+Shift+X shortcut and the activity sheet's Stop do the same), `popout`,
+`mark {tabId, ref, label, reveal, clear}` (outline an element the agent linked; only tabs in the
+chat's group, and `reveal` switches to the tab), `point.clear` (Alt was let go in the panel).
 
 Background to panel: `state {windowId, chatId, events, group, activeTab, paused, engine, model, effort}`
 on hello and on chat switches; `chat.event`, `chat.history`, `chat.transcript`,
@@ -174,7 +180,23 @@ when membership or titles change (in `state`, a chat with no group yet has `labe
 null and `tabs` empty); `activeTab {tab}` (same tab shape as in `group`, or null) when the window's active tab changes or
 its title, URL or icon does;
 `paused {paused}` when the chat's session is paused or resumed; `hostUp` when the native host
-(re)connects, so a panel showing "not connected" asks for capabilities again.
+(re)connects, so a panel showing "not connected" asks for capabilities again; `pick {chatId,
+element: {tabId, ref, role, name, text, image}}` when the user Alt+clicks an element (`image` is a
+PNG data URL, or null); `markFailed {error}` when a clicked element link can't be shown.
+
+Point and ask: background calls the experiment's `setPointTabs` with the active tab of every
+window that has a panel open (web pages only), again when those change, and on `point.clear`.
+In those tabs the actor (which registers for mouse and key events without creating itself, and
+acts only in armed documents) outlines the element under the pointer while Alt alone is held,
+shows the hint in the top frame, and on Alt+click swallows the pointer and click events and
+reports the element through the parent actor (`claudePage.onPick`). A ref made in a child frame
+carries the frame's browsing context id (`ref_7@f12`), and `claudePage.call` starts in that frame
+for any op given one. Background crops the element from `tabs.captureTab` (its rect, moved by
+where its frame's viewport sits relative to the top frame's, clipped to the viewport, with the
+cursor and outlines hidden), adds the tab to the chat's group like `group.add`, and has the actor
+show "Added to chat" on it. The panel sends the crop as an image attachment and the rest as
+`elements`. Element links in replies render as chips; `ref:ref_N` points into the tab of the
+turn's latest Firefox step.
 
 Binding: on a chat's first `chat.send`, background creates the session entry for `chatId` with a
 new group holding the window's active tab (labels as for MCP clients: "Claude", "Claude 2", ...).

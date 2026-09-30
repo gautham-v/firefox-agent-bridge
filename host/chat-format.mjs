@@ -180,11 +180,19 @@ export function parseResetTime(text) {
 export const CONTEXT_OPEN = "<panel-context>";
 export const CONTEXT_CLOSE = "</panel-context>";
 
-export function contextBlock(tabs, files) {
+// Picked elements' lines start with "tab ", like the tabs', so stripContext never reads them as files.
+export function contextBlock(tabs, files, elements = []) {
   const lines = [];
   if (tabs.length) {
     lines.push("Tabs in your Firefox tab group (call tabs_context_mcp for live state):");
     for (const t of tabs.slice(0, 30)) lines.push(`- tab ${t.tabId}: "${clip(t.title, 100)}" ${clip(t.url, 200)}${t.current ? " (the tab the user is viewing)" : ""}`);
+  }
+  if (elements.length) {
+    lines.push("Elements the user pointed at with Alt+click (a screenshot of each is attached; use the ref with computer, read_page ref_id, find or form_input in that tab):");
+    for (const e of elements.slice(0, 10)) {
+      const text = clip(e.text, 1000);
+      lines.push(`- tab ${e.tabId}, ${clip(e.ref, 40)}: ${clip(e.role, 40) || "element"}${e.name ? ` "${clip(e.name, 150)}"` : ""}${text ? `, text: "${text}"` : ""}`);
+    }
   }
   if (files.length) {
     lines.push("Files the user attached, saved on disk (read them by path):");
