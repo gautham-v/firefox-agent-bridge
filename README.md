@@ -129,7 +129,7 @@ read the skill's file. The steps card shows "Loaded skill <name>".
 While the panel is open, hold Alt (⌥ on a Mac) over the page you're viewing: the element under
 the pointer gets an outline and a label with its role and name. Alt+click attaches it to the
 composer instead of clicking it: a crop of the element (with [masked fields](#redaction)
-covered), plus its role, name, visible text and a ref the agent can use with `computer`,
+covered), plus its role, name, visible text (masked like any page read) and a ref the agent can use with `computer`,
 `read_page`, `find` and `form_input`. The tab joins the chat's group if it isn't in it. Esc or
 letting go of Alt clears the outline.
 

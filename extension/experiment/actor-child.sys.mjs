@@ -1735,6 +1735,16 @@ function pointSync(doc, { hint, owner, clear }) {
   return true;
 }
 
+// A pick's name and text as the agent may read them. The pick itself is made without the
+// redaction rules, so background asks for these again with them before the pick goes anywhere.
+function pickInfo(doc, { ref, redact }) {
+  const el = resolveRef(doc, ref);
+  const red = redactor(doc, redact);
+  const role = pickRole(el);
+  if (red.mask(el)) return { name: isField(el) ? red.scrub(pickName(el, role)) : "", text: red.marker(el) };
+  return { name: red.scrub(pickName(el, role)), text: red.scrub(visibleText(el)) };
+}
+
 function pointAdded(doc, { ref }) {
   const p = points.get(doc);
   if (p) p.hold = 0;
@@ -2055,6 +2065,7 @@ const OPS = {
   upload,
   pointArm,
   pointSync,
+  pickInfo,
   pointAdded,
   mark,
   locate,

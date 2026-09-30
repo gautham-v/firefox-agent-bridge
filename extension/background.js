@@ -1717,10 +1717,13 @@ async function onPick(tabId, pick) {
   const shown = [...panels].filter((p) => p.windowId === tab?.windowId && p.ready);
   const chat = chats.get(shown[0]?.chatId);
   if (!chat) return;
+  // The page reported the element's name and text without the redaction rules; they're read
+  // again with them, and left out if that fails.
+  const safe = await page(tabId, "pickInfo", { ref: pick.ref }).catch(() => null);
   const image = await pickImage(tabId, pick).catch(() => null);
   await addToGroup(chat, tabId).catch(() => {});
   page(tabId, "pointAdded", { ref: pick.ref }).catch(() => {});
-  const [element] = pickedElements([{ ...pick, tabId }]);
+  const [element] = pickedElements([{ ...pick, name: safe?.name ?? "", text: safe?.text ?? "", tabId }]);
   for (const panel of shown) if (panel.chatId === chat.id) post(panel, { type: "pick", chatId: chat.id, element: { ...element, image } });
 }
 

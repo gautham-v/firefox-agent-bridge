@@ -1161,6 +1161,7 @@ test("an Alt+click becomes an attachment: a crop of the element, and its ref in 
   const calls = [];
   env.browser.claudePage.call = async (tabId, op, args) => {
     calls.push(plain([tabId, op, args]));
+    if (op === "pickInfo") return { name: "Weekly signups", text: "Nov Jan Mar" };
     return op === "viewport" ? { width: 1000, height: 800, dpr: 2, scrollX: 0, scrollY: 300, screenX: 100, screenY: 50 } : "done";
   };
   const captures = [];
@@ -1182,20 +1183,39 @@ test("an Alt+click becomes an attachment: a crop of the element, and its ref in 
   const element = { tabId: 1, ref: "ref_3@f12", role: "figure", name: "Weekly signups", text: "Nov Jan Mar" };
   assert.deepEqual(a.of("pick"), [{ type: "pick", chatId: a.chatId, element: { ...element, image: "data:image/png;base64,AAAA" } }]);
   assert.equal(env.browser.tabsMap.get(1).groupId, 100, "the tab starts the chat's group");
-  assert.deepEqual(calls.map(([, op]) => op), ["viewport", "pointAdded"]);
+  assert.deepEqual(calls.map(([, op]) => op), ["pickInfo", "viewport", "pointAdded"]);
+  assert.deepEqual(calls[0][2], { ref: "ref_3@f12", redact: { always: ["password", "cc-*", "one-time-code", "new-password", "current-password"], sites: {} } }, "name and text are read again with the redaction rules");
   assert.deepEqual(broadcasts, [[1, "capture", true], [1, "capture", false]], "the crop is taken with the cursor hidden and masked fields covered");
   assert.equal(calls.at(-1)[2].ref, "ref_3@f12", "the outline comes back in the element's frame");
 
   await a.send("chat.send", { engine: "claude", text: "why did this drop?", elements: [a.of("pick")[0].element, { tabId: 1, ref: "javascript:x" }] });
   assert.deepEqual(env.sentToHost("chat.send")[0].context.elements, [element]);
 
+  // What the page said the element holds never goes out; only what the redacted read says.
+  env.browser.claudePage.call = async (tabId, op) => {
+    if (op === "pickInfo") return { name: "Card number", text: "[redacted: cc-number, filled]" };
+    return op === "viewport" ? { width: 1000, height: 800, dpr: 2, scrollX: 0, scrollY: 0, screenX: 0, screenY: 0 } : "done";
+  };
+  await env.browser.claudePage.onPick.fire(1, { ...pick, ref: "ref_4", role: "textbox", name: "Card number", text: "4111 1111 1111 1111" });
+  await wait(50);
+  assert.equal(a.of("pick").at(-1).element.text, "[redacted: cc-number, filled]");
+  // If the redacted read fails, the name and text are left out.
+  env.browser.claudePage.call = async (tabId, op) => {
+    if (op === "pickInfo") throw new Error("ref_5 is gone");
+    return op === "viewport" ? { width: 1000, height: 800, dpr: 2, scrollX: 0, scrollY: 0, screenX: 0, screenY: 0 } : "done";
+  };
+  await env.browser.claudePage.onPick.fire(1, { ...pick, ref: "ref_5", name: "Secret", text: "4111 1111 1111 1111" });
+  await wait(50);
+  assert.deepEqual([a.of("pick").at(-1).element.name, a.of("pick").at(-1).element.text], ["", ""]);
+  const picks = a.of("pick").length;
+
   // A window without a panel, and a ref that isn't one, go nowhere.
   env.browser.tabsMap.set(7, { id: 7, windowId: 12, groupId: -1, active: true, url: "https://seven.example/", status: "complete", title: "seven" });
   await env.browser.claudePage.onPick.fire(7, pick);
   await env.browser.claudePage.onPick.fire(1, { ...pick, ref: "<b>" });
   await wait(50);
-  assert.equal(a.of("pick").length, 1);
-  assert.equal(captures.length, 1);
+  assert.equal(a.of("pick").length, picks);
+  assert.equal(captures.length, 3);
 });
 
 test("an element link outlines the element in its tab, only in the chat's group; a click brings the tab forward", async () => {
