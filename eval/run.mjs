@@ -6,10 +6,15 @@
 //
 //   node eval/run.mjs [--max-minutes 8] [--concurrency 3] [--runs 3] [--model claude-sonnet-5-5]
 //                     [--tasks id,id] [--arms baseline,strip] [--out eval/results/runs.jsonl]
-//                     [--run-timeout-min 7] [--dry-run]
+//                     [--browser firefox|chrome|firefox,chrome] [--run-timeout-min 7] [--dry-run]
 //
-// Every run's MCP config points at THIS worktree's mcp/server.mjs, so all arms see the same tools
-// even if main changes.
+// Every Firefox run's MCP config points at THIS worktree's mcp/server.mjs, so all arms see the
+// same tools even if main changes. Chrome runs use Claude in Chrome (`claude -p --chrome`) with an
+// empty strict MCP config, so only the claude-in-chrome tools are offered; they run the baseline
+// arm only. Rows without a browser field are Firefox runs.
+//
+// Each run also writes one line per tool call to eval/results/traces/<run_id>.jsonl (tool, args
+// summary, result bytes, est. tokens, images and their sizes, duration).
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -18,7 +23,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ARM_PROMPTS, ARM_TOOLS } from "./arms.mjs";
 import { lastJson } from "./lib/check.mjs";
-import { TASKS } from "./tasks.mjs";
+import { screenshotActions, toolTrace, traceTotals } from "./lib/trace.mjs";
+import { TASKS, promptFor } from "./tasks.mjs";
 
 const EVAL = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(EVAL);
@@ -38,6 +44,9 @@ const RUN_CAP_MIN = Number(opt("run-timeout-min", Math.min(7, MAX_MIN)));
 const OUT = path.resolve(opt("out", path.join(EVAL, "results/runs.jsonl")));
 const ONLY_TASKS = opt("tasks")?.split(",");
 const ONLY_ARMS = opt("arms")?.split(",");
+const BROWSERS = opt("browser", "firefox").split(",");
+for (const b of BROWSERS) if (!["firefox", "chrome"].includes(b)) throw new Error(`unknown --browser ${b}`);
+const TRACES = path.join(path.dirname(OUT), "traces");
 const CLAUDE = process.env.CLAUDE_BIN || "claude";
 const DEFAULT_EXPECTED_MS = 4 * 60_000;
 
@@ -63,19 +72,23 @@ function readRuns() {
     .filter(Boolean);
 }
 
-const cellKey = (c) => `${c.task}|${c.arm}|${c.run}`;
+const browserOf = (r) => r.browser ?? "firefox";
+const cellKey = (c) => `${c.task}|${c.arm}|${c.run}|${browserOf(c)}`;
+// Claude in Chrome only runs the baseline arm (the arms' guidance is written for the Firefox tools).
+const armsFor = (t, browser) => (browser === "chrome" ? ["baseline"] : ["baseline", ...t.arms]);
 
-// Ordered run# first, then task, then arm, so a partial matrix stays balanced and each arm runs
-// close in time to its baseline.
+// Ordered run# first, then task, then browser, then arm, so a partial matrix stays balanced and
+// each arm (and each browser) runs close in time to its baseline.
 function allCells() {
   const cells = [];
   for (let run = 1; run <= RUNS; run++)
     for (const t of TASKS) {
       if (ONLY_TASKS && !ONLY_TASKS.includes(t.id)) continue;
-      for (const arm of ["baseline", ...t.arms]) {
-        if (ONLY_ARMS && !ONLY_ARMS.includes(arm)) continue;
-        cells.push({ task: t.id, arm, run });
-      }
+      for (const browser of BROWSERS)
+        for (const arm of armsFor(t, browser)) {
+          if (ONLY_ARMS && !ONLY_ARMS.includes(arm)) continue;
+          cells.push({ task: t.id, arm, run, browser });
+        }
     }
   return cells;
 }
@@ -87,7 +100,7 @@ const median = (xs) => {
 
 // How long a cell is likely to take, from earlier runs of the same task/arm (or task).
 function expectedMs(cell, done) {
-  const same = done.filter((r) => r.task === cell.task && r.arm === cell.arm).map((r) => r.wall_ms);
+  const same = done.filter((r) => r.task === cell.task && r.arm === cell.arm && browserOf(r) === cell.browser).map((r) => r.wall_ms);
   if (same.length) return median(same);
   const task = done.filter((r) => r.task === cell.task).map((r) => r.wall_ms);
   return task.length ? median(task) : DEFAULT_EXPECTED_MS;
@@ -101,6 +114,10 @@ fs.writeFileSync(
   MCP_CONFIG,
   JSON.stringify({ mcpServers: { firefox: { type: "stdio", command: process.execPath, args: [path.join(ROOT, "mcp/server.mjs")] } } }, null, 2),
 );
+// Chrome runs: no MCP servers from config, so the Firefox tools aren't offered; --chrome adds
+// the claude-in-chrome tools.
+const EMPTY_MCP_CONFIG = path.join(TMP, "mcp-empty.json");
+fs.writeFileSync(EMPTY_MCP_CONFIG, JSON.stringify({ mcpServers: {} }));
 
 // Nested `claude` refuses to start, or attaches to this session, with these set.
 const STRIP_ENV = [
@@ -110,9 +127,21 @@ const STRIP_ENV = [
   "FIREFOX_AGENT_BRIDGE_SESSION",
 ];
 
-export function claudeArgs(task, arm) {
+export function claudeArgs(task, arm, browser = "firefox") {
+  if (browser === "chrome")
+    return [
+      "-p", promptFor(task, browser),
+      "--chrome",
+      "--output-format", "stream-json", "--verbose",
+      "--model", MODEL,
+      "--strict-mcp-config", "--mcp-config", EMPTY_MCP_CONFIG,
+      "--tools", "",
+      "--allowedTools", "mcp__claude-in-chrome__*",
+      "--disallowedTools", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch",
+      "--no-session-persistence",
+    ];
   const args = [
-    "-p", task.prompt,
+    "-p", promptFor(task, browser),
     "--output-format", "stream-json", "--verbose",
     "--model", MODEL,
     "--strict-mcp-config", "--mcp-config", MCP_CONFIG,
@@ -127,7 +156,8 @@ export function claudeArgs(task, arm) {
 }
 
 // Folds stream-json events into the per-run metrics.
-function summarize(events) {
+function summarize(timed) {
+  const events = timed.map((x) => x.e);
   const m = {
     session_id: null, model: null, tools_available: null,
     tool_calls: 0, tool_calls_by_tool: {}, subagent_tool_calls: 0, screenshots: 0,
@@ -148,6 +178,10 @@ function summarize(events) {
         m.tool_calls_by_tool[b.name] = (m.tool_calls_by_tool[b.name] ?? 0) + 1;
         if (e.parent_tool_use_id) m.subagent_tool_calls++;
         if (b.name === "mcp__firefox__computer" && ["screenshot", "zoom"].includes(b.input?.action)) m.screenshots++;
+        // Claude in Chrome: screenshots can also sit inside a browser_batch.
+        if (b.name === "mcp__claude-in-chrome__computer" && ["screenshot", "zoom"].includes(b.input?.action)) m.screenshots++;
+        if (b.name === "mcp__claude-in-chrome__browser_batch" || b.name === "mcp__firefox__batch")
+          m.screenshots += screenshotActions(b.name, b.input);
       }
     } else if (e.type === "user") {
       const content = e.message?.content;
@@ -156,7 +190,10 @@ function summarize(events) {
         // Size of what the tools fed back into the context (text chars, image count).
         for (const c of Array.isArray(b.content) ? b.content : [{ type: "text", text: String(b.content ?? "") }]) {
           if (c.type === "image") m.tool_result_images++;
-          else m.tool_result_chars += (c.text ?? "").length;
+          else {
+            m.tool_result_chars += (c.text ?? "").length;
+            if (/Browser extension is not connected/i.test(c.text ?? "")) m.chrome_not_connected = true;
+          }
         }
         if (b.is_error) {
           m.tool_errors++;
@@ -201,9 +238,9 @@ function runCell(cell, capMs) {
   const task = TASKS.find((t) => t.id === cell.task);
   const env = { ...process.env };
   for (const k of STRIP_ENV) delete env[k];
-  const cwd = fs.mkdtempSync(path.join(TMP, `${cell.task}-${cell.arm}-${cell.run}-`));
+  const cwd = fs.mkdtempSync(path.join(TMP, `${cell.task}-${cell.arm}-${cell.run}-${cell.browser}-`));
   const started = Date.now();
-  const proc = spawn(CLAUDE, claudeArgs(task, cell.arm), { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+  const proc = spawn(CLAUDE, claudeArgs(task, cell.arm, cell.browser), { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
   const events = [];
   let buf = "";
   let stderr = "";
@@ -216,7 +253,7 @@ function runCell(cell, capMs) {
       buf = buf.slice(nl + 1);
       if (!line.trim()) continue;
       try {
-        events.push(JSON.parse(line));
+        events.push({ t: Date.now(), e: JSON.parse(line) });
       } catch {}
     }
   });
@@ -244,6 +281,11 @@ function runCell(cell, capMs) {
 async function finish(cell, r) {
   const task = TASKS.find((t) => t.id === cell.task);
   const m = summarize(r.events);
+  const trace = toolTrace(r.events);
+  const totals = traceTotals(trace);
+  const run_id = `${cell.task}.${cell.arm}.${cell.browser}.${cell.run}.${new Date(r.started).toISOString().replace(/[:.]/g, "-")}`;
+  fs.mkdirSync(TRACES, { recursive: true });
+  fs.writeFileSync(path.join(TRACES, `${run_id}.jsonl`), trace.map((c) => JSON.stringify(c)).join("\n") + (trace.length ? "\n" : ""));
   const answer = lastJson(m.final_text);
   let key = task.key;
   let key_source = "static";
@@ -264,8 +306,9 @@ async function finish(cell, r) {
   if (m.is_error) errors.push(`result ${m.result_subtype}`);
   if (!answer) errors.push("no JSON answer");
   if (r.stderr.trim()) errors.push(`stderr: ${r.stderr.trim().slice(0, 300)}`);
+  if (m.chrome_not_connected) errors.push("chrome extension not connected");
   return {
-    task: cell.task, arm: cell.arm, run: cell.run, kind: task.kind,
+    task: cell.task, arm: cell.arm, run: cell.run, browser: cell.browser, run_id, kind: task.kind,
     started_at: new Date(r.started).toISOString(), wall_ms: r.wall_ms,
     model: m.model ?? MODEL, session_id: m.session_id,
     pass: check.pass, fields: check.fields, pass_static_key: staticCheck?.pass ?? null,
@@ -275,10 +318,13 @@ async function finish(cell, r) {
     tool_calls: m.tool_calls, tool_calls_by_tool: m.tool_calls_by_tool, subagent_tool_calls: m.subagent_tool_calls,
     screenshots: m.screenshots, tool_errors: m.tool_errors, error_samples: m.error_samples,
     tool_result_chars: m.tool_result_chars, tool_result_images: m.tool_result_images,
+    screenshot_actions: totals.screenshot_actions, images_returned: totals.images,
+    tool_stats_by_tool: totals.by_tool, trace_file: path.relative(EVAL, path.join(TRACES, `${run_id}.jsonl`)),
     usage: m.usage, tokens_all_models: m.tokens_all_models ?? null, model_usage: m.model_usage,
     cost_usd: m.cost_usd, duration_ms: m.duration_ms, duration_api_ms: m.duration_api_ms,
     tools_available: m.tools_available, errors,
-    harness: { claude_args_tools: ARM_TOOLS[cell.arm] ?? "", concurrency: CONCURRENCY },
+    harness: { claude_args_tools: cell.browser === "chrome" ? "" : ARM_TOOLS[cell.arm] ?? "", concurrency: CONCURRENCY, browsers_in_chunk: BROWSERS },
+    chrome_not_connected: m.chrome_not_connected ?? false,
   };
 }
 
@@ -287,7 +333,7 @@ async function finish(cell, r) {
 const done = readRuns();
 const doneKeys = new Set(done.map(cellKey));
 const pending = allCells().filter((c) => !doneKeys.has(cellKey(c)));
-log(`${allCells().length} cells, ${done.length} recorded in ${path.relative(process.cwd(), OUT)}, ${pending.length} pending; model ${MODEL}, concurrency ${CONCURRENCY}, ${MAX_MIN} min`);
+log(`${allCells().length} cells, ${done.length} recorded in ${path.relative(process.cwd(), OUT)}, ${pending.length} pending; browsers ${BROWSERS.join(",")}, model ${MODEL}, concurrency ${CONCURRENCY}, ${MAX_MIN} min`);
 
 if (flag("dry-run")) {
   for (const c of pending) log("pending", cellKey(c));
@@ -298,6 +344,7 @@ fs.mkdirSync(path.dirname(OUT), { recursive: true });
 const running = new Set();
 let recorded = 0;
 let discarded = 0;
+let chromeDown = false;
 
 process.on("SIGINT", () => {
   for (const r of running) r.kill("interrupted");
@@ -307,7 +354,7 @@ async function worker() {
   while (pending.length) {
     const remaining = deadline - Date.now();
     // Start a cell only if it's likely to finish before the chunk ends.
-    const i = pending.findIndex((c) => expectedMs(c, done) * 1.3 <= remaining);
+    const i = pending.findIndex((c) => !(chromeDown && c.browser === "chrome") && expectedMs(c, done) * 1.3 <= remaining);
     if (i < 0 || remaining < 30_000) return;
     const cell = pending.splice(i, 1)[0];
     const capMs = Math.min(RUN_CAP_MIN * 60_000, remaining - 5_000);
@@ -322,10 +369,19 @@ async function worker() {
       continue;
     }
     const row = await finish(cell, r);
+    // The extension wasn't reachable: that says nothing about the task, so don't record the run
+    // (it stays pending) and skip Chrome cells for the rest of this chunk.
+    if (row.chrome_not_connected) {
+      chromeDown = true;
+      discarded++;
+      fs.rmSync(path.join(EVAL, row.trace_file), { force: true });
+      log(`discarded ${cellKey(cell)}: Claude in Chrome extension not connected; skipping Chrome cells this chunk`);
+      continue;
+    }
     fs.appendFileSync(OUT, JSON.stringify(row) + "\n");
     done.push(row);
     recorded++;
-    log(`done  ${cellKey(cell)} pass=${row.pass} ${(row.wall_ms / 1000).toFixed(0)}s tools=${row.tool_calls} shots=${row.screenshots}${row.errors.length ? " errors=" + row.errors.join("; ").slice(0, 200) : ""}`);
+    log(`done  ${cellKey(cell)} pass=${row.pass} ${(row.wall_ms / 1000).toFixed(0)}s tools=${row.tool_calls} shots=${row.screenshots} images=${row.images_returned}${row.errors.length ? " errors=" + row.errors.join("; ").slice(0, 200) : ""}`);
   }
 }
 

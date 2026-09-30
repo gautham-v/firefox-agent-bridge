@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 // Writes eval/results/report.md from runs.jsonl and the probe files: per arm vs baseline on that
 // arm's tasks (success rate, median and spread of wall time, tool calls, tokens), then the probe
-// summaries. Numbers only.
+// summaries, then Firefox vs Claude in Chrome on the baseline arm (from browsers.jsonl). Numbers
+// only.
 //
-//   node eval/report.mjs [--runs eval/results/runs.jsonl] [--out eval/results/report.md]
+//   node eval/report.mjs [--runs eval/results/runs.jsonl] [--compare eval/results/browsers.jsonl]
+//                        [--out eval/results/report.md]
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { shortTool } from "./lib/trace.mjs";
 import { TASKS } from "./tasks.mjs";
 
 const EVAL = path.dirname(fileURLToPath(import.meta.url));
@@ -21,10 +24,16 @@ const OUT = opt("out", path.join(EVAL, "results/report.md"));
 const STRIP = opt("strip", path.join(EVAL, "results/probe-strip.json"));
 const A11Y = opt("a11y", path.join(EVAL, "results/probe-a11y.json"));
 const PLANNED_RUNS = Number(opt("planned-runs", 3));
+const COMPARE = opt("compare", path.join(EVAL, "results/browsers.jsonl"));
 
-const rows = fs.existsSync(RUNS)
-  ? fs.readFileSync(RUNS, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l))
-  : [];
+const readJsonl = (f) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
+const browserOf = (r) => r.browser ?? "firefox";
+const allRows = readJsonl(RUNS);
+// The arm sections are about the Firefox tools; Chrome rows only feed the browser comparison.
+const rows = allRows.filter((r) => browserOf(r) === "firefox");
+// Browser comparison: the dedicated file when it exists (both browsers run in the same chunks),
+// plus any Chrome rows in the runs file with their Firefox counterparts.
+const compareRows = fs.existsSync(COMPARE) ? readJsonl(COMPARE) : allRows.some((r) => browserOf(r) === "chrome") ? allRows : [];
 
 // ---- stats ---------------------------------------------------------------------------------
 
@@ -112,7 +121,8 @@ out.push("Tokens are summed over every model in a run (sub-agents included). \"I
 
 // Matrix progress.
 const cells = [];
-for (const t of TASKS) for (const arm of ["baseline", ...t.arms]) cells.push({ task: t.id, arm });
+// The speed-idea matrix; the general tasks (no arms) are only in the browser comparison.
+for (const t of TASKS.filter((x) => x.arms.length)) for (const arm of ["baseline", ...t.arms]) cells.push({ task: t.id, arm });
 out.push("## Matrix", "", "| task | kind | arm | runs | pass | errors |", "| --- | --- | --- | --- | --- | --- |");
 for (const c of cells) {
   const rs = rows.filter((r) => r.task === c.task && r.arm === c.arm);
@@ -133,7 +143,7 @@ for (const arm of ["strip", "data", "fanout"]) {
 }
 
 out.push("## Baseline, all tasks", "", "| task | runs | success | wall s | tool calls | screenshots | input tok | output tok |", "| --- | --- | --- | --- | --- | --- | --- | --- |");
-for (const t of TASKS) {
+for (const t of TASKS.filter((x) => x.arms.length)) {
   const rs = rows.filter((r) => r.task === t.id && r.arm === "baseline");
   out.push(`| ${t.id} | ${rs.length} | ${pct(rs.filter((r) => r.pass).length, rs.length)} | ${spread(rs.map((r) => r.wall_ms / 1000), (v) => fmt(v, 1))} | ${spread(rs.map((r) => r.tool_calls))} | ${spread(rs.map((r) => r.screenshots))} | ${spread(rs.map(inputTokens), k)} | ${spread(rs.map(outputTokens), k)} |`);
 }
@@ -213,6 +223,105 @@ if (fs.existsSync(A11Y)) {
   out.push("");
 }
 
+// ---- browser comparison --------------------------------------------------------------------
+
+function browserSection(rs) {
+  const lines = [];
+  const B = ["firefox", "chrome"];
+  const base = rs.filter((r) => r.arm === "baseline");
+  const tasksBoth = TASKS.map((t) => t.id).filter((id) => B.every((b) => base.some((r) => r.task === id && browserOf(r) === b)));
+  const of = (b, ids = tasksBoth) => base.filter((r) => browserOf(r) === b && ids.includes(r.task));
+  const shots = (r) => r.screenshot_actions ?? r.screenshots;
+  const images = (r) => r.images_returned ?? r.tool_result_images;
+  const kb = (r) => Object.values(r.tool_stats_by_tool ?? {}).reduce((s, x) => s + x.result_bytes, 0) / 1024;
+  const M = [
+    ["wall time (s)", (r) => r.wall_ms / 1000, (v) => fmt(v, 1)],
+    ["tool calls", (r) => r.tool_calls, (v) => fmt(v)],
+    ["screenshot/zoom actions", shots, (v) => fmt(v)],
+    ["images returned to the model", images, (v) => fmt(v)],
+    ["turns", (r) => r.turns, (v) => fmt(v)],
+    ["input tokens (incl. cache)", inputTokens, k],
+    ["uncached input tokens", uncachedTokens, k],
+    ["output tokens", outputTokens, k],
+    ["tool result KB (text + images)", kb, (v) => fmt(v, 1)],
+    ["cost (USD)", (r) => r.cost_usd, (v) => fmt(v, 3)],
+  ];
+  lines.push("## Browser comparison: Firefox tools vs Claude in Chrome (baseline arm)", "");
+  lines.push(
+    `Source: \`${path.relative(EVAL, fs.existsSync(COMPARE) ? COMPARE : RUNS)}\`. Same tasks, model and prompt (the prompt names "the Firefox browser tools" or "the Chrome browser tools"); Firefox runs get only the mcp__firefox__* tools, Chrome runs only mcp__claude-in-chrome__* (\`claude -p --chrome\` with an empty strict MCP config). Tools are compared by name without the server prefix. Tasks in the tables: those with runs in both browsers (${tasksBoth.length}).`,
+    "",
+    "**Known confounds.** Claude in Chrome's `find` calls a model server-side to match elements; those tokens and that cost don't appear in these counts, so Chrome's token and cost numbers are a lower bound whenever it uses `find` (its time is included in wall time and in `find`'s per-call time). Claude in Chrome also offers tools the Firefox server doesn't have (browser_batch, gif_creator, console/network readers, shortcuts, resize_window, upload_image, browser selection), and its `scroll` returns a screenshot, so compare \"images returned\" as well as screenshot actions. Chrome needs its window visible for screenshots; Firefox tabs run in the background.",
+    "",
+  );
+  if (!tasksBoth.length) return [...lines, "No task has baseline runs in both browsers yet.", ""].join("\n");
+  lines.push("### Overall", "", "| metric | firefox | chrome | chrome / firefox (medians) |", "| --- | --- | --- | --- |");
+  const f = of("firefox");
+  const c = of("chrome");
+  lines.push(`| runs | ${f.length} | ${c.length} | |`);
+  lines.push(`| success | ${pct(f.filter((r) => r.pass).length, f.length)} | ${pct(c.filter((r) => r.pass).length, c.length)} | |`);
+  for (const [name, fn, fm] of M) lines.push(`| ${name} | ${spread(f.map(fn), fm)} | ${spread(c.map(fn), fm)} | ${ratio(median(c.map(fn)), median(f.map(fn)))} |`);
+  lines.push("", "Median [min–max] per run.", "");
+
+  lines.push("### Per task", "", "| task | browser | runs | success | wall s | tool calls | shots | images | input tok | output tok | tool result KB |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+  for (const id of tasksBoth)
+    for (const b of B) {
+      const x = of(b, [id]);
+      lines.push(`| ${id} | ${b} | ${x.length} | ${pct(x.filter((r) => r.pass).length, x.length)} | ${spread(x.map((r) => r.wall_ms / 1000), (v) => fmt(v, 1))} | ${spread(x.map((r) => r.tool_calls))} | ${spread(x.map(shots))} | ${spread(x.map(images))} | ${spread(x.map(inputTokens), k)} | ${spread(x.map(outputTokens), k)} | ${spread(x.map(kb), (v) => fmt(v, 1))} |`);
+    }
+  lines.push("");
+
+  // By tool: totals over runs, divided by the number of runs of that browser.
+  const byTool = (x) => {
+    const out = {};
+    for (const r of x) {
+      const stats = r.tool_stats_by_tool;
+      if (stats) for (const [t, s] of Object.entries(stats)) {
+        const o = (out[t] ??= { calls: 0, bytes: 0, images: 0, ms: 0, errors: 0 });
+        o.calls += s.calls;
+        o.bytes += s.result_bytes;
+        o.images += s.images;
+        o.ms += s.ms;
+        o.errors += s.errors;
+      }
+      else for (const [t, n] of Object.entries(r.tool_calls_by_tool ?? {})) (out[shortTool(t)] ??= { calls: 0, bytes: NaN, images: NaN, ms: NaN, errors: NaN }).calls += n;
+    }
+    return out;
+  };
+  const tf = byTool(f);
+  const tc = byTool(c);
+  const tools = [...new Set([...Object.keys(tf), ...Object.keys(tc)])].sort((a, b) => ((tc[b]?.calls ?? 0) + (tf[b]?.calls ?? 0)) - ((tc[a]?.calls ?? 0) + (tf[a]?.calls ?? 0)));
+  const per = (o, key, n) => (o ? o[key] / n : 0);
+  lines.push("### By tool (all tasks above)", "", "Calls, KB and images are per run (total / runs of that browser); ms is the mean per call, from the tool_use event to its tool_result on the stream.", "");
+  lines.push("| tool | ff calls | chrome calls | ff KB | chrome KB | ff images | chrome images | ff ms/call | chrome ms/call | ff errors | chrome errors |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+  for (const t of tools) {
+    const a = tf[t];
+    const b = tc[t];
+    lines.push(`| ${t} | ${fmt(per(a, "calls", f.length), 1)} | ${fmt(per(b, "calls", c.length), 1)} | ${fmt(per(a, "bytes", f.length) / 1024, 1)} | ${fmt(per(b, "bytes", c.length) / 1024, 1)} | ${fmt(per(a, "images", f.length), 1)} | ${fmt(per(b, "images", c.length), 1)} | ${a?.calls ? fmt(a.ms / a.calls) : "–"} | ${b?.calls ? fmt(b.ms / b.calls) : "–"} | ${a ? fmt(a.errors) : "–"} | ${b ? fmt(b.errors) : "–"} |`);
+  }
+  lines.push("");
+
+  lines.push("### Tool mix per task", "", "| task | firefox (calls over all runs) | chrome (calls over all runs) |", "| --- | --- | --- |");
+  const mix = (x) => {
+    const o = byTool(x);
+    return Object.entries(o).sort((p, q) => q[1].calls - p[1].calls).map(([t, v]) => `${t} ${v.calls}`).join(", ") || "–";
+  };
+  for (const id of tasksBoth) lines.push(`| ${id} | ${mix(of("firefox", [id]))} | ${mix(of("chrome", [id]))} |`);
+  lines.push("");
+
+  const failedB = base.filter((r) => !r.pass && tasksBoth.includes(r.task));
+  if (failedB.length) {
+    lines.push("### Failed runs", "", "| task | browser | run | failed fields | errors | trace |", "| --- | --- | --- | --- | --- | --- |");
+    for (const r of failedB) {
+      const bad = Object.entries(r.fields ?? {}).filter(([, ok]) => !ok).map(([x]) => x);
+      lines.push(`| ${r.task} | ${browserOf(r)} | ${r.run} | ${bad.join(", ") || "–"} | ${(r.errors ?? []).join("; ").slice(0, 120)} | ${r.trace_file ?? ""} |`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+if (compareRows.length) out.push(browserSection(compareRows));
+
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, out.join("\n"));
-console.log(`wrote ${path.relative(process.cwd(), OUT)} (${rows.length} runs)`);
+console.log(`wrote ${path.relative(process.cwd(), OUT)} (${rows.length} Firefox arm runs, ${compareRows.length} browser comparison runs)`);

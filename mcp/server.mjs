@@ -20,7 +20,7 @@ const VERSION = "0.1.0";
 
 const tabId = (what = "Tab ID to act on") => ({
   type: "number",
-  description: `${what}. Must be a tab in the agent's tab group. Use tabs_context_mcp first if you don't have a valid tab ID.`,
+  description: `${what}. Must be a tab in the agent's tab group. If omitted, the tab this session last used is taken (or its only tab).`,
 });
 
 const TOOLS = [
@@ -49,7 +49,7 @@ const TOOLS = [
   {
     name: "navigate",
     description:
-      'Navigate a tab to a URL, or "back"/"forward" in history, and wait for the page to load. If tabId is omitted for a URL, the first tab in this session\'s group is used (created if needed) and the tab list is appended.',
+      'Navigate a tab to a URL, or "back"/"forward" in history, and wait for the page to load. If tabId is omitted for a URL, the first tab in this session\'s group is used (created if needed) and the tab list is appended. Reading several pages? Don\'t spend a call per step: put each page\'s navigate and its read (get_page_text, or javascript_tool) into one batch call.',
     inputSchema: {
       type: "object",
       properties: {
@@ -89,7 +89,7 @@ const TOOLS = [
         scale: { type: "number", minimum: 0.1, maximum: 1, description: "Return the screenshot/zoom image at this fraction of full size to save tokens. Coordinates stay in the full-size frame." },
         save_to_disk: { type: "boolean", description: "Save the screenshot/zoom image to disk and return its path, for sharing with the user." },
       },
-      required: ["action", "tabId"],
+      required: ["action"],
     },
   },
   {
@@ -105,7 +105,6 @@ const TOOLS = [
         ref_id: { type: "string", description: "Read only this element's subtree." },
         max_chars: { type: "number", description: "Output cap (default 50000)." },
       },
-      required: ["tabId"],
     },
   },
   {
@@ -115,27 +114,35 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: { query: { type: "string", description: "What to look for." }, tabId: tabId() },
-      required: ["query", "tabId"],
+      required: ["query"],
     },
   },
   {
     name: "form_input",
     description:
-      "Set a form field by ref: text inputs and textareas (fires input/change so React sees it), selects (by option value or text), checkboxes/radios (boolean), contenteditable. For custom widgets, use computer clicks.",
+      "Set a form field by ref: text inputs and textareas (fires input/change so React sees it), selects (by option value or text), checkboxes/radios (boolean), contenteditable. To fill several fields at once, pass fields: [{ref, value}, ...] instead of ref/value; they are set in order and it stops at the first failure. For custom widgets, use computer clicks.",
     inputSchema: {
       type: "object",
       properties: {
         ref: { type: "string", description: 'Element ref from read_page or find (e.g. "ref_3").' },
         value: { type: ["string", "boolean", "number"], description: "Value to set." },
+        fields: {
+          type: "array",
+          description: "Several fields to set in one call, in order. Use instead of ref/value.",
+          items: {
+            type: "object",
+            properties: { ref: { type: "string" }, value: { type: ["string", "boolean", "number"] } },
+            required: ["ref", "value"],
+          },
+        },
         tabId: tabId(),
       },
-      required: ["ref", "value", "tabId"],
     },
   },
   {
     name: "javascript_tool",
     description:
-      "Run JavaScript against the page's window and DOM (page CSP does not block it). REPL semantics: the last expression's value is returned, and top-level await works. Write the expression, not `return`.",
+      "Run JavaScript against the page's window and DOM (page CSP does not block it). REPL semantics: the last expression's value is returned, and top-level await works. Write the expression, not `return`. To read several pages on the same site, fetch() them in one call and parse each with DOMParser instead of navigating to each one.",
     inputSchema: {
       type: "object",
       properties: {
@@ -143,7 +150,7 @@ const TOOLS = [
         text: { type: "string", description: "Code to run." },
         tabId: tabId(),
       },
-      required: ["action", "text", "tabId"],
+      required: ["action", "text"],
     },
   },
   {
@@ -157,13 +164,13 @@ const TOOLS = [
         ref: { type: "string", description: "Ref of the file input (or its label)." },
         tabId: tabId(),
       },
-      required: ["paths", "ref", "tabId"],
+      required: ["paths", "ref"],
     },
   },
   {
     name: "get_page_text",
     description: "The page's visible text as plain text (title and URL first). Good for reading job lists, articles and descriptions.",
-    inputSchema: { type: "object", properties: { tabId: tabId() }, required: ["tabId"] },
+    inputSchema: { type: "object", properties: { tabId: tabId() } },
   },
   {
     name: "replay_steps",
@@ -206,6 +213,35 @@ function loadReplay(args) {
   }
   return { replay, inputs: args.inputs, tabId: args.tabId };
 }
+// Tools a batch may run: everything above except replay_steps (long-running, reads a file) and batch itself.
+const BATCHABLE = TOOLS.map((t) => t.name).filter((n) => n !== "replay_steps");
+const BATCH_MAX = 20;
+
+TOOLS.push({
+  name: "batch",
+  description:
+    "Run several browser actions in one call, one after another, to save round trips. Use it when you already know every step's arguments, e.g. navigate then get_page_text on the same tab, or several clicks/keys on refs you already have. Each action is {tool, args}, with the same args that tool takes (tabId included). Stops at the first failed action and says which one; results come back in order, one section per action. Only the last screenshot's image is returned. Don't batch a step whose arguments depend on an earlier step's result (such as refs from a page you haven't read yet).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      actions: {
+        type: "array",
+        minItems: 1,
+        maxItems: BATCH_MAX,
+        description: `Actions to run in order (at most ${BATCH_MAX}).`,
+        items: {
+          type: "object",
+          properties: {
+            tool: { type: "string", enum: BATCHABLE, description: "Tool name, e.g. navigate, get_page_text, computer." },
+            args: { type: "object", description: "That tool's arguments." },
+          },
+          required: ["tool", "args"],
+        },
+      },
+    },
+    required: ["actions"],
+  },
+});
 
 // ---- bridge connection --------------------------------------------------------------------
 
@@ -257,7 +293,7 @@ function connectBridge() {
   return bridge;
 }
 
-async function callFirefox(tool, args) {
+async function callFirefox(tool, args, timeoutMs = tool === "replay_steps" ? REPLAY_TIMEOUT_MS : CALL_TIMEOUT_MS) {
   let socket;
   try {
     socket = await connectBridge();
@@ -267,12 +303,11 @@ async function callFirefox(tool, args) {
     );
   }
   const id = nextId++;
-  const timeout = tool === "replay_steps" ? REPLAY_TIMEOUT_MS : CALL_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       inflight.delete(id);
-      reject(new Error(`Firefox did not answer ${tool} within ${timeout / 1000}s.`));
-    }, timeout);
+      reject(new Error(`Firefox did not answer ${tool} within ${timeoutMs / 1000}s.`));
+    }, timeoutMs);
     inflight.set(id, {
       resolve: (r) => (clearTimeout(timer), resolve(r)),
       reject: (e) => (clearTimeout(timer), reject(e)),
@@ -295,6 +330,139 @@ function saveImages(result) {
   return result;
 }
 
+// ---- tool dispatch --------------------------------------------------------------------------
+
+const errorResult = (message) => ({ content: [{ type: "text", text: message }], isError: true });
+
+async function callOne(tool, args) {
+  try {
+    const result = await callFirefox(tool, args);
+    return args.save_to_disk ? saveImages(result) : result;
+  } catch (e) {
+    return errorResult(e.message);
+  }
+}
+
+// form_input with fields: one form_input per field, in order, stopping at the first failure.
+async function formInput(args) {
+  if (!Array.isArray(args.fields)) {
+    if (args.ref === undefined || args.value === undefined) return errorResult("form_input needs ref and value, or fields: [{ref, value}, ...].");
+    return callOne("form_input", args);
+  }
+  if (!args.fields.length) return errorResult("fields is empty.");
+  const lines = [];
+  for (const [i, f] of args.fields.entries()) {
+    const r = await callOne("form_input", { tabId: args.tabId, ref: f?.ref, value: f?.value });
+    const t = textOf(r);
+    if (r.isError) {
+      lines.push(`[${i + 1}/${args.fields.length}] ${f?.ref}: failed: ${t}`);
+      if (i + 1 < args.fields.length) lines.push(`Stopped; the remaining ${args.fields.length - i - 1} field(s) were not set.`);
+      return { content: [{ type: "text", text: lines.join("\n") }], isError: true };
+    }
+    lines.push(`[${i + 1}/${args.fields.length}] ${f.ref}: ${t}`);
+  }
+  return { content: [{ type: "text", text: lines.join("\n") }] };
+}
+
+const textOf = (r) => (r?.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
+
+// ---- the session's current tab -------------------------------------------------------------
+// Models sometimes leave tabId out even when they have one. The server remembers the tab this
+// session last used or was handed (navigate, tabs_create_mcp and tabs_context_mcp results) and
+// fills it in, instead of failing and costing the model a turn.
+
+let lastTab = null;
+let knownTabs = null; // tab ids from the latest tab list, or null before one has been seen
+
+// The tab list JSON that tabs_context_mcp returns, and that tabs_create_mcp and navigate append.
+function tabListIn(text) {
+  const m = /(^|\n)\{/.exec(text);
+  if (!m) return null;
+  try {
+    const ids = JSON.parse(text.slice(m.index + m[1].length)).availableTabs?.map((t) => t.tabId);
+    return Array.isArray(ids) && ids.every(Number.isInteger) ? ids : null;
+  } catch {
+    return null;
+  }
+}
+
+function noteTabs(name, args, result) {
+  if (result.isError) return;
+  const text = textOf(result);
+  const list = tabListIn(text);
+  if (list) {
+    knownTabs = list;
+    if (!list.includes(lastTab)) lastTab = list.length === 1 ? list[0] : null;
+  }
+  if (name === "tabs_close_mcp") {
+    if (knownTabs) knownTabs = knownTabs.filter((id) => id !== args.tabId);
+    if (lastTab === args.tabId) lastTab = knownTabs?.length === 1 ? knownTabs[0] : null;
+    return;
+  }
+  const made = /^(?:Created tab|Tab) (\d+)\b/.exec(text);
+  if (made && (name === "tabs_create_mcp" || name === "navigate")) lastTab = Number(made[1]);
+  else if (Number.isInteger(args.tabId)) lastTab = args.tabId;
+}
+
+// Fills in a missing tabId: the last tab used, else the session's only tab. Returns the id, or an
+// error result when there is no single tab to pick.
+async function resolveTab() {
+  if (lastTab != null) return lastTab;
+  if (knownTabs?.length !== 1) {
+    const r = await callOne("tabs_context_mcp", {});
+    if (r.isError) return r;
+    noteTabs("tabs_context_mcp", {}, r);
+  }
+  if (lastTab != null) return lastTab;
+  if (!knownTabs?.length) return errorResult("tabId is required: this session has no tabs yet. Call navigate with a url (it opens one) or tabs_create_mcp.");
+  return errorResult(`tabId is required: this session has ${knownTabs.length} tabs (${knownTabs.join(", ")}). Pass the one to act on.`);
+}
+
+const NO_TAB = new Set(["tabs_context_mcp", "tabs_create_mcp"]);
+
+async function runTool(name, args) {
+  args = { ...args };
+  if (typeof args.tabId === "string" && /^\s*\d+\s*$/.test(args.tabId)) args.tabId = Number(args.tabId);
+  let filled = null;
+  // navigate to a URL without a tab already picks the group's first tab (creating it if needed).
+  const navigateNew = name === "navigate" && args.url !== "back" && args.url !== "forward";
+  if (args.tabId == null && !NO_TAB.has(name) && name !== "tabs_close_mcp" && !(navigateNew && lastTab == null)) {
+    const t = await resolveTab();
+    if (typeof t !== "number") return t;
+    args.tabId = filled = t;
+  }
+  const result = name === "form_input" ? await formInput(args) : await callOne(name, args);
+  noteTabs(name, args, result);
+  if (filled != null) result.content = [...(result.content ?? []), { type: "text", text: `(No tabId given; used tab ${filled}.)` }];
+  return result;
+}
+
+// batch: runs actions in order, each with its own timeout, stops at the first error. Text from
+// every action is kept; of the images, only the last one is returned.
+async function batch(args) {
+  const actions = args.actions;
+  if (!Array.isArray(actions) || !actions.length) return errorResult("actions must be a non-empty array of {tool, args}.");
+  if (actions.length > BATCH_MAX) return errorResult(`At most ${BATCH_MAX} actions per batch.`);
+  const content = [];
+  let failed = false;
+  for (const [i, a] of actions.entries()) {
+    const head = `[${i + 1}/${actions.length}] ${a?.tool}`;
+    const r = !BATCHABLE.includes(a?.tool)
+      ? errorResult(`Unknown or unbatchable tool ${a?.tool}.`)
+      : await runTool(a.tool, a.args && typeof a.args === "object" ? a.args : {});
+    content.push({ type: "text", text: `${head}${r.isError ? " failed" : ""}:` });
+    for (const c of r.content ?? []) content.push(c);
+    if (r.isError) {
+      failed = true;
+      if (i + 1 < actions.length) content.push({ type: "text", text: `Stopped at action ${i + 1}; the remaining ${actions.length - i - 1} action(s) did not run.` });
+      break;
+    }
+  }
+  const lastImage = content.findLastIndex((c) => c.type === "image");
+  const out = content.map((c, i) => (c.type === "image" && i !== lastImage ? { type: "text", text: "(image omitted: a batch returns only its last image)" } : c));
+  return failed ? { content: out, isError: true } : { content: out };
+}
+
 // ---- MCP stdio ----------------------------------------------------------------------------
 
 const out = (msg) => process.stdout.write(JSON.stringify(msg) + "\n");
@@ -315,7 +483,7 @@ async function handle(msg) {
         capabilities: { tools: {} },
         serverInfo: { name: "firefox-agent-bridge", version: VERSION },
         instructions:
-          "Browser tools for Firefox Developer Edition. Tabs live in the agent's own per-session tab group and run in the background; input is trusted and never moves the user's cursor.",
+          "Browser tools for Firefox Developer Edition. Tabs live in the agent's own per-session tab group and run in the background; input is trusted and never moves the user's cursor. Each tool call is a round trip: use batch to run several known steps (e.g. navigate + get_page_text for each of several pages) in one call, and form_input's fields to fill a form at once.",
       };
     }
     case "tools/list":
@@ -323,12 +491,14 @@ async function handle(msg) {
     case "tools/call": {
       const { name, arguments: args = {} } = params;
       if (!TOOLS.some((t) => t.name === name)) throw Object.assign(new Error(`Unknown tool ${name}`), { code: -32602 });
-      try {
-        const result = await callFirefox(name, name === "replay_steps" ? loadReplay(args) : args);
-        return args.save_to_disk ? saveImages(result) : result;
-      } catch (e) {
-        return { content: [{ type: "text", text: e.message }], isError: true };
+      if (name === "replay_steps") {
+        try {
+          return await callFirefox(name, loadReplay(args));
+        } catch (e) {
+          return errorResult(e.message);
+        }
       }
+      return name === "batch" ? batch(args) : runTool(name, args);
     }
     case "ping":
       return {};
