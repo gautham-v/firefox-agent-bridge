@@ -153,6 +153,12 @@ Differences from Chrome:
   reach into any frame; a scroll over a frame that can't scroll scrolls the page around it.
   Typing and keys go to the frame the last click landed in, and their result names the element
   that got them and its value.
+- `navigate` waits for the load event and then for the page's text to stop growing (up to 5s).
+  With `wait: "interactive"` it returns once the new page is parsed and no other page has
+  replaced it for 300ms, and says when the page is still loading. A read right after it
+  (`get_page_text`, `find`) gets the page as parsed so far: the HTML is all there, but content
+  that scripts add later may not be. A redirect that lands later replaces the page, and a read
+  caught in the switch fails; reading again reads the new page.
 - There is no `gif_creator` or shortcuts. Console and network reading is one opt-in tool,
   `devtools`, below.
 

@@ -70,10 +70,11 @@ export async function createHarness({ prefix, firefoxBin }) {
       console.log(`ok ${h.passed} - ${name} (${Date.now() - t0}ms)`);
     },
 
-    // Serves fixed HTML by path.
+    // Serves fixed HTML by path; a route that is a function handles the request itself.
     serve(port, routes) {
       const server = http.createServer((req, res) => {
         const body = routes[new URL(req.url, "http://x").pathname];
+        if (typeof body === "function") return body(req, res);
         res.writeHead(body ? 200 : 404, { "content-type": "text/html; charset=utf-8" });
         res.end(body ?? "not found");
       });

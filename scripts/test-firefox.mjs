@@ -62,6 +62,10 @@ const PAGE_HTML = `<!doctype html>
 
 const OTHER_HTML = `<!doctype html><title>Other page</title><p>Opened by target=_blank</p>`;
 
+// For navigate's wait "interactive": parsed at once, but its image holds the load event for 3s.
+const SLOW_HTML = `<!doctype html><title>Slow page</title><p>Parsed early</p><img src="/slow.png">`;
+const slowImage = (req, res) => setTimeout(() => res.writeHead(404).end(), 3000);
+
 // For the devtools tool: messages and a failed request while the page loads, before any call.
 const DEVTOOLS_HTML = `<!doctype html><title>Devtools page</title>
 <input type="password" id="pw" value="hunter2-secret">
@@ -123,7 +127,7 @@ async function screenshotScale(client, tabId, file) {
 let mn;
 let failed = false;
 try {
-  await h.serve(PAGE_PORT, { "/": PAGE_HTML, "/other": OTHER_HTML, "/devtools": DEVTOOLS_HTML });
+  await h.serve(PAGE_PORT, { "/": PAGE_HTML, "/other": OTHER_HTML, "/devtools": DEVTOOLS_HTML, "/slow": SLOW_HTML, "/slow.png": slowImage });
   await h.serve(FRAME_PORT, { "/frame": FRAME_HTML });
   const UPLOAD = path.join(h.TMP, "upload-test.txt");
   fs.writeFileSync(UPLOAD, "upload body 123\n");
@@ -312,6 +316,16 @@ try {
     assert.deepEqual(ctx.availableTabs.map((t) => t.tabId).sort(), [tab, opened].sort());
     assert.equal(await mn.chrome("return gBrowser.selectedTab.label"), before, "focus went back to the user's tab");
     await agent.ok("tabs_close_mcp", { tabId: opened });
+  });
+
+  await h.step('navigate wait "interactive" answers before the load event, with the title', async () => {
+    const slow = tabIdIn((await agent.ok("tabs_create_mcp")).text);
+    const t0 = Date.now();
+    const r = await agent.ok("navigate", { tabId: slow, url: `${PAGE}/slow`, wait: "interactive" });
+    assert.ok(Date.now() - t0 < 2500, `took ${Date.now() - t0}ms`);
+    assert.match(r.text, /Title: Slow page\n\(returned once the page was parsed; it is still loading/);
+    assert.match((await agent.ok("get_page_text", { tabId: slow })).text, /Parsed early/);
+    await agent.ok("tabs_close_mcp", { tabId: slow });
   });
 
   await h.step("the test page screenshot is saved as PNG", async () => {
