@@ -584,10 +584,17 @@ There were no infrastructure failures or flaky-task confounds in the eval runs.
 **Model and effort.** A second harness (`eval/models.mjs`) ran 6 complex tasks on Haiku 4.5 and
 on Sonnet 5.5, Opus 5.5 and Fable 5.1 at low, medium and high effort (180 runs; analysis in
 [eval/results/models/analysis.md](eval/results/models/analysis.md)). Sonnet, Opus and Fable passed
-every run at every level, so effort bought no score; high only added cost and steps. Use Sonnet
-5.5 medium for the sidebar chat and Sonnet 5.5 low for quick tasks and fan-out sub-agents ($0.114
-a run, against 1.6x for Opus low and 4.1x for Fable low, at about the same median time). Haiku
-4.5 failed 8 of 18 runs, was 4x slower and still cost 3x Sonnet low.
+every run at every level, so effort bought no score; high only added cost and steps. Haiku 4.5
+failed 8 of 18 runs, was 4x slower and still cost 3x Sonnet low. A harder tier (162 runs, 6
+tasks, four of them without JavaScript: 167 star ratings read as icons, 582 rows counted, an Evil
+sudoku, a 13-shape tldraw grid; analysis in
+[eval/results/models-hard/analysis.md](eval/results/models-hard/analysis.md)) did separate them:
+Sonnet scored 0.935 / 0.930 / 0.994 at low / medium / high, Opus 0.98-0.99 and Fable 0.99-1.00.
+Effort bought score only for Sonnet, from medium to high, at the same cost. Use Sonnet 5.5 high
+for the sidebar chat (it matches Opus at every level for 0.7x its cost), Sonnet 5.5 low for quick
+tasks and fan-out sub-agents ($0.114 a run on easy tasks, $0.30 on hard ones), and Fable 5.1
+medium when a task must be right the first time (18 of 18 on the hard tier, fastest, about 3x
+Sonnet's cost). Skip Sonnet medium and Opus.
 
 The same harness also compares these tools with Claude in Chrome; see
 [Compared with Claude in Chrome](#compared-with-claude-in-chrome).

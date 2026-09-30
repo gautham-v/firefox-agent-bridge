@@ -5,7 +5,9 @@
 //   node eval/models.mjs [--max-minutes 8.5] [--concurrency 3] [--rounds 3] [--seed 7]
 //                        [--configs haiku:default,sonnet:low,...] | [--models sonnet,opus --efforts low,high]
 //                        [--tasks id,id] [--out eval/results/models/runs.jsonl] [--run-timeout-min 12]
-//                        [--tag smoke] [--wait] [--dry-run]
+//                        [--tag smoke] [--wait] [--dry-run] [--tier base|hard]
+//
+// --tier hard runs models-tasks-hard.mjs into eval/results/models-hard/runs.jsonl, without Haiku.
 //
 // Schedule: round-robin. Round r runs every (task, config) once, in an order shuffled with a seed
 // derived from --seed and r, and round r+1 starts only after every cell of round r has started, so
@@ -30,7 +32,8 @@ import { fileURLToPath } from "node:url";
 import { lastJson } from "./lib/check.mjs";
 import { startMcp } from "./lib/mcp-client.mjs";
 import { childEnv, summarize } from "./lib/stream.mjs";
-import { TASKS, score, taskById } from "./models-tasks.mjs";
+import * as round1 from "./models-tasks.mjs";
+import * as hard from "./models-tasks-hard.mjs";
 
 const SELF = fileURLToPath(import.meta.url);
 const EVAL = path.dirname(SELF);
@@ -42,6 +45,12 @@ const opt = (name, dflt) => {
   return i >= 0 ? argv[i + 1] : dflt;
 };
 const flag = (name) => argv.includes(`--${name}`);
+
+// --tier hard: the hard tasks (models-tasks-hard.mjs), results in results/models-hard/, and no
+// Haiku by default. Without it, round 1's tasks, output and configs are unchanged.
+const TIER = opt("tier", "base");
+if (!["base", "hard"].includes(TIER)) throw new Error(`--tier must be base or hard, not ${TIER}`);
+const { TASKS, score, taskById } = TIER === "hard" ? hard : round1;
 
 export const MODELS = {
   haiku: "claude-haiku-4-5-20251001",
@@ -62,7 +71,7 @@ function parseConfigs() {
   else if (opt("models")) {
     const efforts = (opt("efforts") ?? "low,medium,high").split(",");
     list = opt("models").split(",").flatMap((m) => (m === "haiku" || m === MODELS.haiku ? ["haiku:default"] : efforts.map((e) => `${m}:${e}`)));
-  } else list = DEFAULT_CONFIGS;
+  } else list = TIER === "hard" ? DEFAULT_CONFIGS.filter((c) => !c.startsWith("haiku")) : DEFAULT_CONFIGS;
   return list.map((c) => {
     const [m, effort = "default"] = c.split(":");
     const model = MODELS[m] ?? m;
@@ -70,7 +79,7 @@ function parseConfigs() {
   });
 }
 
-const OUT = path.resolve(opt("out", path.join(EVAL, "results/models/runs.jsonl")));
+const OUT = path.resolve(opt("out", path.join(EVAL, TIER === "hard" ? "results/models-hard/runs.jsonl" : "results/models/runs.jsonl")));
 const DIR = path.dirname(OUT);
 const INFLIGHT = path.join(DIR, "inflight");
 const STREAMS = path.join(DIR, "streams");
@@ -237,9 +246,11 @@ async function runOne(cell) {
   const m = summarize(events);
   const { state, errors: inspectErrors, tabsLeft } = await inspectAndClose(session, task);
   const answer = lastJson(m.final_text);
+  // The agent's tool calls, for tasks whose rules limit the tools (the hard tier's no-JS tasks).
+  const trace = events.filter((e) => e.type === "assistant" && !e.parent_tool_use_id).flatMap((e) => (e.message?.content ?? []).filter((b) => b.type === "tool_use").map((b) => ({ name: b.name, input: b.input })));
   let fields = {};
   try {
-    fields = task.check(answer, state);
+    fields = task.check(answer, state, trace);
   } catch (e) {
     inspectErrors.push(`check: ${e.message}`);
   }
@@ -406,6 +417,7 @@ async function schedule() {
         const logFd = fs.openSync(path.join(LOGS, `${fileKey(next)}.log`), "a");
         const args = [SELF, "--one", JSON.stringify(next), "--out", OUT, "--run-timeout-min", String(RUN_CAP_MIN)];
         if (TAG) args.push("--tag", TAG);
+        if (TIER !== "base") args.push("--tier", TIER);
         if (opt("configs")) args.push("--configs", opt("configs"));
         const w = spawn(process.execPath, args, { detached: true, stdio: ["ignore", logFd, logFd], env: childEnv() });
         w.unref();

@@ -213,3 +213,36 @@ thinking blocks, `cost_usd` from the result event, tool errors, repeated identic
 calls, retries after an error, score, pass, sub-goal fields, the inspected page state, and
 load: how many other runs of this benchmark, other eval processes and other harnesses' `claude
 -p` agents were running (sampled every 15 s). Raw stream-json goes to `results/models/streams/`.
+
+## Hard tier (round 2)
+
+Round 1 was at ceiling: Sonnet, Opus and Fable passed all 162 runs at every effort. `--tier hard`
+runs six harder tasks (`models-tasks-hard.mjs`) on the 9 Sonnet/Opus/Fable configs (no Haiku)
+into `results/models-hard/`. Four tasks forbid `javascript_tool` (a run that calls it, even
+inside `batch`, scores 0; the harness passes each run's tool calls to `check()`), because drafts
+without that rule were solved through the page's own JavaScript and stayed at ceiling.
+
+| task | what it exercises | checked from | key from |
+|---|---|---|---|
+| `wc-tiebreak` | 2026 World Cup tie-breakers read from Wikipedia, applied through 4 levels (head-to-head goals, re-apply, fair play with one deduction per player per match, FIFA ranking); placing a team in the real third-place table via a footnote | answer | the article's criteria and table, applied by hand |
+| `uitp-no-js` | no JS: UI Testing Playground widgets (15 s load, text box that needs real input, link replaced on hover with an exact click count, self-clearing covered field, scroll and hover targets, 9 fields to clear, multi-selects, a table that changes on reload) | 8 tabs' DOM + answer | live page state |
+| `books-no-js` | no JS: star ratings only as icons, 167 books over 10 pages (page 1 alone ranks the categories differently), then 8 full titles and prices into TodoMVC | TodoMVC DOM + answer | every book fetched by script |
+| `sudoku-no-js` | no JS: solve websudoku's Evil puzzle 1,234,567,890 by reasoning and enter 55 digits | the grid's inputs, row by row | the page's embedded solution, checked unique by a solver |
+| `hockey-no-js` | no JS: exact counts over 582 rows (per-year maxima across all pages, with ties), a franchise whose 2011 name a different club used in the 1990s, a 63-number signed sum | answer | all rows fetched by script |
+| `tldraw-no-js` | no JS: 6 labeled rectangles on an aligned 2x3 grid with equal gaps and row colors, 6 bound arrows with 2 labels, all in a frame named Loop | tldraw editor shapes, parents, bindings | – |
+
+```sh
+node eval/models.mjs --tier hard            # one chunk; run again until it says complete
+node eval/models-rescore.mjs --in eval/results/models-hard/runs.jsonl   # after a checker fix
+node eval/models-report.mjs --in eval/results/models-hard/runs.jsonl
+node eval/models-charts.mjs --in eval/results/models-hard/runs.jsonl    # charts.json, round 1's schema
+```
+
+Result (162 runs, $108.52 list plus $19.75 of smoke runs; analysis in
+`results/models-hard/analysis.md`):
+mean score (passes of 18) Sonnet 0.935 (14) / 0.930 (12) / 0.994 (17) at low / medium / high,
+Opus 0.981 (16) / 0.989 (17) / 0.991 (17), Fable 0.991 (17) / 1.000 (18) / 1.000 (18). Effort
+bought score only for Sonnet, and only from medium to high (+0.064, up on 4 of 6 tasks, none
+down, x1.06 cost). Misses were slips (one misread star in 167, one miscounted row, a head-to-head
+goals total, a text box whose `change` event never fired after typing), not missing capability:
+every config solved the sudoku and drew the tldraw grid.
