@@ -6,8 +6,14 @@
 //                        [--configs haiku:default,sonnet:low,...] | [--models sonnet,opus --efforts low,high]
 //                        [--tasks id,id] [--out eval/results/models/runs.jsonl] [--run-timeout-min 12]
 //                        [--tag smoke] [--wait] [--dry-run] [--tier base|hard]
+//                        [--experiments flags [--arm-label name]]...
 //
 // --tier hard runs models-tasks-hard.mjs into eval/results/models-hard/runs.jsonl, without Haiku.
+//
+// --experiments starts each run's MCP server with FIREFOX_BRIDGE_EXPERIMENTS=flags. Given more
+// than once, each is an arm (lib/experiments.mjs): every (task, config) runs once per arm in each
+// round, shuffled together, so arms share conditions. Rows carry experiments and arm_label, and
+// arms with different labels can share one --out file.
 //
 // Schedule: round-robin. Round r runs every (task, config) once, in an order shuffled with a seed
 // derived from --seed and r, and round r+1 starts only after every cell of round r has started, so
@@ -30,6 +36,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { answerOf } from "./lib/check.mjs";
+import { armEnv, parseArms } from "./lib/experiments.mjs";
 import { startMcp } from "./lib/mcp-client.mjs";
 import { childEnv, summarize } from "./lib/stream.mjs";
 import * as round1 from "./models-tasks.mjs";
@@ -87,8 +94,10 @@ const LOGS = path.join(DIR, "logs");
 const RUN_CAP_MIN = Number(opt("run-timeout-min", 12));
 const CLAUDE = process.env.CLAUDE_BIN || "claude";
 const TAG = opt("tag", null);
+const EXPERIMENT_ARMS = parseArms(argv);
 
-const cellKey = (c) => `${c.task}|${c.config}|${c.round}`;
+// Rows from an experiment arm carry its label; rows without one keep the key they always had.
+const cellKey = (c) => `${c.task}|${c.config}|${c.round}${c.arm_label != null ? `|${c.arm_label}` : ""}`;
 const fileKey = (c) => cellKey(c).replace(/[^\w.-]+/g, "_");
 
 function readRuns() {
@@ -194,7 +203,7 @@ async function runOne(cell) {
   const mcpConfig = path.join(tmp, "mcp.json");
   fs.writeFileSync(
     mcpConfig,
-    JSON.stringify({ mcpServers: { firefox: { type: "stdio", command: process.execPath, args: [path.join(ROOT, "mcp/server.mjs")], env: { FIREFOX_AGENT_BRIDGE_SESSION: session } } } }),
+    JSON.stringify({ mcpServers: { firefox: { type: "stdio", command: process.execPath, args: [path.join(ROOT, "mcp/server.mjs")], env: { FIREFOX_AGENT_BRIDGE_SESSION: session, ...armEnv({ flags: cell.experiments ?? [] }) } } } }),
   );
   const started = Date.now();
   fs.writeFileSync(inflightFile, JSON.stringify({ ...cell, pid: process.pid, started_at: new Date(started).toISOString(), session }));
@@ -273,6 +282,7 @@ async function runOne(cell) {
 
   const row = {
     task: cell.task, config: config.id, model: config.model, effort: config.effort, round: cell.round, order: cell.order, tag: TAG,
+    experiments: cell.experiments ?? [], ...(cell.arm_label != null ? { arm_label: cell.arm_label } : {}),
     started_at: new Date(started).toISOString(), wall_ms, first_tool_ms: m.first_tool_ms,
     timeout: timedOut, infra_error: infraError, rate_limited: rateLimited,
     score: sc, pass, fields, answer, answer_source: answerSource, final_text: m.final_text?.slice(-1500) ?? null,
@@ -280,7 +290,7 @@ async function runOne(cell) {
     model_reported: m.model, per_turn_effort_active: m.per_turn_effort_active,
     thinking_blocks: m.thinking_blocks, thinking_signature_chars: m.thinking_signature_chars, thinking_text_chars: m.thinking_text_chars,
     turns: m.turns, assistant_messages: m.assistant_messages,
-    tool_calls: m.tool_calls, tool_calls_by_tool: m.tool_calls_by_tool, screenshots: m.screenshots,
+    tool_calls: m.tool_calls, tool_calls_by_tool: m.tool_calls_by_tool, screenshots: m.screenshots, screenshot_actions: m.screenshot_actions,
     tool_errors: m.tool_errors, repeated_calls: m.repeated_calls, retries_after_error: m.retries_after_error, error_samples: m.error_samples,
     tool_result_chars: m.tool_result_chars, tool_result_images: m.tool_result_images,
     usage: m.usage, tokens_all_models: m.tokens_all_models ?? null, model_usage: m.model_usage,
@@ -318,10 +328,12 @@ function shuffle(xs, seed) {
   return a;
 }
 
-function allCells(configs, tasks, rounds, seed) {
+// Without --experiments there is one arm with no label, and the cells (and their order) are what
+// they always were.
+function allCells(configs, tasks, rounds, seed, arms = [{ flags: [], label: null }]) {
   const cells = [];
   for (let round = 1; round <= rounds; round++) {
-    const base = tasks.flatMap((t) => configs.map((c) => ({ task: t.id, config: c.id })));
+    const base = tasks.flatMap((t) => configs.flatMap((c) => arms.map((a) => ({ task: t.id, config: c.id, ...(a.label != null ? { arm_label: a.label, experiments: a.flags } : {}) }))));
     shuffle(base, seed * 1000 + round).forEach((c, i) => cells.push({ ...c, round, order: i }));
   }
   return cells;
@@ -355,7 +367,7 @@ function doneKeys(rows) {
   const ok = new Set();
   const fails = {};
   for (const r of rows) {
-    const k = `${r.task}|${r.config}|${r.round}`;
+    const k = cellKey(r);
     if (!r.infra_error) ok.add(k);
     else fails[k] = (fails[k] ?? 0) + 1;
   }
@@ -375,15 +387,16 @@ async function schedule() {
   const deadline = t0 + MAX_MIN * 60_000;
   const log = (...a) => console.log(`[${((Date.now() - t0) / 1000).toFixed(0).padStart(4)}s]`, ...a);
 
-  const cells = allCells(configs, tasks, ROUNDS, SEED);
+  const cells = allCells(configs, tasks, ROUNDS, SEED, EXPERIMENT_ARMS);
   const pendingNow = () => {
     const done = doneKeys(readRuns());
     const running = new Set(inflight().map(cellKey));
     return cells.filter((c) => !done.has(cellKey(c)) && !running.has(cellKey(c)));
   };
   let pending = pendingNow();
-  log(`${cells.length} cells (${tasks.length} tasks x ${configs.length} configs x ${ROUNDS} rounds), ${cells.length - pending.length - inflight().length} done, ${inflight().length} running, ${pending.length} pending; concurrency ${CONCURRENCY}, chunk ${MAX_MIN} min`);
+  log(`${cells.length} cells (${tasks.length} tasks x ${configs.length} configs${EXPERIMENT_ARMS[0].label != null ? ` x ${EXPERIMENT_ARMS.length} arms` : ""} x ${ROUNDS} rounds), ${cells.length - pending.length - inflight().length} done, ${inflight().length} running, ${pending.length} pending; concurrency ${CONCURRENCY}, chunk ${MAX_MIN} min`);
   log(`configs: ${configs.map((c) => c.id).join(", ")}`);
+  if (EXPERIMENT_ARMS[0].label != null) log(`experiment arms: ${EXPERIMENT_ARMS.map((a) => `${a.label}=${a.flags.join(",") || "none"}`).join(" ")}`);
   if (flag("dry-run")) {
     for (const c of pending.slice(0, 40)) log("pending", cellKey(c));
     if (pending.length > 40) log(`... and ${pending.length - 40} more`);

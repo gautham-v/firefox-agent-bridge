@@ -1,12 +1,14 @@
 // Shared by the runners: the env a nested `claude -p` must not inherit, and a fold of its
 // stream-json events into per-run metrics.
 
+import { screenshotActions } from "./trace.mjs";
+
 // Nested `claude` refuses to start, or attaches to this session, with these set.
 export const STRIP_ENV = [
   "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
   "CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
   "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_EXECPATH", "CLAUDE_PID", "CLAUDE_EFFORT", "AI_AGENT",
-  "FIREFOX_AGENT_BRIDGE_SESSION",
+  "FIREFOX_AGENT_BRIDGE_SESSION", "FIREFOX_BRIDGE_EXPERIMENTS",
 ];
 
 export function childEnv(extra = {}) {
@@ -20,7 +22,7 @@ export function childEnv(extra = {}) {
 export function summarize(events) {
   const m = {
     session_id: null, model: null, tools_available: null, per_turn_effort_active: null,
-    tool_calls: 0, tool_calls_by_tool: {}, subagent_tool_calls: 0, screenshots: 0,
+    tool_calls: 0, tool_calls_by_tool: {}, subagent_tool_calls: 0, screenshots: 0, screenshot_actions: 0,
     repeated_calls: 0, retries_after_error: 0, first_tool_ms: null, thinking_blocks: 0, thinking_signature_chars: 0, thinking_text_chars: 0,
     tool_errors: 0, error_samples: [], tool_result_chars: 0, tool_result_images: 0, turns: null, assistant_messages: 0,
     usage: null, model_usage: null, cost_usd: null, duration_ms: null, duration_api_ms: null,
@@ -49,6 +51,10 @@ export function summarize(events) {
         m.tool_calls_by_tool[b.name] = (m.tool_calls_by_tool[b.name] ?? 0) + 1;
         if (e.parent_tool_use_id) m.subagent_tool_calls++;
         if (b.name === "mcp__firefox__computer" && ["screenshot", "zoom"].includes(b.input?.action)) m.screenshots++;
+        // screenshots counts top-level calls (computer, and the screenshot tool when it's offered:
+        // the screenshotAlias experiment); screenshot_actions also counts those inside a batch.
+        if (b.name === "mcp__firefox__screenshot" && m.tools_available?.includes(b.name)) m.screenshots++;
+        m.screenshot_actions += screenshotActions(b.name, b.input, m.tools_available);
         // The same call with the same input as the one just before it (a retry or a stuck loop).
         // Screenshots, waits, scrolls and key presses repeat legitimately, so they don't count.
         // retries_after_error: the call right after a failed call used the same tool.

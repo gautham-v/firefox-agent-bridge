@@ -8,10 +8,16 @@
 //
 // --prefix names the outputs <prefix>report.md and <prefix>summary.json, so a rerun into its own
 // file doesn't overwrite the round's report.
+//
+// When the rows come from more than one experiment arm (models.mjs --experiments), every config is
+// split by arm ("claude-sonnet-5-5/low · batchHint"), and an "Experiment arms" section compares
+// each arm with the reference arm: "none" if there is one, else the first. --by-arm splits even
+// when there is one arm.
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { armOf } from "./lib/experiments.mjs";
 
 const EVAL = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -27,6 +33,14 @@ const rows = fs
   .filter(Boolean)
   .map((l) => JSON.parse(l))
   .filter((r) => !r.infra_error && r.tag !== "smoke");
+
+const ARMS = [...new Set(rows.map(armOf))].sort((a, b) => (a === "none" ? -1 : b === "none" ? 1 : 0));
+const BY_ARM = ARMS.length > 1 || argv.includes("--by-arm");
+const ARM_SEP = " · ";
+// A row's group: its config, or its config and arm.
+const groupOf = (r) => (BY_ARM ? `${r.config}${ARM_SEP}${armOf(r)}` : r.config);
+const configPart = (g) => g.split(ARM_SEP)[0];
+const armPart = (g) => g.split(ARM_SEP)[1] ?? null;
 
 // ---- stats ---------------------------------------------------------------------------------
 
@@ -48,6 +62,8 @@ const METRICS = {
   cost_usd: (r) => r.cost_usd ?? NaN,
   tool_calls: (r) => r.tool_calls,
   screenshots: (r) => r.screenshots,
+  screenshot_actions: (r) => r.screenshot_actions ?? NaN, // incl. batch contents; rows from before it existed have none
+  batch_calls: (r) => r.tool_calls_by_tool?.mcp__firefox__batch ?? 0,
   turns: (r) => r.turns ?? NaN,
   output_tokens: (r) => tok(r).output_tokens ?? NaN, // includes thinking
   input_tokens: (r) => tok(r).input_tokens ?? NaN,
@@ -83,19 +99,22 @@ function summarizeGroup(rs) {
   return out;
 }
 
-const configs = [...new Set(rows.map((r) => r.config))].sort((a, b) => {
-  const order = (c) => ["haiku", "sonnet", "opus", "fable"].findIndex((m) => c.includes(m)) * 10 + ["default", "low", "medium", "high"].indexOf(c.split("/")[1]);
+const configs = [...new Set(rows.map(groupOf))].sort((a, b) => {
+  const order = (g) => {
+    const c = configPart(g);
+    return (["haiku", "sonnet", "opus", "fable"].findIndex((m) => c.includes(m)) * 10 + ["default", "low", "medium", "high"].indexOf(c.split("/")[1])) * 100 + ARMS.indexOf(armPart(g));
+  };
   return order(a) - order(b);
 });
 const tasks = [...new Set(rows.map((r) => r.task))].sort();
 
 const perConfig = {};
-for (const c of configs) perConfig[c] = summarizeGroup(rows.filter((r) => r.config === c));
+for (const c of configs) perConfig[c] = summarizeGroup(rows.filter((r) => groupOf(r) === c));
 const perTaskConfig = {};
 for (const t of tasks) {
   perTaskConfig[t] = {};
   for (const c of configs) {
-    const rs = rows.filter((r) => r.task === t && r.config === c);
+    const rs = rows.filter((r) => r.task === t && groupOf(r) === c);
     if (rs.length) perTaskConfig[t][c] = summarizeGroup(rs);
   }
 }
@@ -123,15 +142,16 @@ for (const t of tasks) flag(perTaskConfig[t]);
 
 // Effort steps within each model: what each step up bought and what it cost.
 const effortSteps = [];
-for (const m of [...new Set(configs.map((c) => c.split("/")[0]))]) {
-  const levels = ["low", "medium", "high"].map((e) => `${m}/${e}`).filter((c) => perConfig[c]);
+const modelArms = [...new Set(configs.map((c) => c.split("/")[0]))].flatMap((m) => (BY_ARM ? ARMS : [null]).map((arm) => [m, arm]));
+for (const [m, arm] of modelArms) {
+  const levels = ["low", "medium", "high"].map((e) => `${m}/${e}${arm != null ? ARM_SEP + arm : ""}`).filter((c) => perConfig[c]);
   for (let k = 1; k < levels.length; k++) {
     const a = perConfig[levels[k - 1]];
     const b = perConfig[levels[k]];
     const dScore = b.mean_score - a.mean_score;
     const dCost = b.metrics.cost_usd.median - a.metrics.cost_usd.median;
     effortSteps.push({
-      model: m, from: levels[k - 1].split("/")[1], to: levels[k].split("/")[1],
+      model: arm != null ? `${m}${ARM_SEP}${arm}` : m, from: configPart(levels[k - 1]).split("/")[1], to: configPart(levels[k]).split("/")[1],
       d_mean_score: dScore, d_pass_rate: b.pass_rate - a.pass_rate,
       d_median_cost_usd: dCost, d_median_wall_s: b.metrics.wall_s.median - a.metrics.wall_s.median,
       d_median_output_tokens: b.metrics.output_tokens.median - a.metrics.output_tokens.median,
@@ -140,9 +160,33 @@ for (const m of [...new Set(configs.map((c) => c.split("/")[0]))]) {
   }
 }
 
+// Experiment arms: each arm against the reference arm, per config (model/effort) and over all of
+// them. Ratios are of medians (arm / reference); batch share is batch calls over all calls.
+const REF_ARM = ARMS[0];
+const batchShare = (rs) => {
+  const calls = rs.reduce((a, r) => a + (r.tool_calls ?? 0), 0);
+  return calls ? rs.reduce((a, r) => a + (r.tool_calls_by_tool?.mcp__firefox__batch ?? 0), 0) / calls : null;
+};
+const armCompare = (rs) => {
+  const out = {};
+  for (const arm of ARMS) {
+    const x = rs.filter((r) => armOf(r) === arm);
+    if (x.length) out[arm] = { ...summarizeGroup(x), batch_share: batchShare(x) };
+  }
+  const ref = out[REF_ARM];
+  for (const [arm, s] of Object.entries(out)) {
+    if (!ref || arm === REF_ARM) continue;
+    const r = (k) => (ref.metrics[k].median ? s.metrics[k].median / ref.metrics[k].median : null);
+    s.vs_ref = { d_mean_score: s.mean_score - ref.mean_score, d_pass_rate: s.pass_rate - ref.pass_rate, tool_calls: r("tool_calls"), screenshots: r("screenshots"), wall_s: r("wall_s"), cost_usd: r("cost_usd"), total_input_tokens: r("total_input_tokens") };
+  }
+  return out;
+};
+const perArm = BY_ARM ? { all: armCompare(rows), ...Object.fromEntries([...new Set(configs.map(configPart))].map((c) => [c, armCompare(rows.filter((r) => r.config === c))])) } : null;
+
 const summary = {
   generated_at: new Date().toISOString(),
   runs: rows.length,
+  ...(BY_ARM ? { arms: ARMS, reference_arm: REF_ARM, per_arm: perArm } : {}),
   rounds: [...new Set(rows.map((r) => r.round))].sort(),
   configs, tasks,
   per_config: perConfig,
@@ -165,6 +209,16 @@ for (const c of configs) {
   const s = perConfig[c];
   const m = s.metrics;
   md += `| ${short(c)} | ${s.n} | ${pct(s.pass_rate)} | ${f(s.mean_score)} | ${mi(m.wall_s)} | ${mi(m.first_tool_s, 1)} | ${mi(m.tool_calls)} | ${mi(m.screenshots)} | ${mi(m.turns)} | ${mi(m.output_tokens)} | ${mi(m.total_input_tokens)} | ${mi(m.cost_usd, 3)} | ${f(s.cost_per_success_usd, 3)} | ${s.pareto_score_cost ? "★" : ""} | ${s.pareto_score_time ? "★" : ""} | ${s.timeouts} | ${f(m.load_other_eval.mean, 1)} |\n`;
+}
+if (BY_ARM) {
+  md += `\n## Experiment arms\n\nEach arm against \`${REF_ARM}\` (the reference arm), over all configs and then per config. Ratios are of medians (arm / reference). Batch share is batch calls over all calls. Shot actions count screenshots and zooms inside batches too.\n\n| config | arm | n | pass | score | Δ score | tool calls | ×calls | batch share | shots | shot actions | ×shots | wall s | ×wall | in tok (all) | ×in tok | cost $ | ×cost |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n`;
+  const x = (v) => (v == null || !Number.isFinite(v) ? "–" : `×${v.toFixed(2)}`);
+  for (const [c, byArm] of Object.entries(perArm))
+    for (const [arm, s] of Object.entries(byArm)) {
+      const m = s.metrics;
+      const v = s.vs_ref ?? {};
+      md += `| ${c === "all" ? "all" : short(c)} | ${arm} | ${s.n} | ${pct(s.pass_rate)} | ${f(s.mean_score)} | ${s.vs_ref ? f(v.d_mean_score, 3) : ""} | ${mi(m.tool_calls)} | ${s.vs_ref ? x(v.tool_calls) : ""} | ${pct(s.batch_share)} | ${mi(m.screenshots)} | ${mi(m.screenshot_actions)} | ${s.vs_ref ? x(v.screenshots) : ""} | ${mi(m.wall_s)} | ${s.vs_ref ? x(v.wall_s) : ""} | ${mi(m.total_input_tokens)} | ${s.vs_ref ? x(v.total_input_tokens) : ""} | ${mi(m.cost_usd, 3)} | ${s.vs_ref ? x(v.cost_usd) : ""} |\n`;
+    }
 }
 md += `\n## Errors and retries per config\n\n| config | tool errors | repeated calls | retries after error | thinking blocks | tool result kchars |\n|---|---|---|---|---|---|\n`;
 for (const c of configs) {

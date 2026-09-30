@@ -7,11 +7,15 @@
 //   node eval/report.mjs [--runs eval/results/runs.jsonl] [--compare eval/results/browsers.jsonl]
 //                        [--after eval/results/browsers-after.jsonl] [--devtools eval/results/browsers-devtools.jsonl]
 //                        [--after2 eval/results/browsers-after-2.jsonl]
+//                        [--experiments eval/results/experiments.jsonl]
 //                        [--out eval/results/report.md]
+//
+// --experiments: rows from run.mjs --experiments arms, compared arm by arm ("none" first).
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { armOf } from "./lib/experiments.mjs";
 import { shortTool } from "./lib/trace.mjs";
 import { TASKS } from "./tasks.mjs";
 
@@ -534,6 +538,60 @@ if (after2Rows.length) {
     "",
     callFacts(cols),
   );
+}
+
+// ---- experiment arms: MCP server flags, A/B in one file --------------------------------------
+
+// Per arm, from the rows and traces: how much went through batch, screenshots, and the result
+// sizes the flags are meant to change.
+function experimentFacts(cols) {
+  const lines = [`| per run | ${cols.map(([l]) => l).join(" | ")} |`, `| --- | ${cols.map(() => "---").join(" | ")} |`];
+  const facts = cols.map(([, rs]) => {
+    const calls = rs.flatMap(traceOf);
+    const batches = calls.filter((c) => c.short === "batch");
+    const bytes = (tool) => calls.filter((c) => c.short === tool && !c.is_error).map((c) => c.text_bytes);
+    return {
+      rs,
+      calls: calls.length,
+      batches: batches.length,
+      actions: calls.length - batches.length + sum(batches.map((c) => c.batch_actions ?? 0)),
+      shots: sum(rs.map((r) => r.screenshot_actions ?? r.screenshots)),
+      shotTool: calls.filter((c) => c.short === "screenshot").length,
+      tabLists: calls.filter((c) => c.short === "navigate" && /This session's tabs/.test(c.text_head ?? "")).length,
+      navigate: bytes("navigate"),
+      pageText: bytes("get_page_text"),
+    };
+  });
+  const row = (label, fn) => lines.push(`| ${label} | ${facts.map(fn).join(" | ")} |`);
+  row("batch share of calls", (f) => pct(f.batches, f.calls));
+  row("actions per run (batch contents counted)", (f) => fmt(f.actions / f.rs.length, 1));
+  row("screenshot/zoom actions per run", (f) => fmt(f.shots / f.rs.length, 1));
+  row("screenshot tool calls (offered only with screenshotAlias)", (f) => f.shotTool);
+  row("navigate results that list the session's tabs", (f) => f.tabLists);
+  row("navigate result bytes, median [min–max]", (f) => spread(f.navigate));
+  row("get_page_text result bytes, median [min–max]", (f) => spread(f.pageText));
+  lines.push("");
+  return lines.join("\n");
+}
+
+const EXPERIMENTS = opt("experiments", path.join(EVAL, "results/experiments.jsonl"));
+const experimentRows = readJsonl(EXPERIMENTS).filter((r) => browserOf(r) === "firefox");
+if (experimentRows.length) {
+  const arms = [...new Set(experimentRows.map(armOf))].sort((a, b) => (a === "none" ? -1 : b === "none" ? 1 : 0));
+  const cols = arms.map((a) => [a, experimentRows.filter((r) => armOf(r) === a)]);
+  const ids = TASKS.map((t) => t.id).filter((id) => experimentRows.some((r) => r.task === id));
+  out.push("## Experiment arms (Firefox)", "");
+  out.push(
+    `Source: \`${path.relative(EVAL, EXPERIMENTS)}\`, grouped by arm (\`run.mjs --experiments\`; the flags each arm's MCP server ran with are in eval/README.md). Arms: ${cols.map(([a, rs]) => `${a} (${[...new Set(rs.map((r) => (r.experiments ?? []).join(",") || "no flags"))].join("; ")}, ${rs.length} runs)`).join(", ")}.`,
+    "",
+    compareSets(cols, { ratioOf: cols.length === 2 ? [1, 0] : null, taskIds: ids }),
+  );
+  if (cols.length > 2) {
+    out.push(`Each arm / ${cols[0][0]} (medians):`, "", `| arm | ${RUN_METRICS.map(([n]) => n).join(" | ")} |`, `| --- | ${RUN_METRICS.map(() => "---").join(" | ")} |`);
+    for (const [a, rs] of cols.slice(1)) out.push(`| ${a} | ${RUN_METRICS.map(([, fn]) => ratio(median(rs.map(fn)), median(cols[0][1].map(fn)))).join(" | ")} |`);
+    out.push("");
+  }
+  out.push("### What the flags are meant to change", "", experimentFacts(cols), "### Per call", "", callFacts(cols));
 }
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });

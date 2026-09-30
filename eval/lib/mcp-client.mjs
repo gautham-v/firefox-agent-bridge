@@ -12,6 +12,7 @@ export const SERVER = path.join(ROOT, "mcp/server.mjs");
 export async function startMcp({ name = "eval-probe", timeoutMs = 100_000, session = null } = {}) {
   const env = { ...process.env };
   delete env.FIREFOX_AGENT_BRIDGE_SESSION;
+  delete env.FIREFOX_BRIDGE_EXPERIMENTS; // probes and checks see the tools as they are by default
   if (session) env.FIREFOX_AGENT_BRIDGE_SESSION = session;
   const proc = spawn(process.execPath, [SERVER], { env, stdio: ["pipe", "pipe", "inherit"] });
   const waiting = new Map();

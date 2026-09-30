@@ -7,10 +7,13 @@
 //   node eval/run.mjs [--max-minutes 8] [--concurrency 3] [--runs 3] [--model claude-sonnet-5-5]
 //                     [--tasks id,id] [--arms baseline,strip] [--out eval/results/runs.jsonl]
 //                     [--browser firefox|chrome|firefox,chrome] [--run-timeout-min 7] [--dry-run]
-//                     [--devtools] [--streams dir]
+//                     [--devtools] [--streams dir] [--experiments flags [--arm-label name]]...
 //
 // --devtools starts the Firefox MCP server with FIREFOX_BRIDGE_DEVTOOLS=1 (the opt-in devtools
 // tool); rows then carry devtools: true. --streams saves each run's raw stream-json to dir.
+// --experiments starts it with FIREFOX_BRIDGE_EXPERIMENTS=flags; given more than once, each is an
+// arm and every Firefox cell runs once per arm (lib/experiments.mjs). Rows carry experiments and
+// arm_label, and arms with different labels can share one --out file.
 //
 // Every Firefox run's MCP config points at THIS worktree's mcp/server.mjs, so all arms see the
 // same tools even if main changes. Chrome runs use Claude in Chrome (`claude -p --chrome`) with an
@@ -27,6 +30,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ARM_PROMPTS, ARM_TOOLS } from "./arms.mjs";
 import { lastJson } from "./lib/check.mjs";
+import { armEnv, fileSafe, parseArms } from "./lib/experiments.mjs";
 import { screenshotActions, toolTrace, traceTotals } from "./lib/trace.mjs";
 import { TASKS, promptFor } from "./tasks.mjs";
 
@@ -56,6 +60,7 @@ const TRACES = path.join(path.dirname(OUT), "traces");
 const CLAUDE = process.env.CLAUDE_BIN || "claude";
 const DEVTOOLS = flag("devtools");
 const STREAMS = opt("streams") ? path.resolve(opt("streams")) : null;
+const EXPERIMENT_ARMS = parseArms(argv);
 const DEFAULT_EXPECTED_MS = 4 * 60_000;
 
 const t0 = Date.now();
@@ -81,9 +86,12 @@ function readRuns() {
 }
 
 const browserOf = (r) => r.browser ?? "firefox";
-const cellKey = (c) => `${c.task}|${c.arm}|${c.run}|${browserOf(c)}`;
+// Rows from an experiment arm carry its label; rows without one keep the key they always had.
+const cellKey = (c) => `${c.task}|${c.arm}|${c.run}|${browserOf(c)}${c.arm_label != null ? `|${c.arm_label}` : ""}`;
 // Claude in Chrome only runs the baseline arm (the arms' guidance is written for the Firefox tools).
 const armsFor = (t, browser) => (browser === "chrome" ? ["baseline"] : ["baseline", ...t.arms]);
+// Experiment arms are MCP server flags, so Chrome runs once, without any.
+const experimentsFor = (browser) => (browser === "chrome" ? [{ flags: [], label: null }] : EXPERIMENT_ARMS);
 
 // Ordered run# first, then task, then browser, then arm, so a partial matrix stays balanced and
 // each arm (and each browser) runs close in time to its baseline.
@@ -95,7 +103,7 @@ function allCells() {
       for (const browser of BROWSERS)
         for (const arm of armsFor(t, browser)) {
           if (ONLY_ARMS && !ONLY_ARMS.includes(arm)) continue;
-          cells.push({ task: t.id, arm, run, browser });
+          for (const x of experimentsFor(browser)) cells.push({ task: t.id, arm, run, browser, arm_label: x.label, experiments: x.flags });
         }
     }
   return cells;
@@ -108,7 +116,7 @@ const median = (xs) => {
 
 // How long a cell is likely to take, from earlier runs of the same task/arm (or task).
 function expectedMs(cell, done) {
-  const same = done.filter((r) => r.task === cell.task && r.arm === cell.arm && browserOf(r) === cell.browser).map((r) => r.wall_ms);
+  const same = done.filter((r) => r.task === cell.task && r.arm === cell.arm && browserOf(r) === cell.browser && (r.arm_label ?? null) === cell.arm_label).map((r) => r.wall_ms);
   if (same.length) return median(same);
   const task = done.filter((r) => r.task === cell.task).map((r) => r.wall_ms);
   return task.length ? median(task) : DEFAULT_EXPECTED_MS;
@@ -117,11 +125,17 @@ function expectedMs(cell, done) {
 // ---- one run -------------------------------------------------------------------------------
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "fab-eval-"));
-const MCP_CONFIG = path.join(TMP, "mcp.json");
-fs.writeFileSync(
-  MCP_CONFIG,
-  JSON.stringify({ mcpServers: { firefox: { type: "stdio", command: process.execPath, args: [path.join(ROOT, "mcp/server.mjs")], ...(DEVTOOLS ? { env: { FIREFOX_BRIDGE_DEVTOOLS: "1" } } : {}) } } }, null, 2),
-);
+// One MCP config per experiment arm; without --experiments, the one config is what it always was.
+const mcpConfigs = new Map();
+EXPERIMENT_ARMS.forEach((x, i) => {
+  const file = path.join(TMP, i ? `mcp-${i}.json` : "mcp.json");
+  const env = { ...(DEVTOOLS ? { FIREFOX_BRIDGE_DEVTOOLS: "1" } : {}), ...armEnv(x) };
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ mcpServers: { firefox: { type: "stdio", command: process.execPath, args: [path.join(ROOT, "mcp/server.mjs")], ...(Object.keys(env).length ? { env } : {}) } } }, null, 2),
+  );
+  mcpConfigs.set(x.label, file);
+});
 // Chrome runs: no MCP servers from config, so the Firefox tools aren't offered; --chrome adds
 // the claude-in-chrome tools.
 const EMPTY_MCP_CONFIG = path.join(TMP, "mcp-empty.json");
@@ -132,10 +146,10 @@ const STRIP_ENV = [
   "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
   "CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
   "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_EXECPATH", "CLAUDE_PID", "CLAUDE_EFFORT", "AI_AGENT",
-  "FIREFOX_AGENT_BRIDGE_SESSION", "FIREFOX_BRIDGE_DEVTOOLS",
+  "FIREFOX_AGENT_BRIDGE_SESSION", "FIREFOX_BRIDGE_DEVTOOLS", "FIREFOX_BRIDGE_EXPERIMENTS",
 ];
 
-export function claudeArgs(task, arm, browser = "firefox") {
+export function claudeArgs(task, arm, browser = "firefox", mcpConfig = mcpConfigs.get(EXPERIMENT_ARMS[0].label)) {
   if (browser === "chrome")
     return [
       "-p", promptFor(task, browser),
@@ -152,7 +166,7 @@ export function claudeArgs(task, arm, browser = "firefox") {
     "-p", promptFor(task, browser),
     "--output-format", "stream-json", "--verbose",
     "--model", MODEL,
-    "--strict-mcp-config", "--mcp-config", MCP_CONFIG,
+    "--strict-mcp-config", "--mcp-config", mcpConfig,
     "--tools", ARM_TOOLS[arm] ?? "",
     // The sub-agent tool is listed as "Task" but its tool_use blocks are named "Agent".
     "--allowedTools", ["mcp__firefox__*", ...(ARM_TOOLS[arm] ? [ARM_TOOLS[arm], "Agent"] : [])].join(","),
@@ -188,8 +202,8 @@ function summarize(timed) {
         if (b.name === "mcp__firefox__computer" && ["screenshot", "zoom"].includes(b.input?.action)) m.screenshots++;
         // Claude in Chrome: screenshots can also sit inside a browser_batch.
         if (b.name === "mcp__claude-in-chrome__computer" && ["screenshot", "zoom"].includes(b.input?.action)) m.screenshots++;
-        if (b.name === "mcp__claude-in-chrome__browser_batch" || b.name === "mcp__firefox__batch")
-          m.screenshots += screenshotActions(b.name, b.input);
+        if (b.name === "mcp__claude-in-chrome__browser_batch" || b.name === "mcp__firefox__batch" || b.name === "mcp__firefox__screenshot")
+          m.screenshots += screenshotActions(b.name, b.input, m.tools_available);
       }
     } else if (e.type === "user") {
       const content = e.message?.content;
@@ -246,9 +260,9 @@ function runCell(cell, capMs) {
   const task = TASKS.find((t) => t.id === cell.task);
   const env = { ...process.env };
   for (const k of STRIP_ENV) delete env[k];
-  const cwd = fs.mkdtempSync(path.join(TMP, `${cell.task}-${cell.arm}-${cell.run}-${cell.browser}-`));
+  const cwd = fs.mkdtempSync(path.join(TMP, `${cell.task}-${cell.arm}-${cell.run}-${cell.browser}-${cell.arm_label != null ? `${fileSafe(cell.arm_label)}-` : ""}`));
   const started = Date.now();
-  const proc = spawn(CLAUDE, claudeArgs(task, cell.arm, cell.browser), { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+  const proc = spawn(CLAUDE, claudeArgs(task, cell.arm, cell.browser, mcpConfigs.get(cell.arm_label)), { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
   const events = [];
   let buf = "";
   let stderr = "";
@@ -291,7 +305,7 @@ async function finish(cell, r) {
   const m = summarize(r.events);
   const trace = toolTrace(r.events);
   const totals = traceTotals(trace);
-  const run_id = `${cell.task}.${cell.arm}.${cell.browser}.${cell.run}.${new Date(r.started).toISOString().replace(/[:.]/g, "-")}`;
+  const run_id = `${cell.task}.${cell.arm}.${cell.browser}.${cell.run}.${cell.arm_label != null ? `${fileSafe(cell.arm_label)}.` : ""}${new Date(r.started).toISOString().replace(/[:.]/g, "-")}`;
   fs.mkdirSync(TRACES, { recursive: true });
   fs.writeFileSync(path.join(TRACES, `${run_id}.jsonl`), trace.map((c) => JSON.stringify(c)).join("\n") + (trace.length ? "\n" : ""));
   if (STREAMS) {
@@ -322,6 +336,8 @@ async function finish(cell, r) {
   return {
     task: cell.task, arm: cell.arm, run: cell.run, browser: cell.browser, run_id, kind: task.kind,
     ...(DEVTOOLS && cell.browser === "firefox" ? { devtools: true } : {}),
+    ...(cell.browser === "firefox" ? { experiments: cell.experiments } : {}),
+    ...(cell.arm_label != null ? { arm_label: cell.arm_label } : {}),
     started_at: new Date(r.started).toISOString(), wall_ms: r.wall_ms,
     model: m.model ?? MODEL, session_id: m.session_id,
     pass: check.pass, fields: check.fields, pass_static_key: staticCheck?.pass ?? null,
@@ -336,7 +352,7 @@ async function finish(cell, r) {
     usage: m.usage, tokens_all_models: m.tokens_all_models ?? null, model_usage: m.model_usage,
     cost_usd: m.cost_usd, duration_ms: m.duration_ms, duration_api_ms: m.duration_api_ms,
     tools_available: m.tools_available, errors,
-    harness: { claude_args_tools: cell.browser === "chrome" ? "" : ARM_TOOLS[cell.arm] ?? "", concurrency: CONCURRENCY, browsers_in_chunk: BROWSERS, devtools: DEVTOOLS },
+    harness: { claude_args_tools: cell.browser === "chrome" ? "" : ARM_TOOLS[cell.arm] ?? "", concurrency: CONCURRENCY, browsers_in_chunk: BROWSERS, devtools: DEVTOOLS, experiment_arms_in_chunk: EXPERIMENT_ARMS.map((x) => x.label) },
     chrome_not_connected: m.chrome_not_connected ?? false,
   };
 }
@@ -346,7 +362,7 @@ async function finish(cell, r) {
 const done = readRuns();
 const doneKeys = new Set(done.map(cellKey));
 const pending = allCells().filter((c) => !doneKeys.has(cellKey(c)));
-log(`${allCells().length} cells, ${done.length} recorded in ${path.relative(process.cwd(), OUT)}, ${pending.length} pending; browsers ${BROWSERS.join(",")}${DEVTOOLS ? " (devtools on)" : ""}, model ${MODEL}, concurrency ${CONCURRENCY}, ${MAX_MIN} min`);
+log(`${allCells().length} cells, ${done.length} recorded in ${path.relative(process.cwd(), OUT)}, ${pending.length} pending; browsers ${BROWSERS.join(",")}${DEVTOOLS ? " (devtools on)" : ""}${EXPERIMENT_ARMS[0].label != null ? `, experiment arms ${EXPERIMENT_ARMS.map((x) => `${x.label}=${x.flags.join(",") || "none"}`).join(" ")}` : ""}, model ${MODEL}, concurrency ${CONCURRENCY}, ${MAX_MIN} min`);
 
 if (flag("dry-run")) {
   for (const c of pending) log("pending", cellKey(c));
