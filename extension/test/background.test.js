@@ -1076,6 +1076,34 @@ test("nothing masked adds no line; a frame that couldn't cover its fields stops 
   assert.equal(env.broadcasts.at(-1).args.on, false, "the frames that did draw bars took them away");
 });
 
+test("captures of one tab never overlap, so one's cleanup can't uncover another's capture", async () => {
+  const env = await captureEnv([{ masked: 1, site: "acme-supply.com", top: true }]);
+  const log = [];
+  env.browser.claudePage.broadcast = async (tabId, op, args) => {
+    log.push(args.on ? "on" : "off");
+    await wait(5);
+    return [{ masked: 1, site: "acme-supply.com", top: true }];
+  };
+  env.browser.tabs.captureTab = async () => {
+    log.push("capture");
+    await wait(20);
+    return "data:image/jpeg;base64,AAAA";
+  };
+  const shots = await Promise.all([
+    env.callTool("computer", { action: "screenshot", tabId: 2 }),
+    env.callTool("computer", { action: "zoom", tabId: 2, region: [0, 0, 10, 10] }),
+  ]);
+  for (const s of shots) assert.equal(s.result.content.at(-1).text, "1 field masked on acme-supply.com");
+  assert.deepEqual(log, ["on", "capture", "off", "on", "capture", "off"]);
+  // A failed capture doesn't hold up the next one.
+  env.browser.tabs.captureTab = async () => {
+    throw new Error("gone");
+  };
+  assert.equal((await env.callTool("computer", { action: "screenshot", tabId: 2 })).result.isError, true);
+  env.browser.tabs.captureTab = async () => "data:image/jpeg;base64,AAAA";
+  assert.equal((await env.callTool("computer", { action: "screenshot", tabId: 2 })).result.content[0].type, "image");
+});
+
 test("the host's rules go to every page op, and a masked result gets its own line", async () => {
   const env = await captureEnv([]);
   const rules = { always: ["password"], sites: { "chase.com": [".account-number"] } };

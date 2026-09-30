@@ -348,7 +348,20 @@ function imageContent(dataUrl) {
 // masked fields covered by labeled bars. Every frame of the tab, cross-origin ones included,
 // hides its cursor and draws its bars before the capture and takes them away after. If a frame
 // couldn't, nothing is captured. Answers the capture and what was masked, if anything.
-async function forCapture(tabId, capture) {
+// Captures of one tab run one at a time: an agent screenshot, a point-and-ask crop and Teach step
+// shots can overlap, and one's "off" would take the bars down (and bring the cursor back) in the
+// middle of the other's capture.
+const captureQueue = new Map(); // tab id -> the last capture queued for it
+
+function forCapture(tabId, capture) {
+  const run = (captureQueue.get(tabId) ?? Promise.resolve()).then(() => captureNow(tabId, capture));
+  const tail = run.catch(() => {});
+  captureQueue.set(tabId, tail);
+  tail.then(() => captureQueue.get(tabId) === tail && captureQueue.delete(tabId));
+  return run;
+}
+
+async function captureNow(tabId, capture) {
   const undo = () => browser.claudePage.broadcast(tabId, "capture", { on: false }).catch(() => {});
   let frames;
   try {
