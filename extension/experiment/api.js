@@ -80,6 +80,39 @@ function browserWindows() {
   return [...Services.wm.getEnumerator("navigator:browser")];
 }
 
+// The browser window an element (a tab, a <browser>) is in. Firefox renamed ownerGlobal to
+// documentGlobal.
+const windowOf = (el) => el?.documentGlobal ?? el?.ownerGlobal ?? null;
+
+// Keeping session tabs rendering while their window is occluded (another macOS Space, covered,
+// minimized). Firefox then treats the window as hidden (its chrome document goes hidden, which
+// the tab switcher reads as "minimized or occluded"), and the pages in it stop getting animation
+// frames, session tabs included, though their docShellIsActive holds and they still read as
+// visible. CanonicalBrowsingContext.forceAppWindowActive, set on the
+// window's top chrome context, keeps it active; Picture-in-Picture sets it on the window a video
+// was popped out of so the video's captions keep updating. There's no per-tab switch, so it
+// covers the whole window.
+const PIP_MODULES = ["moz-src:///toolkit/components/pictureinpicture/PictureInPicture.sys.mjs", "resource://gre/modules/PictureInPicture.sys.mjs"];
+
+// Whether Picture-in-Picture wants this window kept active, so letting go of it is left to PiP.
+function pipHolds(win) {
+  for (const url of PIP_MODULES) {
+    try {
+      return (ChromeUtils.importESModule(url).PictureInPicture?.originatingWinWeakMap?.get(win) ?? 0) > 0;
+    } catch {
+      // not at this path in this version
+    }
+  }
+  return false;
+}
+
+function forceWindowActive(win, on) {
+  const bc = win.browsingContext;
+  if (!bc || bc.forceAppWindowActive === on) return;
+  if (!on && pipHolds(win)) return;
+  bc.forceAppWindowActive = on;
+}
+
 function setRecording(browserId, on) {
   const ids = new Set(Services.ppmm.sharedData.get(RECORDING_KEY) ?? []);
   if (on) ids.add(browserId);
@@ -114,6 +147,7 @@ this.claudePage = class extends ExtensionAPI {
     this.ready.catch((e) => console.error("firefox-agent-bridge: actor registration failed", e));
     this.watchWindows();
     this.watchFrames();
+    this.renderingWindows = new Set(); // windows keepRendering is keeping active
   }
 
   // Documents that load in an armed tab (a navigation, a late iframe) are armed as they appear.
@@ -187,6 +221,14 @@ this.claudePage = class extends ExtensionAPI {
     Services.obs.removeObserver(this.frameObserver, "window-global-created");
     for (const browser of this.pointing.values()) armFrames(browser, false);
     this.removeSheets();
+    for (const win of this.renderingWindows) {
+      try {
+        if (!win.closed) forceWindowActive(win, false);
+      } catch {
+        // window closing
+      }
+    }
+    this.renderingWindows.clear();
     Services.ppmm.sharedData.delete(RECORDING_KEY);
     Services.ppmm.sharedData.delete(RECORD_REDACT_KEY);
     unregisterActor();
@@ -288,6 +330,34 @@ this.claudePage = class extends ExtensionAPI {
           return browser.docShellIsActive;
         }),
 
+        // Keeps the windows holding these (session) tabs rendering while occluded, and lets go of
+        // windows it kept before that hold none of them now. Answers how many windows it keeps.
+        keepRendering: surfaced(async (tabIds) => {
+          const want = new Set();
+          for (const id of tabIds) {
+            try {
+              const win = windowOf(tabManager.get(id).nativeTab);
+              if (win && !win.closed) want.add(win);
+            } catch {
+              // tab closed
+            }
+          }
+          for (const win of self.renderingWindows) {
+            if (want.has(win)) continue;
+            self.renderingWindows.delete(win);
+            try {
+              if (!win.closed) forceWindowActive(win, false);
+            } catch {
+              // window closing
+            }
+          }
+          for (const win of want) {
+            forceWindowActive(win, true);
+            self.renderingWindows.add(win);
+          }
+          return want.size;
+        }),
+
         // Sets (or, with a null state, clears) the state icon drawn in a tab group's label.
         // Returns whether it is showing: false when the group or its label element isn't found or
         // the stylesheet didn't apply, and the caller then puts a glyph in the title instead.
@@ -335,7 +405,7 @@ this.claudePage = class extends ExtensionAPI {
           register: (fire) => {
             const observer = (browser, topic, data) => {
               if (!self.pointing.has(browser?.browserId)) return;
-              const tab = browser.ownerGlobal?.gBrowser?.getTabForBrowser(browser);
+              const tab = windowOf(browser)?.gBrowser?.getTabForBrowser(browser);
               if (tab) fire.async(tabManager.getWrapper(tab).id, JSON.parse(data));
             };
             Services.obs.addObserver(observer, PICK_TOPIC);

@@ -218,12 +218,16 @@ async function syncGroups() {
     do {
       syncAgain = false;
       const seen = new Set();
+      const live = new Set();
       for (const [session, s] of sessions) {
         const groupId = await sessionGroupId(session);
         if (groupId == null) continue;
         seen.add(groupId);
-        await paintGroup(groupId, s.label, sessionState(session)).catch(() => {});
+        const state = sessionState(session);
+        if (state !== "disconnected") live.add(groupId);
+        await paintGroup(groupId, s.label, state).catch(() => {});
       }
+      await keepRendering(live).catch(() => {});
       for (const [groupId, label] of earlierGroups) {
         if (!(await browser.tabGroups.get(groupId).catch(() => null))) {
           earlierGroups.delete(groupId);
@@ -243,6 +247,26 @@ async function syncGroups() {
 browser.tabGroups.onMoved?.addListener((group) => {
   painted.delete(group.id);
   scheduleRefresh();
+});
+
+// While Firefox's window is occluded (on another macOS Space, covered or minimized) the pages in
+// it stop getting animation frames, even session tabs kept active: requestAnimationFrame stops,
+// so lazy lists, IntersectionObserver content and canvas apps stall. The windows holding a live
+// session's tabs are kept rendering (keepRendering in experiment/api.js); that covers the whole
+// window, the user's tab in it too, so it lasts only while such a tab is there. Re-sent on every
+// refresh, since Picture-in-Picture turns the same switch off when its player closes.
+async function keepRendering(groupIds) {
+  if (typeof browser.claudePage.keepRendering !== "function") return; // an experiment from before this
+  const tabIds = groupIds.size ? (await browser.tabs.query({})).filter((t) => groupIds.has(t.groupId)).map((t) => t.id) : [];
+  await browser.claudePage.keepRendering(tabIds);
+}
+
+// Tabs leaving a session's group (closed, ungrouped, moved to another window) change which
+// windows that covers.
+browser.tabs.onRemoved.addListener(() => scheduleRefresh());
+browser.tabs.onAttached.addListener(() => scheduleRefresh());
+browser.tabs.onUpdated.addListener((tabId, change) => {
+  if ("groupId" in change) scheduleRefresh();
 });
 
 async function createSessionTab(session, client, url = "about:blank", preferWindowId = null) {
@@ -385,13 +409,86 @@ async function captureNow(tabId, capture) {
   }
 }
 
+// Pixel size of a captured image (a PNG or JPEG data URL), read from its header; null if it
+// can't be read.
+function imageSize(dataUrl) {
+  let bytes;
+  try {
+    const bin = atob(String(dataUrl).split(",", 2)[1].slice(0, 65536));
+    bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+  const u16 = (i) => (bytes[i] << 8) | bytes[i + 1];
+  const size = (width, height) => (width > 0 && height > 0 ? { width, height } : null);
+  if (bytes.length >= 24 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    return size(u16(16) * 65536 + u16(18), u16(20) * 65536 + u16(22));
+  }
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  // JPEG: walk the segments to the start of frame, which holds the size.
+  for (let i = 2; i + 8 < bytes.length; ) {
+    if (bytes[i] !== 0xff) return null;
+    const marker = bytes[i + 1];
+    if (marker === 0xff) {
+      i++;
+      continue;
+    }
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) return size(u16(i + 7), u16(i + 5));
+    i += 2 + u16(i + 2);
+  }
+  return null;
+}
+
+// The tab's zoom, which captureTab multiplies the scale it's given by.
+async function tabZoom(tabId) {
+  try {
+    const zoom = await browser.tabs.getZoom(tabId);
+    return zoom > 0 ? zoom : 1;
+  } catch {
+    return 1;
+  }
+}
+
+// The tab's viewport in CSS pixels: the page's answer, else the tab's own size (its <browser>
+// element, unzoomed). Pages have answered 0x0 while Firefox's window was occluded (on another
+// macOS Space). Null when neither knows; the screenshot then measures its own capture.
+async function cssViewport(tabId, vp, zoom) {
+  if (vp?.width > 0 && vp?.height > 0) return { width: vp.width, height: vp.height };
+  const tab = await browser.tabs.get(tabId).catch(() => null);
+  if (tab?.width > 0 && tab?.height > 0) return { width: tab.width / zoom, height: tab.height / zoom };
+  return null;
+}
+
+// The full frame's size in screenshot pixels: the viewport's, scaled. When the image disagrees by
+// more than rounding, the size a stale page gave was wrong and the image's own size (scaled back
+// up when a smaller image was asked for) wins.
+function frameSize(css, s, image, scale) {
+  const w = Math.round(css.width * s);
+  const h = Math.round(css.height * s);
+  if (image && (Math.abs(image.width - w * scale) > 2 || Math.abs(image.height - h * scale) > 2)) {
+    return { w: Math.round(image.width / scale), h: Math.round(image.height / scale) };
+  }
+  return { w, h };
+}
+
 async function screenshot(tabId, scale = 1) {
   const vp = await browser.claudePage.call(tabId, "viewport", {});
-  const s = fitScale(vp.width, vp.height);
+  const zoom = await tabZoom(tabId);
+  // With the zoom divided out, an image pixel is 1/k CSS pixels whatever the tab's zoom.
+  const grab = (k) => forCapture(tabId, () => browser.tabs.captureTab(tabId, { format: "jpeg", quality: 80, scale: k / zoom }));
+  let css = await cssViewport(tabId, vp, zoom);
+  let got = null;
+  if (!css) {
+    // Nothing knows the viewport's size, so it is captured at one pixel per CSS pixel and measured.
+    got = await grab(1);
+    css = imageSize(got.shot);
+    if (!css) throw new Error(`Couldn't tell how big tab ${tabId}'s viewport is. Take the screenshot again.`);
+  }
+  const s = fitScale(css.width, css.height);
+  if (!got || s * scale !== 1) got = await grab(s * scale);
   frameRatio.set(tabId, 1 / s);
-  const { shot, masked } = await forCapture(tabId, () => browser.tabs.captureTab(tabId, { format: "jpeg", quality: 80, scale: s * scale }));
-  const w = Math.round(vp.width * s);
-  const h = Math.round(vp.height * s);
+  const { shot, masked } = got;
+  const { w, h } = frameSize(css, s, imageSize(shot), scale);
   const note = scale < 1 ? ` Image returned at ${Math.round(scale * 100)}% size; coordinates still use the full ${w}x${h} frame.` : "";
   const out = [imageContent(shot), text(`Screenshot of tab ${tabId} (${w}x${h}).${note}\n${vp.title}\n${vp.url}`)];
   return masked ? [...out, maskedPart(masked)] : out;
@@ -405,11 +502,12 @@ async function zoom(tabId, region, scale = 1) {
   const width = Math.max(1, x1 - x0);
   const height = Math.max(1, y1 - y0);
   const s = Math.min(vp.dpr * 2, SCREENSHOT_MAX_EDGE / Math.max(width, height)) * scale;
+  const tabZoomed = await tabZoom(tabId);
   const { shot, masked } = await forCapture(tabId, () =>
     browser.tabs.captureTab(tabId, {
       format: "jpeg",
       quality: 90,
-      scale: s,
+      scale: s / tabZoomed,
       rect: { x: x0 + vp.scrollX, y: y0 + vp.scrollY, width, height },
     }),
   );
@@ -418,11 +516,14 @@ async function zoom(tabId, region, scale = 1) {
 }
 
 // CSS pixels per screenshot pixel. Before the first screenshot, it is the ratio a screenshot
-// would have, so coordinates from find match a screenshot taken later.
+// would have, so coordinates from find match a screenshot taken later. While the viewport's size
+// is unknown it is 1, until a screenshot measures it.
 async function ratioFor(tabId) {
   if (!frameRatio.has(tabId)) {
     const vp = await browser.claudePage.call(tabId, "viewport", {});
-    frameRatio.set(tabId, 1 / fitScale(vp.width, vp.height));
+    const css = await cssViewport(tabId, vp, await tabZoom(tabId));
+    if (!css) return 1;
+    frameRatio.set(tabId, 1 / fitScale(css.width, css.height));
   }
   return frameRatio.get(tabId);
 }

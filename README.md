@@ -54,8 +54,17 @@ Other details:
 - **Background tabs.** Normally hidden tabs don't render and IntersectionObserver never fires,
   so lazy lists stay empty. Session tabs are therefore marked active (`docShellIsActive`)
   without being shown.
+- **Window on another Space.** When Firefox's window is occluded (on another macOS Space,
+  covered or minimized), Firefox stops giving its pages animation frames, session tabs included,
+  so lazy lists, IntersectionObserver content and canvas apps would stall. While a connected
+  session has tabs in a window, that window is kept rendering (`forceAppWindowActive`, the switch
+  Picture-in-Picture uses to keep captions updating), and let go when the session disconnects or
+  its tabs leave. There's no per-tab switch, so the tab you left showing in that window keeps
+  rendering too, which costs some battery while it's out of sight.
 - **Screenshots.** `tabs.captureTab` works on background tabs. Images are scaled to at most
-  1568px on the long edge and 1.15 MP. Coordinates are mapped back to CSS pixels.
+  1568px on the long edge and 1.15 MP. Coordinates are mapped back to CSS pixels, with the tab's
+  zoom taken out. If the page reports a 0x0 viewport (seen while the window was occluded), the
+  size comes from the tab, or else from the captured image.
 
 ## Tools
 
