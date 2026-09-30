@@ -78,7 +78,8 @@ node eval/report.mjs       # writes eval/results/report.md
 
 `run.mjs` options: `--max-minutes 8 --concurrency 3 --runs 3 --model claude-sonnet-5-5
 --tasks id,id --arms a,b --browser firefox|chrome|firefox,chrome --out file --run-timeout-min 7
---devtools --streams dir`. `--devtools` starts the MCP server with FIREFOX_BRIDGE_DEVTOOLS=1.
+--devtools --streams dir --experiments flags --arm-label name`. `--devtools` starts the MCP server with
+FIREFOX_BRIDGE_DEVTOOLS=1; `--experiments` is under "Experiments" below.
 Each run is `claude -p` with `--strict-mcp-config` and an MCP config pointing at this checkout's
 `mcp/server.mjs`, only the Firefox tools (plus Task for fanout), no session persistence, in its
 own tab group. A run cut off by the chunk's deadline isn't recorded and runs again next time; one
@@ -192,6 +193,47 @@ screenshot):
 - **`find` duplicates and role queries** (uitestingplayground.com/textinput): `find "text input"`
   lists the heading once, and `find "button"` returns the button first.
 
+## Experiments (MCP server flags)
+
+Some changes to what the model sees can be switched per run in `mcp/server.mjs`, so they can be
+A/B tested without restarting Firefox. The server reads a comma-separated list from
+`FIREFOX_BRIDGE_EXPERIMENTS`. Unset, tools/list and every result are as before
+(`host/test/fixtures/tools-list.json`). `node mcp/server.mjs --list-experiments` prints the flags.
+
+| flag | what changes |
+| --- | --- |
+| `batchHint` | `find` and `read_page` results with refs end with "(The next clicks, typing and form_input on these refs can go in one batch call.)", except inside a batch. The `batch` description says to use it whenever the next two or more steps are known; `computer` says several clicks or keys on known refs go in one batch. |
+| `fewerShots` | `computer`'s description says action results already report what changed (element, text typed, focus and its value), so a checking screenshot after each action is usually unnecessary; take one when the page's appearance matters. |
+| `screenshotAlias` | Adds a `screenshot` tool ({tabId?, scale?}) that runs `computer`'s screenshot action, also inside `batch`; `computer` no longer says there is no screenshot tool. Sonnet calls this name with empty input about 0.4 times a run. |
+| `quietTabs` | `navigate` leaves out "This session's tabs: {…}" while the session's tab ids are the ones the last result that showed a list had (`tabs_context_mcp`, `tabs_create_mcp`, or an earlier `navigate`). The created-tab note stays. |
+| `pageTextCap` | `get_page_text` returns at most 8000 characters (`pageTextCap=4000` sets another default), then a line with how many are left and the `offset` to read on from. Adds optional `offset` and `max_chars`. The server slices the full text. |
+| `fastNavigate` | `navigate` sends `wait: "interactive"` to the extension unless the call set `wait`. Until Firefox loads an extension that knows `wait`, it is ignored and this arm is the same as none. |
+
+Both runners take `--experiments <flags>` for the MCP server they start. Given more than once,
+each is an arm: `run.mjs` runs every Firefox cell once per arm, and `models.mjs` shuffles every
+(task, config, arm) together within each round, so arms share conditions. `--experiments none`
+is an arm without flags. `--arm-label <name>`, once per `--experiments` in the same order, names
+the arms (default: the flags joined with `+`). Rows record `experiments` and `arm_label`, and
+arms with different labels share one `--out` file. Without `--experiments`, cells and rows are
+as before.
+
+```sh
+node eval/run.mjs --browser firefox --arms baseline --concurrency 2 --out eval/results/experiments.jsonl \
+  --experiments none --experiments batchHint,fewerShots,screenshotAlias --arm-label none --arm-label hints
+node eval/report.mjs --experiments eval/results/experiments.jsonl   # "Experiment arms (Firefox)"
+
+node eval/models.mjs --tier hard --configs sonnet:medium --out eval/results/models-hard/experiments.jsonl \
+  --experiments none --experiments batchHint --experiments fewerShots,screenshotAlias
+node eval/models-report.mjs --in eval/results/models-hard/experiments.jsonl --prefix experiments-
+```
+
+Run each again until it says complete. `report.mjs` groups rows by arm ("none" first) and adds
+batch share, actions per run, screenshot actions, calls to the screenshot tool and result sizes
+for `navigate` and `get_page_text`. `models-report.mjs` splits every config by arm when the file
+has more than one (`--by-arm` forces it) and adds an "Experiment arms" table against "none".
+Models rows now also carry `screenshot_actions` (screenshots and zooms inside batches too); the
+older `screenshots` counts top-level calls only.
+
 # Model x effort benchmark
 
 Which model and effort level is worth using for browser tasks, and where effort stops paying.
@@ -223,7 +265,7 @@ node eval/models-report.mjs          # writes results/models/report.md and summa
 
 Options: `--configs haiku:default,sonnet:low,...` (or `--models sonnet,opus --efforts low,high`),
 `--tasks`, `--rounds 3`, `--seed 7`, `--concurrency 3`, `--max-minutes 8.5`,
-`--run-timeout-min 12`, `--out`, `--tag`, `--wait`.
+`--run-timeout-min 12`, `--out`, `--tag`, `--wait`, `--experiments`, `--arm-label` ("Experiments" above).
 
 The schedule is round-robin: each round runs every (task, config) once in a seeded shuffle, and
 a round starts only after the previous one has started all its cells, so stopping early leaves

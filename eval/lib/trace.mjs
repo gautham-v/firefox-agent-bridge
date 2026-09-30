@@ -62,11 +62,19 @@ export function summarizeArgs(input) {
 }
 
 // Screenshot-like actions a call asked for (computer screenshot/zoom, including inside a batch).
-export function screenshotActions(name, input) {
+// The Firefox screenshot tool counts only when the run was offered it (the screenshotAlias
+// experiment); `offered` is the init event's tool list. Without it, it's a call to a tool that
+// doesn't exist.
+export function screenshotActions(name, input, offered = null) {
   const tool = shortTool(name);
   if (tool === "computer") return ["screenshot", "zoom"].includes(input?.action) ? 1 : 0;
+  if (name === "mcp__firefox__screenshot") return offered?.includes(name) ? 1 : 0;
   if (tool === "browser_batch" || tool === "batch")
-    return (input?.actions ?? []).filter((a) => shortTool(a.name ?? a.tool) === "computer" && ["screenshot", "zoom"].includes((a.input ?? a.args)?.action)).length;
+    return (input?.actions ?? []).filter((a) => {
+      const inner = shortTool(a.name ?? a.tool);
+      if (inner === "screenshot") return tool === "batch" && !!offered?.includes("mcp__firefox__screenshot");
+      return inner === "computer" && ["screenshot", "zoom"].includes((a.input ?? a.args)?.action);
+    }).length;
   return 0;
 }
 
@@ -74,8 +82,10 @@ export function screenshotActions(name, input) {
 export function toolTrace(timed) {
   const calls = new Map();
   const order = [];
+  let offered = null;
   for (const { t, e } of timed) {
-    if (e.type === "assistant") {
+    if (e.type === "system" && e.subtype === "init") offered = e.tools ?? null;
+    else if (e.type === "assistant") {
       for (const b of e.message?.content ?? []) {
         if (b.type !== "tool_use") continue;
         const c = {
@@ -86,7 +96,7 @@ export function toolTrace(timed) {
           action: b.input?.action ?? null,
           args: summarizeArgs(b.input),
           batch_actions: Array.isArray(b.input?.actions) ? b.input.actions.length : null,
-          screenshot_actions: screenshotActions(b.name, b.input),
+          screenshot_actions: screenshotActions(b.name, b.input, offered),
           subagent: !!e.parent_tool_use_id,
           msg: e.message?.id ?? null,
           t_use: t,
