@@ -4,6 +4,7 @@
 
 import { setTimeout, clearTimeout } from "resource://gre/modules/Timer.sys.mjs";
 import { barLabel, fieldKind, marker, markLabels, scrub, selectorKind, siteSelectors } from "resource://firefox-agent-bridge/redact.sys.mjs";
+import { focusEvents } from "resource://firefox-agent-bridge/focus.sys.mjs";
 
 const INTERACTIVE_ROLES = new Set([
   "button", "link", "textbox", "searchbox", "combobox", "checkbox", "radio", "switch", "slider",
@@ -1038,6 +1039,7 @@ async function click(doc, args) {
     el = deepElementFromPoint(doc, x, y);
     if (!el) throw new Error("Nothing at that point any more; the page changed. Take a fresh screenshot.");
   }
+  const focused = keyTarget(doc);
   pressCursor(doc, true);
   fire(win, el, "PointerEvent", "pointerover", { ...pointer, buttons: 0 });
   fire(win, el, "MouseEvent", "mouseover", { ...base, buttons: 0 });
@@ -1050,6 +1052,8 @@ async function click(doc, args) {
       const focusable = el.closest?.(FOCUSABLE);
       if (focusable && doc.activeElement !== focusable) focusable.focus();
     }
+    // The field clicked away from fires change here, before the click, as with a real mouse.
+    if (i === 1) focusMoved(doc, focused);
     fire(win, el, "PointerEvent", "pointerup", { ...pointer, buttons: 0, detail: i });
     const up = directDispatches;
     fire(win, el, "MouseEvent", "mouseup", { ...base, buttons: 0, detail: i });
@@ -1264,9 +1268,25 @@ function keyboardEvent(win, tip, key) {
 }
 
 function press(win, tip, key) {
+  const focused = keyTarget(win.document);
   const ev = keyboardEvent(win, tip, key);
   tip.keydown(ev);
   tip.keyup(ev);
+  focusMoved(win.document, focused);
+}
+
+// After input that may have moved focus (a click, Tab, a key the page answers by focusing
+// something): where Gecko moved it silently, the focus events it skipped, which is what makes a
+// field that was typed into fire change. See focus.sys.mjs.
+function focusMoved(doc, from) {
+  const win = doc.defaultView;
+  const to = keyTarget(doc);
+  for (const e of focusEvents({ hasFocus: doc.hasFocus(), from, to })) {
+    // A blur handler that moved focus again has made the rest stale.
+    if ((e.type === "focus" || e.type === "focusin") && keyTarget(doc) !== to) break;
+    if (!e.target.isConnected) continue;
+    e.target.dispatchEvent(new win.FocusEvent(e.type, { bubbles: e.bubbles, composed: true, view: win, relatedTarget: e.relatedTarget }));
+  }
 }
 
 function type(doc, { text, redact }) {
@@ -1319,6 +1339,13 @@ function key(doc, { keys, repeat = 1, redact }) {
   return reported(`Pressed ${keys}${repeat > 1 ? ` x${repeat}` : ""}`, keyReport(doc, redact));
 }
 
+// Focuses an element as a click would, so the field focus leaves fires change if it was typed in.
+function focusOn(doc, el) {
+  const focused = keyTarget(doc);
+  el.focus();
+  focusMoved(doc, focused);
+}
+
 // ---------------------------------------------------------------------------------------------
 // form_input
 
@@ -1362,14 +1389,14 @@ function formInput(doc, { ref, value, redact }) {
   }
 
   if (el.isContentEditable) {
-    el.focus();
+    focusOn(doc, el);
     win.getSelection().selectAllChildren(el);
     doc.execCommand("insertText", false, String(value));
     return `Set text of ${ref}`;
   }
 
   if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
-    el.focus();
+    focusOn(doc, el);
     // Assigning through the Xray wrapper calls the native setter, skipping any
     // framework-installed setter on the instance, so React sees a real change.
     el.value = String(value);
@@ -2184,7 +2211,7 @@ async function fill(doc, { ref, text }) {
     r = el.getBoundingClientRect();
   }
   await moveCursor(doc, r.left + r.width / 2, r.top + r.height / 2);
-  el.focus();
+  focusOn(doc, el);
   if (el.isContentEditable) win.getSelection().selectAllChildren(el);
   else el.select?.();
   if (text) type(doc, { text: String(text) });
