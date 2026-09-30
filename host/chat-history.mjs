@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { HIDDEN_TOOLS, clip, mimeFromName, stripClaudeSkill, stripCodexSkill, stripContext, summarizeToolResult, summarizeToolUse, toolTab } from "./chat-format.mjs";
+import { HIDDEN_TOOLS, clip, mimeFromName, stripClaudeSkill, stripCodexSkill, stripContext, summarizeToolResult, summarizeToolUse, toolMasked, toolTab } from "./chat-format.mjs";
 
 const HEAD_BYTES = 128 * 1024;
 const NEEDLE = '"name":"mcp__firefox__';
@@ -203,7 +203,7 @@ export async function claudeTranscript(file, maxItems = 1500) {
       const c = e.message?.content;
       if (Array.isArray(c)) {
         for (const b of c) {
-          if (b.type === "tool_result" && names.has(b.tool_use_id)) items.push({ kind: "tool_end", toolUseId: b.tool_use_id, ok: !b.is_error, summary: summarizeToolResult(names.get(b.tool_use_id) ?? "", b.content, b.is_error) });
+          if (b.type === "tool_result" && names.has(b.tool_use_id)) items.push({ kind: "tool_end", toolUseId: b.tool_use_id, ok: !b.is_error, summary: summarizeToolResult(names.get(b.tool_use_id) ?? "", b.content, b.is_error), ...toolMasked(names.get(b.tool_use_id) ?? "", b.content) });
         }
       }
       const text = userText(e);

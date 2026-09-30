@@ -7,6 +7,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { createChat } from "./chat.mjs";
+import { createRedactRules } from "./redact.mjs";
 
 const DIR = path.join(os.homedir(), ".firefox-agent-bridge");
 const SOCKET = path.join(DIR, "bridge.sock");
@@ -19,6 +20,10 @@ const log = (...a) => fs.appendFileSync(LOG, `${new Date().toISOString()} ${a.jo
 
 // The sidebar chat: `chat.*` messages are handled by chat.mjs, which runs Claude Code and Codex.
 const chat = createChat({ send: (msg) => send(msg), log });
+
+// Redaction rules go to the extension when it says hello, and again before the next call after
+// the file changes, so an edit applies without restarting Firefox.
+const redact = createRedactRules(path.join(DIR, "redact.json"), log);
 
 // Firefox closes the connection to the host (and this process ends with it) when one message
 // is over 1 MiB, so an oversize one is refused here instead. Returns whether it was sent.
@@ -65,6 +70,7 @@ function onExtensionMessage(msg) {
   if (chat.handle(msg)) return;
   if (msg.type === "hello") {
     log("extension connected, version", msg.version);
+    send({ type: "redact", rules: redact.load() });
     return;
   }
   if (msg.type === "disconnect_client") {
@@ -127,6 +133,8 @@ const server = net.createServer((socket) => {
         continue;
       }
       if (!client.info) announce(clientId, client, {});
+      const rules = redact.changed();
+      if (rules) send({ type: "redact", rules });
       const sent = send({
         type: "call",
         id: `${clientId}:${req.id}`,

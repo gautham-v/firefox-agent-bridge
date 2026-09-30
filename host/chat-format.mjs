@@ -74,6 +74,17 @@ export function toolTab(name, input) {
   return String(name).startsWith("mcp__firefox__") && Number.isSafeInteger(id) && id >= 0 ? { tabId: id } : {};
 }
 
+const MASKED_LINE = /^\d{1,5} fields? masked on [\w.-]{1,253}$/;
+
+// What redaction masked in a Firefox tool's result ("3 fields masked on acme-supply.com"), as a
+// field to spread into tool_end. The extension puts that line in a content part of its own, so
+// only a whole part counts: a page can't write one into its own text.
+export function toolMasked(name, content) {
+  if (!String(name).startsWith("mcp__firefox__") || !Array.isArray(content)) return {};
+  const part = content.findLast((p) => p?.type === "text" && MASKED_LINE.test(p.text ?? ""));
+  return part ? { masked: part.text } : {};
+}
+
 export function summarizeToolUse(name, input) {
   const a = input && typeof input === "object" ? input : {};
   const fx = /^mcp__firefox__(.+)$/.exec(name);

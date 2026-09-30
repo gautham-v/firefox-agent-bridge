@@ -19,6 +19,9 @@ const SETTLE_TIMEOUT_MS = 5_000;
 const sessions = new Map();
 // tab id -> CSS pixels per screenshot pixel, from the tab's last screenshot
 const frameRatio = new Map();
+// Which fields are masked in what the agent reads and sees (README, "Redaction"). The host sends
+// the user's rules from ~/.firefox-agent-bridge/redact.json; until then, the defaults it writes there.
+let redactRules = { always: ["password", "cc-*", "one-time-code", "new-password", "current-password"], sites: {} };
 
 let port = null;
 
@@ -47,12 +50,28 @@ const control = createControl({
 function onRequest(msg) {
   if (msg.type?.startsWith("chat.")) return chatFromHost(msg);
   if (msg.type === "client") return control.clientEvent(msg);
+  if (msg.type === "redact") return setRedactRules(msg.rules);
   if (msg.type !== "call") return;
   control.handleCall(msg, runTool, async (tabId) => (await browser.tabs.get(tabId)).url);
 }
 
 const text = (t) => ({ type: "text", text: t });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function setRedactRules(rules) {
+  if (!Array.isArray(rules?.always) || !rules.sites || typeof rules.sites !== "object") return;
+  redactRules = { always: rules.always.filter((t) => typeof t === "string"), sites: rules.sites };
+}
+
+// "3 fields masked on acme-supply.com", in a content part of its own after the result, so the
+// sidebar can show it and a page can't write one into its own text.
+const maskedPart = ({ count, site }) => text(`${count} field${count === 1 ? "" : "s"} masked on ${site}`);
+
+// Page ops answer text, or { text, masked } when redaction hid something.
+function pageContent(result, extra = "") {
+  if (typeof result !== "object" || result === null) return [text(result + extra)];
+  return [text(result.text + extra), maskedPart(result.masked)];
+}
 
 // ---------------------------------------------------------------------------------------------
 // Session tab groups
@@ -325,13 +344,31 @@ function imageContent(dataUrl) {
   return { type: "image", data, mimeType };
 }
 
-// The on-page cursor is for the person watching; screenshots show the page without it.
-async function withoutCursor(tabId, capture) {
-  await browser.claudePage.call(tabId, "cursorVisible", { visible: false }).catch(() => {});
+// Screenshots show the page without the agent's cursor (it's for the person watching), and with
+// masked fields covered by labeled bars. Every frame of the tab, cross-origin ones included,
+// hides its cursor and draws its bars before the capture and takes them away after. If a frame
+// couldn't, nothing is captured. Answers the capture and what was masked, if anything.
+async function forCapture(tabId, capture) {
+  const undo = () => browser.claudePage.broadcast(tabId, "capture", { on: false }).catch(() => {});
+  let frames;
   try {
-    return await capture();
+    frames = await browser.claudePage.broadcast(tabId, "capture", { on: true, redact: redactRules });
+  } catch (e) {
+    await undo();
+    throw new Error(`Could not cover sensitive fields before the screenshot (${e.message}). Try again.`);
+  }
+  const failed = frames.find((f) => f?.error);
+  if (failed) {
+    await undo();
+    throw new Error(`Could not cover sensitive fields before the screenshot (${failed.error}). Try again.`);
+  }
+  try {
+    const shot = await capture();
+    const count = frames.reduce((n, f) => n + (f?.masked ?? 0), 0);
+    const site = (frames.find((f) => f?.top) ?? frames.find((f) => f?.site))?.site ?? "this page";
+    return { shot, masked: count ? { count, site } : null };
   } finally {
-    await browser.claudePage.call(tabId, "cursorVisible", { visible: true }).catch(() => {});
+    await undo();
   }
 }
 
@@ -339,11 +376,12 @@ async function screenshot(tabId, scale = 1) {
   const vp = await browser.claudePage.call(tabId, "viewport", {});
   const s = fitScale(vp.width, vp.height);
   frameRatio.set(tabId, 1 / s);
-  const dataUrl = await withoutCursor(tabId, () => browser.tabs.captureTab(tabId, { format: "jpeg", quality: 80, scale: s * scale }));
+  const { shot, masked } = await forCapture(tabId, () => browser.tabs.captureTab(tabId, { format: "jpeg", quality: 80, scale: s * scale }));
   const w = Math.round(vp.width * s);
   const h = Math.round(vp.height * s);
   const note = scale < 1 ? ` Image returned at ${Math.round(scale * 100)}% size; coordinates still use the full ${w}x${h} frame.` : "";
-  return [imageContent(dataUrl), text(`Screenshot of tab ${tabId} (${w}x${h}).${note}\n${vp.title}\n${vp.url}`)];
+  const out = [imageContent(shot), text(`Screenshot of tab ${tabId} (${w}x${h}).${note}\n${vp.title}\n${vp.url}`)];
+  return masked ? [...out, maskedPart(masked)] : out;
 }
 
 async function zoom(tabId, region, scale = 1) {
@@ -354,7 +392,7 @@ async function zoom(tabId, region, scale = 1) {
   const width = Math.max(1, x1 - x0);
   const height = Math.max(1, y1 - y0);
   const s = Math.min(vp.dpr * 2, SCREENSHOT_MAX_EDGE / Math.max(width, height)) * scale;
-  const dataUrl = await withoutCursor(tabId, () =>
+  const { shot, masked } = await forCapture(tabId, () =>
     browser.tabs.captureTab(tabId, {
       format: "jpeg",
       quality: 90,
@@ -362,7 +400,8 @@ async function zoom(tabId, region, scale = 1) {
       rect: { x: x0 + vp.scrollX, y: y0 + vp.scrollY, width, height },
     }),
   );
-  return [imageContent(dataUrl), text(`Zoomed region [${region.join(", ")}] of tab ${tabId}.`)];
+  const out = [imageContent(shot), text(`Zoomed region [${region.join(", ")}] of tab ${tabId}.`)];
+  return masked ? [...out, maskedPart(masked)] : out;
 }
 
 // CSS pixels per screenshot pixel. Before the first screenshot, it is the ratio a screenshot
@@ -409,7 +448,7 @@ async function openedTabsNote(tabId, since) {
 // ---------------------------------------------------------------------------------------------
 // Tools
 
-const page = (tabId, op, args) => browser.claudePage.call(tabId, op, args);
+const page = (tabId, op, args) => browser.claudePage.call(tabId, op, { ...args, redact: redactRules });
 
 async function computer(session, args) {
   const { action, tabId } = args;
@@ -431,7 +470,7 @@ async function computer(session, args) {
       const button = action === "right_click" ? 2 : 0;
       const since = Date.now();
       const result = await page(tabId, "click", { ...(await toCss(tabId, args.coordinate)), ref: args.ref, button, clickCount, modifiers: args.modifiers });
-      return [text(result + (await openedTabsNote(tabId, since)))];
+      return pageContent(result, await openedTabsNote(tabId, since));
     }
     case "hover":
       needsTarget();
@@ -506,23 +545,23 @@ async function runTool(session, tool, args, client) {
 
     case "read_page":
       await requireTab(session, args.tabId);
-      return [text(await page(args.tabId, "readPage", { filter: args.filter, depth: args.depth, maxChars: args.max_chars, refId: args.ref_id, frameScale: await frameScale(args.tabId) }))];
+      return pageContent(await page(args.tabId, "readPage", { filter: args.filter, depth: args.depth, maxChars: args.max_chars, refId: args.ref_id, frameScale: await frameScale(args.tabId) }));
 
     case "find":
       await requireTab(session, args.tabId);
-      return [text(await page(args.tabId, "find", { query: args.query, frameScale: await frameScale(args.tabId) }))];
+      return pageContent(await page(args.tabId, "find", { query: args.query, frameScale: await frameScale(args.tabId) }));
 
     case "get_page_text":
       await requireTab(session, args.tabId);
-      return [text(await page(args.tabId, "text", {}))];
+      return pageContent(await page(args.tabId, "text", {}));
 
     case "form_input":
       await requireTab(session, args.tabId);
-      return [text(await page(args.tabId, "formInput", { ref: args.ref, value: args.value }))];
+      return pageContent(await page(args.tabId, "formInput", { ref: args.ref, value: args.value }));
 
     case "javascript_tool":
       await requireTab(session, args.tabId);
-      return [text(await page(args.tabId, "evaluate", { code: args.text }))];
+      return pageContent(await page(args.tabId, "evaluate", { code: args.text }));
 
     case "file_upload":
       await requireTab(session, args.tabId);

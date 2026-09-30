@@ -1013,3 +1013,83 @@ test("choosing a recent chat opens the sidebar on it", async () => {
   await wait(300);
   assert.equal(p.of("state").at(-1).chatId, "h1");
 });
+
+// ---- Redaction
+
+// A session tab whose page answers viewport, and every frame's answer to "capture" from frames.
+async function captureEnv(frames) {
+  const env = await load();
+  await env.callTool("tabs_create_mcp");
+  const calls = [];
+  const broadcasts = [];
+  env.browser.claudePage.call = async (tabId, op, args) => {
+    calls.push({ op, args: plain(args) });
+    if (op === "viewport") return { width: 1000, height: 800, dpr: 2, scrollX: 0, scrollY: 0, title: "Checkout", url: "https://checkout.acme-supply.com/" };
+    return op === "textSize" ? 10 : "done";
+  };
+  env.browser.claudePage.broadcast = async (tabId, op, args) => {
+    broadcasts.push({ op, args: plain(args) });
+    return args.on ? frames : frames.map(() => ({ masked: 0 }));
+  };
+  env.browser.tabs.captureTab = async () => {
+    env.captured = (env.captured ?? 0) + 1;
+    return "data:image/jpeg;base64,AAAA";
+  };
+  return { ...env, calls, broadcasts };
+}
+
+test("a screenshot is taken with masked fields covered in every frame, and says how many on which site", async () => {
+  const env = await captureEnv([
+    { masked: 1, site: "acme-supply.com", top: true },
+    { masked: 2, site: "stripe.com", top: false },
+    null,
+  ]);
+  const r = await env.callTool("computer", { action: "screenshot", tabId: 2 });
+  const content = r.result.content;
+  assert.equal(content[0].type, "image");
+  assert.match(content[1].text, /^Screenshot of tab 2/);
+  assert.deepEqual(plain(content[2]), { type: "text", text: "3 fields masked on acme-supply.com" });
+  assert.deepEqual(env.broadcasts.map((b) => [b.op, b.args.on]), [["capture", true], ["capture", false]], "bars drawn before, taken away after");
+  assert.deepEqual(env.broadcasts[0].args.redact.always, ["password", "cc-*", "one-time-code", "new-password", "current-password"]);
+
+  const zoom = await env.callTool("computer", { action: "zoom", tabId: 2, region: [0, 0, 100, 100] });
+  assert.equal(zoom.result.content.at(-1).text, "3 fields masked on acme-supply.com");
+});
+
+test("nothing masked adds no line; a frame that couldn't cover its fields stops the screenshot", async () => {
+  const clean = await captureEnv([{ masked: 0, site: "example.com", top: true }]);
+  const r = await clean.callTool("computer", { action: "screenshot", tabId: 2 });
+  assert.equal(r.result.content.length, 2);
+
+  const env = await captureEnv([{ masked: 1, site: "acme-supply.com", top: true }, { error: "Actor destroyed" }]);
+  const bad = await env.callTool("computer", { action: "screenshot", tabId: 2 });
+  assert.equal(bad.result.isError, true);
+  assert.match(bad.result.content[0].text, /Could not cover sensitive fields before the screenshot \(Actor destroyed\)/);
+  assert.equal(env.captured, undefined, "nothing was captured");
+  assert.equal(env.broadcasts.at(-1).args.on, false, "the frames that did draw bars took them away");
+});
+
+test("the host's rules go to every page op, and a masked result gets its own line", async () => {
+  const env = await captureEnv([]);
+  const rules = { always: ["password"], sites: { "chase.com": [".account-number"] } };
+  await env.host({ type: "redact", rules });
+  env.browser.claudePage.call = async (tabId, op, args) => {
+    env.calls.push({ op, args: plain(args) });
+    if (op === "viewport") return { width: 1000, height: 800, dpr: 1, scrollX: 0, scrollY: 0 };
+    return { text: "Title: Accounts\n\ntext [redacted: account-number, filled]", masked: { count: 1, site: "chase.com" } };
+  };
+  const r = await env.callTool("get_page_text", { tabId: 2 });
+  assert.deepEqual(env.calls.find((c) => c.op === "text").args.redact, rules);
+  assert.deepEqual(plain(r.result.content), [
+    { type: "text", text: "Title: Accounts\n\ntext [redacted: account-number, filled]" },
+    { type: "text", text: "1 field masked on chase.com" },
+  ]);
+  for (const tool of ["read_page", "find", "form_input", "javascript_tool"]) {
+    const out = await env.callTool(tool, { tabId: 2, ref: "ref_1", value: "x", query: "q", text: "1" });
+    assert.equal(out.result.content.at(-1).text, "1 field masked on chase.com", tool);
+  }
+  // A malformed rules message leaves the rules as they were.
+  await env.host({ type: "redact", rules: { always: "password" } });
+  await env.callTool("get_page_text", { tabId: 2 });
+  assert.deepEqual(env.calls.findLast((c) => c.op === "text").args.redact, rules);
+});

@@ -142,7 +142,7 @@ Events (`chat.event`'s `event`):
 | `text_delta` | `messageId` (`<api message id>:<n>` for the nth text block), `text` |
 | `text` | `messageId` (same scheme), `text` (full text of a finished assistant text block) |
 | `tool_start` | `toolUseId`, `name` (e.g. `mcp__firefox__navigate`), `summary` (short, no typed text, form values, script source, key sequences or URL queries; `ToolSearch` is not reported), `tabId` (Firefox tools that name a tab; the steps card says "Using Firefox in <site>" from the latest one) |
-| `tool_end` | `toolUseId`, `ok`, `summary` (text only for failures, plus the first line of navigate and shell results; screenshots and page content never leave the host) |
+| `tool_end` | `toolUseId`, `ok`, `summary` (text only for failures, plus the first line of navigate and shell results; screenshots and page content never leave the host), `masked` (Firefox tools whose result masked sensitive fields: the extension's own content part, e.g. "3 fields masked on acme-supply.com"; the steps card shows the latest per site as a note with a lock) |
 | `permission` | `requestId`, `tool`, `summary` (what would run, see Permissions), `always` (whether Always allow is offered; absent means yes) |
 | `result` | `ok`, `durationMs`, `numTurns`, `error` (a short message when `ok` is false; every turn ends with one, including failed starts) |
 | `error` | `code`: `not_found` \| `auth` \| `limit` \| `spawn` \| `crashed`, `message`, `resetsAt` (epoch ms when a usage limit lifts and the engine said so, else null) |

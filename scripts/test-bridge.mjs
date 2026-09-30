@@ -134,6 +134,12 @@ try {
   await until("host socket", () => fs.existsSync(SOCKET));
   toHost({ type: "hello", version: "test" });
 
+  await test("hello gets the redaction rules, written with the defaults when there was no file", async () => {
+    const msg = await expectHost("redact rules", (m) => m.type === "redact");
+    assert.deepEqual(msg.rules, { always: ["password", "cc-*", "one-time-code", "new-password", "current-password"], sites: {} });
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(DIR, "redact.json"), "utf8")), msg.rules);
+  });
+
   const mcp = startMcp();
   let mcpClientId;
 
@@ -252,6 +258,21 @@ try {
     toHost({ id: call.id, result: textResult("hello from fake firefox") });
     assert.equal(await exited, 0);
     assert.match(stdout, /hello from fake firefox/);
+    await expectHost("ffctl disconnected", isDisconnected(ev.client.id));
+  });
+
+  await test("an edited redact.json reaches the extension before the next call", async () => {
+    fs.writeFileSync(path.join(DIR, "redact.json"), JSON.stringify({ always: ["password"], sites: { "www.chase.com": ".account-number" } }));
+    const proc = spawn(process.execPath, [path.join(ROOT, "scripts/ffctl.mjs"), "tabs_context_mcp", "{}", "sess-2"], { env, stdio: "ignore" });
+    children.push(proc);
+    const exited = new Promise((r) => proc.on("exit", r));
+    const ev = await expectHost("ffctl connected", isConnected("ffctl"));
+    const call = await expectHost("ffctl call", isCall("tabs_context_mcp"));
+    const msg = await expectHost("new redact rules", (m) => m.type === "redact");
+    assert.deepEqual(msg.rules, { always: ["password"], sites: { "chase.com": [".account-number"] } });
+    assert.ok(seen.indexOf(msg) < seen.indexOf(call), "the rules arrive before the call");
+    toHost({ id: call.id, result: textResult("ok") });
+    assert.equal(await exited, 0);
     await expectHost("ffctl disconnected", isDisconnected(ev.client.id));
   });
 
