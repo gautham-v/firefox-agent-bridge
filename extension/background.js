@@ -744,6 +744,9 @@ async function readPageAll(tabId, args) {
 // hrefs clipped.
 const FIND_MAX = 8;
 const FIND_KEEP = 0.5; // of the best score
+// A query that names a role ("button") keeps up to this many of the elements with that role
+// (roleHit, from the actor), when prose that mentions the word outscores them all.
+const FIND_ROLE_EXTRA = 3;
 const FIND_NAME_MAX = 50;
 const FIND_HREF_MAX = 50;
 
@@ -771,14 +774,23 @@ async function findAll(tabId, query) {
   const frames = await browser.claudePage.broadcast(tabId, "find", { query, frameScale: scale, origin, redact: redactRules });
   if (frames[0]?.error) throw new Error(frames[0].error);
   const answered = frames.filter((f) => Array.isArray(f?.matches));
-  const scored = answered.flatMap((f) => f.matches).sort((a, b) => b.score - a.score);
+  // The same line twice is the same element (an actor from before the restart can answer it so).
+  const seen = new Set();
+  const scored = answered
+    .flatMap((f) => f.matches)
+    .sort((a, b) => b.score - a.score)
+    .filter((m) => !seen.has(m.line) && seen.add(m.line));
   const best = scored.length ? scored[0].score : 0;
   const floor = Math.max(1, best * FIND_KEEP);
   const close = scored.filter((m) => m.score >= floor);
-  if (!close.length) return `No elements matched "${query}". Try read_page with filter "interactive".`;
-  const shown = close.slice(0, FIND_MAX);
+  let shown = close.slice(0, FIND_MAX);
+  if (!shown.some((m) => m.roleHit)) {
+    const extra = scored.filter((m) => m.roleHit && !shown.includes(m)).slice(0, FIND_ROLE_EXTRA);
+    if (extra.length) shown = [...shown.slice(0, FIND_MAX - extra.length), ...extra];
+  }
+  if (!shown.length) return `No elements matched "${query}". Try read_page with filter "interactive".`;
   // Behind the shown ones: the rest of the close matches here, and each frame's own that it left out.
-  const more = close.length - shown.length + answered.reduce((n, f) => n + (f.rest ?? []).filter((s) => s >= floor).length, 0);
+  const more = close.filter((m) => !shown.includes(m)).length + answered.reduce((n, f) => n + (f.rest ?? []).filter((s) => s >= floor).length, 0);
   const out = `Found ${shown.length} for "${query}" (screenshot coordinates; if off-screen, computer left_click its ref):\n${shown.map((m) => clipFindLine(m.line)).join("\n")}${more ? `\n(+${more} more, refine the query)` : ""}`;
   const masked = answered.reduce((m, f) => addMasked(m, f.masked), null);
   return masked ? { text: out, masked } : out;

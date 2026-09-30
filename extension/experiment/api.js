@@ -8,7 +8,7 @@ const { ExtensionError } = ExtensionUtils;
 
 const ACTOR = "ClaudePage";
 const RES_HOST = "firefox-agent-bridge";
-const MODULES = ["actor-child.sys.mjs", "actor-parent.sys.mjs", "focus.sys.mjs", "redact.sys.mjs"];
+const MODULES = ["actor-child.sys.mjs", "actor-parent.sys.mjs", "find-rank.sys.mjs", "focus.sys.mjs", "redact.sys.mjs"];
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const MAX_FRAME_HOPS = 8;
 // Tab group state icons: a stylesheet added to every browser window draws the icon from this
