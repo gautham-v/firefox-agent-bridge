@@ -1,0 +1,8 @@
+# Secret scanning: the redaction tests use made-up passwords and a dummy JWT on purpose, to check
+# that the bridge masks them. None of them is a real credential.
+version: 2
+secret:
+  ignored_paths:
+    - "extension/test/**"
+    - "host/test/**"
+    - "scripts/test-firefox.mjs"
