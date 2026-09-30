@@ -9,7 +9,9 @@ Unofficial. Not affiliated with Anthropic, OpenAI or Mozilla.
 ![Asking Claude in the Firefox sidebar to draw a timeline of Pavement's albums; it opens Excalidraw in its tab group and draws the boxes, labels and arrows with the mouse](docs/demo.gif)
 
 - A [chat panel](#chat-panel) in Firefox's sidebar: click the toolbar button, ask, and the agent
-  works in the tab you're on. Drag more tabs into its group and it sees those too.
+  works in the tab you're on. Drag more tabs into its group and it sees those too. Tasks can also
+  start from the [address bar](#address-bar) or [your phone](#start-a-task-from-your-phone), and
+  you can [point at elements](#point-and-ask) or [teach it a task](#teach) by doing it.
 - Tabs live in a per-session tab group named after the client (**Claude**, **Codex**, ...; a
   second session from the same client gets "Codex 2") and stay in the background. Every agent
   group is grey, with a [state icon](#tab-group-icons) in its label. Nothing takes
@@ -63,7 +65,7 @@ These have the same names and arguments as Claude in Chrome: `tabs_context_mcp`,
 as `mcp__firefox__<name>`; Codex lists them under `mcp__firefox`.
 
 `replay_steps {path, inputs, tabId}` is this bridge's own: it runs a `replay.json` saved by
-[Teach](#chat-panel) step by step without the model, and at the first step that doesn't match it
+[Teach](#teach) step by step without the model, and at the first step that doesn't match it
 stops and returns the step, what was expected, the recorded screenshot of it and the page's
 interactive elements, so the agent finishes from there.
 
@@ -88,29 +90,10 @@ Nothing is billed beyond your existing subscription, and nothing runs until you 
   ...) and the agent works in that group. Add tabs with the composer's + menu or by dragging them
   into the group; each message tells the agent which tabs are in it. If the viewed tab is pinned or
   already belongs to another chat, the chat starts with a blank tab instead.
-- **Composer.** The + menu attaches files or photos (paste and drop work too), adds a tab, and
-  lists your skills, connectors and plugins. The model menu picks the
-  engine, model and effort. Enter sends; while a task runs, Stop interrupts it, and a message you
+- **Composer.** The + menu attaches files or photos (paste and drop work too), adds a tab, lists
+  your connectors and plugins, and lists your [skills](#skills). The model menu picks the engine,
+  model and effort. Enter sends; while a task runs, Stop interrupts it, and a message you
   send instead is added to the task.
-- **Agent cam.** While a task runs, the steps card shows a live thumbnail of the tab the agent last
-  acted on, with its cursor, refreshed about twice a second; the button in its corner switches to
-  that tab. It pauses while the panel is hidden or the card is scrolled out of view, and goes away
-  when the task ends.
-- **Skills.** Typing `/` at the start of the composer opens a menu of your skills (Codex's own
-  skills when Codex is the engine). Skills for the site you're on come first: those whose
-  `sites:` frontmatter names it (`sites: linkedin.com, greenhouse.io`), or, with no `sites:`,
-  whose name or description mentions the site's main label. Arrow keys and Enter or Tab pick one,
-  Esc closes. The pick becomes a chip in the composer and in your message, and sending runs it on
-  the current tab: Claude Code gets `/skill-name <your text>`, Codex is told to read the skill's
-  file. The steps card shows "Loaded skill <name>".
-- **Point and ask.** While the panel is open, hold Alt (⌥ on a Mac) over the page you're viewing:
-  the element under the pointer gets an outline and a label with its role and name. Alt+click
-  attaches it to the composer instead of clicking it: a crop of the element, plus its role, name,
-  visible text and a ref the agent can use with `computer`, `read_page`, `find` and `form_input`.
-  The tab joins the chat's group if it isn't in it. Esc or letting go of Alt clears the outline.
-  The agent points back by linking an element as `[label](ref:ref_12)`, which shows as a purple
-  chip; hovering it outlines the element in its tab, and clicking it switches to the tab and
-  scrolls the element into view. Both work inside frames.
 - **Permissions.** Firefox tools run without asking. Anything else, such as a shell command, a file
   edit, a read outside the chat folder or a web fetch, shows an Allow once / Always allow in this
   chat / Deny card with what it would do, and waits. Always allow covers the exact command (or the
@@ -118,33 +101,70 @@ Nothing is billed beyond your existing subscription, and nothing runs until you 
   more. If the sidebar is closed while a card waits, the toolbar button shows a `!`. Codex chats
   run in a read-only sandbox, since `codex exec` can't ask; it can still read files, so it is the
   less contained engine.
-- **Teach.** **Teach Claude a task** in the + menu records you doing a task in the tab you're on
-  (it isn't grouped): each click, field you type in, select and Enter is a step, found again later
-  by its role and accessible name, with a CSS selector and nearby text as fallbacks, and a small
-  screenshot. Values typed into password and other secret fields are never recorded; the step
-  says "from Keychain" or "ask". Stop and draft sends the steps to the chat's engine, which drafts
-  a skill: name, trigger, inputs (the typed values that change between runs), checks. Save writes
-  `~/.claude/skills/<name>/SKILL.md` and `replay.json`; with "Replay without Claude when steps
-  match" on, the skill runs `replay_steps` first. Try it once runs the draft in a tab of the
-  agent's own. The formats are in [docs/teach.md](docs/teach.md).
 - **History.** The clock button lists recent tasks: chats from the panel, and Claude Code sessions
   from your terminal that used the Firefox tools in the last 14 days. Opening one loads its
   transcript and the next message resumes it. Claude Code chats are ordinary sessions in
   `~/.claude/projects/` (their working folder is `~/.firefox-agent-bridge/chat/`), and the panel
   keeps only its own index in `~/.firefox-agent-bridge/chat/chats.json`; Codex chats are kept in
   Codex's own history. Attachments go to `~/.firefox-agent-bridge/chat/uploads/`.
-- **Address bar.** Type `c` and a space, then a task: Enter starts it in a new tab group (with the
-  engine, model and effort the panel last used) without opening the sidebar or leaving your tab.
-  "Ask about this page" starts it with the viewed tab in the group, and the two most recent chats
-  are offered to resume in the sidebar. The group label shows Working and Done as usual; if the
-  task finishes while you're elsewhere, one notification ("Claude 2 finished" and the first line
-  of the reply) takes you to the group when clicked.
 - **Errors.** A usage limit, a missing sign-in and a missing `claude` or `codex` binary each show
   a banner. The host finds the binaries from `CLAUDE_BIN` / `CODEX_BIN` (baked into its launcher
   by `scripts/install.sh`), then common install paths and your login shell.
 
 The panel's protocol and the host's process handling are described in
 [docs/chat-panel.md](docs/chat-panel.md). Connector toggles and voice input aren't built.
+
+### Skills
+
+Typing `/` at the start of the composer opens a menu of your skills (Codex's own skills when Codex
+is the engine). Skills for the site you're on come first: those whose `sites:` frontmatter names
+it (`sites: linkedin.com, greenhouse.io`), or, with no `sites:`, whose name or description
+mentions the site's main label. Arrow keys and Enter or Tab pick one, Esc closes; the + menu's
+skills list picks one too. The pick becomes a chip in the composer and in your message, and
+sending runs it on the current tab: Claude Code gets `/skill-name <your text>`, Codex is told to
+read the skill's file. The steps card shows "Loaded skill <name>".
+
+### Point and ask
+
+While the panel is open, hold Alt (⌥ on a Mac) over the page you're viewing: the element under
+the pointer gets an outline and a label with its role and name. Alt+click attaches it to the
+composer instead of clicking it: a crop of the element (with [masked fields](#redaction)
+covered), plus its role, name, visible text and a ref the agent can use with `computer`,
+`read_page`, `find` and `form_input`. The tab joins the chat's group if it isn't in it. Esc or
+letting go of Alt clears the outline.
+
+The agent points back by linking an element as `[label](ref:ref_12)`, which shows as a purple
+chip; hovering it outlines the element in its tab, and clicking it switches to the tab and
+scrolls the element into view. Both directions work inside frames.
+
+### Agent cam
+
+While a task runs, the steps card shows a live thumbnail of the tab the agent last acted on, with
+its cursor, refreshed about twice a second; the button in its corner switches to that tab. It
+pauses while the panel is hidden or the card is scrolled out of view, and goes away when the task
+ends. The thumbnail stays in the sidebar and never reaches the agent, so it isn't redacted.
+
+### Teach
+
+**Teach Claude a task** in the + menu records you doing a task in the tab you're on (it isn't
+grouped): each click, field you type in, select and Enter is a step, found again later by its role
+and accessible name, with a CSS selector and nearby text as fallbacks, and a small screenshot
+(with [masked fields](#redaction) covered). Values typed into password and other secret fields
+are never recorded; the step says "from Keychain" or "ask". Stop and draft sends the steps to the
+chat's engine, which drafts a skill: name, trigger, inputs (the typed values that change between
+runs), checks. Save writes `~/.claude/skills/<name>/SKILL.md` and `replay.json` (Codex:
+`~/.codex/skills/`); with "Replay without Claude when steps match" on, the skill runs
+[`replay_steps`](#tools) first. Try it once runs the draft in a tab of the agent's own. The
+formats are in [docs/teach.md](docs/teach.md).
+
+### Address bar
+
+Type `c` and a space, then a task: Enter starts it in a new tab group (with the engine, model and
+effort the panel last used) without opening the sidebar or leaving your tab. "Ask about this page"
+starts it with the viewed tab in the group, and the two most recent chats are offered to resume in
+the sidebar. The group label shows Working and Done as usual; if the task finishes while you're
+elsewhere, one notification ("Claude 2 finished" and the first line of the reply) takes you to the
+group when clicked.
 
 ## Tab group icons
 
@@ -236,7 +256,8 @@ Paused and blocked calls fail with a message telling the agent to ask you, not t
 
 Sensitive fields are masked in what the agent sees and reads, before it leaves Firefox:
 
-- **Screenshots.** Before `computer` takes a screenshot or zoom, every frame of the tab, including
+- **Screenshots.** Before `computer` takes a screenshot or zoom (and before the crop of a
+  [pointed-at](#point-and-ask) element or a [Teach](#teach) step's screenshot), every frame of the tab, including
   cross-origin iframes such as a payment provider's card fields, covers each sensitive field with
   a solid bar labeled with what it is and whether it's filled ("card number · filled"). The bars
   are drawn as anonymous content, like the cursor, so the page can't see or remove them, and
@@ -359,7 +380,6 @@ Codex can run on either of these instead:
     OpenAI account.
   - The last two save screenshots to `SHOTS_DIR` (default `<tmpdir>/firefox-agent-bridge-shots`);
     `KEEP=1` keeps their temp dir.
-- Redaction rules are in `~/.firefox-agent-bridge/redact.json`.
 - Logs are in `~/.firefox-agent-bridge/host.log`. Screenshots saved with `save_to_disk` go to
   `~/.firefox-agent-bridge/screenshots/`.
 
