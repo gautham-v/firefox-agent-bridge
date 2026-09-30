@@ -2259,6 +2259,13 @@ function textSize(doc) {
   return (doc.body?.innerText ?? "").length;
 }
 
+// How far the frame's document has loaded, for navigate's wait "interactive". id is its inner
+// window's, which changes when a new document commits, so the page a navigation is leaving isn't
+// taken for the one it goes to.
+function readyState(doc) {
+  return { id: doc.defaultView?.windowGlobalChild?.innerWindowId ?? null, state: doc.readyState, title: doc.title };
+}
+
 // The viewport's size in CSS pixels. innerWidth/innerHeight have read 0x0 in a session tab while
 // Firefox's window was occluded (on another macOS Space), likely a size the page hadn't taken yet
 // because it wasn't getting refresh ticks. The scrolling element's client size (the viewport
@@ -2469,6 +2476,7 @@ function stopConsole(id) {
 const OPS = {
   viewport,
   textSize,
+  readyState,
   cursorVisible,
   capture,
   maskRects,

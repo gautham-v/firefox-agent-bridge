@@ -400,6 +400,51 @@ async function waitForLoad(tabId) {
   return browser.tabs.get(tabId);
 }
 
+// navigate with wait "interactive": done once the new document is parsed (readyState interactive
+// or complete) and has stayed the tab's document for INTERACTIVE_QUIET_MS, so a redirect a script
+// starts right away is followed, instead of waiting for the load event and the text to settle.
+// Scripts may still be adding content, and images loading, when it returns.
+const INTERACTIVE_POLL_MS = 50;
+const INTERACTIVE_QUIET_MS = 300;
+// As waitForLoad's first sleep: a navigation that leaves the same document in place (a #hash, or
+// back with no history) is taken as done once the tab says complete this long after it started.
+const COMMIT_GRACE_MS = 250;
+
+// The top frame's document: { id, state, title }; null mid-navigation (no window to ask), and
+// undefined from an actor from before the restart, which has no readyState op.
+async function docState(tabId) {
+  try {
+    return await browser.claudePage.call(tabId, "readyState", {});
+  } catch (e) {
+    return /Unknown op/.test(e?.message) ? undefined : null;
+  }
+}
+
+// `before` is docState from before the navigation started. Answers { tab, title, parsed }, or
+// null when the page can't say how far it has loaded (the caller waits for the full load then).
+async function waitForInteractive(tabId, before, started) {
+  const deadline = started + LOAD_TIMEOUT_MS;
+  let watching = null; // { id, since }: the parsed document being watched for quiet
+  let st = null;
+  while (Date.now() < deadline) {
+    st = await docState(tabId);
+    if (st === undefined) return null;
+    const now = Date.now();
+    let fresh = !!st && st.state !== "loading";
+    if (fresh && before && st.id === before.id) {
+      fresh = now - started >= COMMIT_GRACE_MS && (await browser.tabs.get(tabId)).status === "complete";
+    } else if (fresh && !before) {
+      fresh = now - started >= COMMIT_GRACE_MS;
+    }
+    if (!fresh) watching = null;
+    else if (watching?.id !== st.id) watching = { id: st.id, since: now };
+    else if (now - watching.since >= INTERACTIVE_QUIET_MS) break;
+    await sleep(INTERACTIVE_POLL_MS);
+  }
+  const tab = await browser.tabs.get(tabId);
+  return { tab, title: st?.title || tab.title, parsed: !!watching };
+}
+
 // ---------------------------------------------------------------------------------------------
 // Screenshots. The image is scaled so its long edge and pixel count stay inside what the model
 // sees without resizing; coordinates the agent reads off it are mapped back to CSS pixels here.
@@ -626,12 +671,14 @@ async function toCss(tabId, coordinate) {
 const frameScale = async (tabId) => 1 / (await ratioFor(tabId));
 
 // ---------------------------------------------------------------------------------------------
-// Tabs opened by a session tab (target=_blank, window.open), reported back after clicks. A tab a
-// click opens is created at once but reaches onCreated a moment later, so a click waits up to
-// OPEN_GRACE_MS for one, or OPEN_WAIT_MS when it was on a link or form that targets a new tab,
-// and goes on as soon as one arrives.
+// Tabs opened by a session tab (target=_blank, window.open), reported back after clicks. A click
+// waits only when it opened one: window.open has made its tab before the click's answer comes
+// back, so tabs.query already lists it (openerTabs), and a link or form that targets a new tab
+// opens one just after (the page says so, result.opens). onCreated, which records the tab in
+// openedBy, sees it a moment later; the click waits up to OPEN_WAIT_MS for that, and goes on as
+// soon as it arrives. A click that opened nothing answers at once, so keys sent right after it
+// aren't held up; a tab a script opens later still joins the group, unreported.
 
-const OPEN_GRACE_MS = 100;
 const OPEN_WAIT_MS = 500;
 const openedBy = new Map(); // opener tab id -> [{ tabId, at }]
 const openWaiters = new Map(); // opener tab id -> Set of callbacks waiting for a tab it opens
@@ -655,9 +702,14 @@ function untilTabOpened(tabId, ms) {
   });
 }
 
-async function openedTabsNote(tabId, since, wait = OPEN_GRACE_MS) {
+// The ids of the tabs this tab opened (openerTabId), in every window.
+async function openerTabs(tabId) {
+  return new Set((await browser.tabs.query({})).filter((t) => t.openerTabId === tabId).map((t) => t.id));
+}
+
+async function openedTabsNote(tabId, since) {
   const opened = () => (openedBy.get(tabId) ?? []).filter((o) => o.at >= since);
-  if (!opened().length) await untilTabOpened(tabId, wait);
+  if (!opened().length) await untilTabOpened(tabId, OPEN_WAIT_MS);
   const fresh = opened();
   if (!fresh.length) return "";
   const notes = [];
@@ -862,8 +914,10 @@ async function computer(session, args) {
       const clickCount = { double_click: 2, triple_click: 3 }[action] ?? 1;
       const button = action === "right_click" ? 2 : 0;
       const since = Date.now();
-      const result = await page(tabId, "click", { ...(await toCss(tabId, args.coordinate)), ref: args.ref, button, clickCount, modifiers: args.modifiers, animate });
-      return pageContent(result, await openedTabsNote(tabId, since, result?.opens ? OPEN_WAIT_MS : OPEN_GRACE_MS));
+      const [point, before] = await Promise.all([toCss(tabId, args.coordinate), openerTabs(tabId)]);
+      const result = await page(tabId, "click", { ...point, ref: args.ref, button, clickCount, modifiers: args.modifiers, animate });
+      const opened = result?.opens || [...(await openerTabs(tabId))].some((id) => !before.has(id));
+      return pageContent(result, opened ? await openedTabsNote(tabId, since) : "");
     }
     case "hover":
       needsTarget();
@@ -928,14 +982,22 @@ async function runTool(session, tool, args, client) {
         listTabs = true;
       }
       await requireTab(session, tabId);
+      const { wait = "load" } = args;
+      if (wait !== "load" && wait !== "interactive") throw new Error('wait must be "load" or "interactive".');
+      const started = Date.now();
+      const before = wait === "interactive" ? await docState(tabId) : undefined;
       if (url === "back") await browser.tabs.goBack(tabId);
       else if (url === "forward") await browser.tabs.goForward(tabId);
       else {
         if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) url = `https://${url}`;
         await browser.tabs.update(tabId, { url });
       }
-      const tab = await waitForLoad(tabId);
-      let out = `Tab ${tabId}: ${tab.url}\nTitle: ${tab.title}${tab.status !== "complete" ? "\n(still loading after 30s)" : ""}`;
+      // An actor from before the restart can't tell; the full load is waited for then.
+      const early = before === undefined ? null : await waitForInteractive(tabId, before, started);
+      const tab = early?.tab ?? (await waitForLoad(tabId));
+      let out = `Tab ${tabId}: ${tab.url}\nTitle: ${early?.title ?? tab.title}`;
+      if (early ? !early.parsed : tab.status !== "complete") out += "\n(still loading after 30s)";
+      else if (tab.status !== "complete") out += "\n(returned once the page was parsed; it is still loading, so content its scripts add may be missing)";
       if (created) out += `\n${createdNote(created)}`;
       if (listTabs) out += `\n\nThis session's tabs:\n${JSON.stringify(await tabContext(session), null, 2)}`;
       return [text(out)];

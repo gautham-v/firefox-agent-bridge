@@ -2003,6 +2003,101 @@ test("navigate without a tabId says when it opened the session's first tab", asy
   assert.match(again, /This session's tabs:/, "the tab list is still appended");
 });
 
+// ---- navigate wait "interactive"
+
+// A session tab (id 2) that goes to `status` when navigated. `doc(ms)` is what its top frame's
+// readyState op answers `ms` after the navigation started (-1 before it): a document, null, or
+// an Error to throw.
+async function navEnv(doc, { status = "loading" } = {}) {
+  const env = await load();
+  await env.callTool("tabs_create_mcp");
+  const ops = [];
+  let navAt = null;
+  env.browser.tabs.update = async (id, props) => {
+    navAt = Date.now();
+    return Object.assign(env.browser.tabsMap.get(id), props, { status, title: "tab title" });
+  };
+  env.browser.claudePage.call = async (tabId, op) => {
+    ops.push(op);
+    if (op === "textSize") return 10;
+    if (op !== "readyState") return "done";
+    const d = doc(navAt == null ? -1 : Date.now() - navAt);
+    if (d instanceof Error) throw d;
+    return d;
+  };
+  const nav = async (args) => {
+    const t0 = Date.now();
+    const r = await env.callTool("navigate", { tabId: 2, url: "https://b.example/", ...args }, "s1", undefined, 4000);
+    return { text: r.result.content[0].text, isError: r.result.isError, took: Date.now() - t0 };
+  };
+  return { ...env, ops, nav };
+}
+
+const OLD = { id: 1, state: "complete", title: "Old page" };
+// The old page stays until 150ms, nothing answers while the new one commits, and the new one is
+// parsed at 250ms.
+const loads = (ms) => (ms < 150 ? OLD : ms < 200 ? null : ms < 250 ? { id: 2, state: "loading", title: "" } : { id: 2, state: "interactive", title: "New page" });
+
+test("navigate without wait is unchanged: it waits for the load and the text to settle", async () => {
+  const env = await navEnv(loads, { status: "complete" });
+  const { text, took } = await env.nav({});
+  assert.equal(text, "Tab 2: https://b.example/\nTitle: tab title");
+  assert.ok(!env.ops.includes("readyState"), "the page isn't asked for its readyState");
+  assert.ok(env.ops.filter((op) => op === "textSize").length >= 3);
+  assert.ok(took >= 1200, `took ${took}ms`);
+});
+
+test('navigate wait "interactive" answers once the new page is parsed and quiet, with its URL and title', async () => {
+  const env = await navEnv(loads);
+  const { text, took } = await env.nav({ wait: "interactive" });
+  assert.equal(text, "Tab 2: https://b.example/\nTitle: New page\n(returned once the page was parsed; it is still loading, so content its scripts add may be missing)");
+  assert.ok(took >= 250 + 300 && took < 900, `took ${took}ms`);
+  assert.ok(!env.ops.includes("textSize"), "the text isn't waited on");
+});
+
+test('navigate wait "interactive" on a page that has loaded by then adds no note', async () => {
+  const env = await navEnv((ms) => (ms < 100 ? OLD : { id: 2, state: "complete", title: "Done" }), { status: "complete" });
+  const { text } = await env.nav({ wait: "interactive" });
+  assert.equal(text, "Tab 2: https://b.example/\nTitle: Done");
+});
+
+test('navigate wait "interactive" follows a redirect that commits in the quiet period', async () => {
+  const env = await navEnv((ms) => (ms < 300 ? loads(ms) : { id: 3, state: "interactive", title: "Signed in" }));
+  const { text, took } = await env.nav({ wait: "interactive" });
+  assert.match(text, /^Tab 2: https:\/\/b\.example\/\nTitle: Signed in\n/);
+  assert.ok(took >= 300 + 300, `took ${took}ms`);
+});
+
+test('navigate wait "interactive" doesn\'t take the page it is leaving for the new one', async () => {
+  // The old page is still there, parsed, while the tab loads the next one.
+  const env = await navEnv((ms) => (ms < 700 ? OLD : { id: 2, state: "interactive", title: "Slow server" }));
+  const { text, took } = await env.nav({ wait: "interactive" });
+  assert.match(text, /\nTitle: Slow server\n/);
+  assert.ok(took >= 700 + 300, `took ${took}ms`);
+});
+
+test('navigate wait "interactive" to the same document (a #hash) ends once the tab says complete', async () => {
+  const env = await navEnv(() => OLD, { status: "complete" });
+  const { text, took } = await env.nav({ wait: "interactive", url: "https://b.example/#part" });
+  assert.equal(text, "Tab 2: https://b.example/#part\nTitle: Old page");
+  assert.ok(took >= 250 + 300 && took < 900, `took ${took}ms`);
+});
+
+test('navigate wait "interactive" with an actor from before the restart waits for the full load', async () => {
+  const env = await navEnv(() => new Error("Unknown op readyState"), { status: "complete" });
+  const { text, took } = await env.nav({ wait: "interactive" });
+  assert.equal(text, "Tab 2: https://b.example/\nTitle: tab title");
+  assert.ok(env.ops.filter((op) => op === "textSize").length >= 3);
+  assert.ok(took >= 1200, `took ${took}ms`);
+});
+
+test("navigate rejects a wait it doesn't know", async () => {
+  const env = await navEnv(loads);
+  const { text, isError } = await env.nav({ wait: "networkidle" });
+  assert.equal(isError, true);
+  assert.match(text, /wait must be "load" or "interactive"/);
+});
+
 test("key and type answer where the keys went, with a masked line when the field is masked", async () => {
   const env = await framesEnv();
   env.browser.claudePage.call = async (tabId, op) => {
@@ -2032,29 +2127,51 @@ async function clickEnv({ answer = 'Clicked button "Go"', onClick } = {}) {
     }
     return op === "textSize" ? 10 : "done";
   };
-  // The page in tab 2 opens tab 3 after `ms`.
-  const openAfter = (ms) =>
-    setTimeout(() => {
-      const t3 = { id: 3, windowId: 10, groupId: -1, active: false, openerTabId: 2, url: "https://x.example/new", status: "complete", title: "New" };
-      env.browser.tabsMap.set(3, t3);
-      env.browser.tabs.onCreated.fire({ ...t3 });
-    }, ms);
+  // The page in tab 2 opens tab 3: the tab exists (tabs.query lists it) after `made` ms, as a
+  // tab window.open made does before the click answers, and onCreated sees it after `seen`.
+  const openAfter = (seen, made = seen) => {
+    const t3 = { id: 3, windowId: 10, groupId: -1, active: false, openerTabId: 2, url: "https://x.example/new", status: "complete", title: "New" };
+    const make = () => env.browser.tabsMap.set(3, t3);
+    if (made <= 0) make();
+    else setTimeout(make, made);
+    setTimeout(() => env.browser.tabs.onCreated.fire({ ...t3 }), seen);
+  };
   return { ...env, calls, openAfter };
 }
 
-test("a click that opens no tab answers after a short grace period, not half a second", async () => {
+test("a click that opens no tab answers at once, so keys right after it aren't held up", async () => {
   const env = await clickEnv();
   const t0 = Date.now();
   const r = await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] });
+  await env.callTool("computer", { action: "key", tabId: 2, text: "Tab" });
   const took = Date.now() - t0;
   assert.equal(r.result.content[0].text, 'Clicked button "Go"');
-  assert.ok(took < 300, `took ${took}ms`);
+  assert.ok(took < 95, `click and key took ${took}ms`);
 });
 
-test("a click that opens a tab within the grace period names it", async () => {
-  const env = await clickEnv({ onClick: () => env.openAfter(40) });
+test("a click whose page opened a tab (window.open) waits for onCreated and names it", async () => {
+  const env = await clickEnv({ onClick: () => env.openAfter(40, 0) });
   const r = await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] }, "s1", undefined, 4000);
   assert.match(r.result.content[0].text, /^Clicked button "Go"\nThe click opened a new tab in this session's group: tab 3: https:\/\/x\.example\/new \(New\)$/);
+});
+
+test("a tab the page opens after the click answered isn't waited for, but still joins the group", async () => {
+  const env = await clickEnv({ onClick: () => env.openAfter(40) });
+  const t0 = Date.now();
+  const r = await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] });
+  assert.ok(Date.now() - t0 < 95, `took ${Date.now() - t0}ms`);
+  assert.equal(r.result.content[0].text, 'Clicked button "Go"');
+  await wait(100);
+  assert.equal(env.browser.tabsMap.get(3).groupId, env.browser.tabsMap.get(2).groupId);
+});
+
+test("a tab the page opened before the click doesn't make the click wait", async () => {
+  const env = await clickEnv();
+  env.browser.tabsMap.set(3, { id: 3, windowId: 10, groupId: -1, active: false, openerTabId: 2, url: "https://x.example/old", status: "complete", title: "Old" });
+  const t0 = Date.now();
+  const r = await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] });
+  assert.ok(Date.now() - t0 < 95, `took ${Date.now() - t0}ms`);
+  assert.equal(r.result.content[0].text, 'Clicked button "Go"');
 });
 
 test("a click on a link that targets a new tab waits longer for it", async () => {

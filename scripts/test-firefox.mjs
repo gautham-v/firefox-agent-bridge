@@ -35,6 +35,7 @@ const PAGE_HTML = `<!doctype html>
   #color { position: absolute; left: 480px; top: 120px; }
   #blank { position: absolute; left: 40px; top: 330px; }
   #upload { position: absolute; left: 240px; top: 330px; }
+  #pop { position: absolute; left: 40px; top: 370px; }
   #tall { position: absolute; top: 0; left: 0; width: 1px; height: 3000px; }
 </style></head>
 <body>
@@ -47,6 +48,7 @@ const PAGE_HTML = `<!doctype html>
 <iframe id="frame" src="${FRAME}/frame"></iframe>
 <a id="blank" href="/other" target="_blank">Open other page</a>
 <input id="upload" type="file" aria-label="Resume file">
+<button id="pop" onclick="window.open('/other')">Pop up other page</button>
 <div id="tall"></div>
 <script>
   window.clicks = [];
@@ -61,6 +63,10 @@ const PAGE_HTML = `<!doctype html>
 </body></html>`;
 
 const OTHER_HTML = `<!doctype html><title>Other page</title><p>Opened by target=_blank</p>`;
+
+// For navigate's wait "interactive": parsed at once, but its image holds the load event for 3s.
+const SLOW_HTML = `<!doctype html><title>Slow page</title><p>Parsed early</p><img src="/slow.png">`;
+const slowImage = (req, res) => setTimeout(() => res.writeHead(404).end(), 3000);
 
 // For the devtools tool: messages and a failed request while the page loads, before any call.
 const DEVTOOLS_HTML = `<!doctype html><title>Devtools page</title>
@@ -123,7 +129,7 @@ async function screenshotScale(client, tabId, file) {
 let mn;
 let failed = false;
 try {
-  await h.serve(PAGE_PORT, { "/": PAGE_HTML, "/other": OTHER_HTML, "/devtools": DEVTOOLS_HTML });
+  await h.serve(PAGE_PORT, { "/": PAGE_HTML, "/other": OTHER_HTML, "/devtools": DEVTOOLS_HTML, "/slow": SLOW_HTML, "/slow.png": slowImage });
   await h.serve(FRAME_PORT, { "/frame": FRAME_HTML });
   const UPLOAD = path.join(h.TMP, "upload-test.txt");
   fs.writeFileSync(UPLOAD, "upload body 123\n");
@@ -312,6 +318,28 @@ try {
     assert.deepEqual(ctx.availableTabs.map((t) => t.tabId).sort(), [tab, opened].sort());
     assert.equal(await mn.chrome("return gBrowser.selectedTab.label"), before, "focus went back to the user's tab");
     await agent.ok("tabs_close_mcp", { tabId: opened });
+  });
+
+  await h.step("a button that calls window.open reports the tab it opened; a plain click doesn't wait", async () => {
+    const r = await agent.ok("computer", { action: "left_click", tabId: tab, coordinate: await centerOf(agent, tab, "#pop", scale) });
+    const opened = Number(r.text.match(/opened a new tab in this session's group: tab (\d+)/)?.[1]);
+    assert.ok(opened, r.text);
+    assert.match(r.text, /\/other \(Other page\)/);
+    await agent.ok("tabs_close_mcp", { tabId: opened });
+    const at = await centerOf(agent, tab, "#btn", scale);
+    const t0 = Date.now();
+    await agent.ok("computer", { action: "left_click", tabId: tab, coordinate: at });
+    assert.ok(Date.now() - t0 < 100, `a click that opened nothing took ${Date.now() - t0}ms`);
+  });
+
+  await h.step('navigate wait "interactive" answers before the load event, with the title', async () => {
+    const slow = tabIdIn((await agent.ok("tabs_create_mcp")).text);
+    const t0 = Date.now();
+    const r = await agent.ok("navigate", { tabId: slow, url: `${PAGE}/slow`, wait: "interactive" });
+    assert.ok(Date.now() - t0 < 2500, `took ${Date.now() - t0}ms`);
+    assert.match(r.text, /Title: Slow page\n\(returned once the page was parsed; it is still loading/);
+    assert.match((await agent.ok("get_page_text", { tabId: slow })).text, /Parsed early/);
+    await agent.ok("tabs_close_mcp", { tabId: slow });
   });
 
   await h.step("the test page screenshot is saved as PNG", async () => {

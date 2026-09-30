@@ -138,7 +138,12 @@ wasn't run here.
 
 Per-tool ms: a call issued in the same message as a `navigate` waits for it. The after runs did
 that more often (navigate then get_page_text or find in one turn), so their mean ms per call for
-those two tools includes the page load. Traces now record `msg_calls` (calls in the same message)
+those two tools includes the page load. The same goes for keys: in the first run's traces, a
+`key` or `type` right after a click read 250–880ms (23 of 29, most on gen-mdn-iframe), about the
+click's own time less 400ms, while after the restart `type` right after a click took 8–29ms
+(9 of 9). Those keys were waiting for the old 520–900ms click in the same message, not slow
+themselves. The click still waited 100ms for a tab it might open; it now waits only when it
+opened one. Traces now record `msg_calls` (calls in the same message)
 and `text_head` (the first 300 characters of the result), and `run.mjs --streams dir` keeps each
 run's raw stream-json.
 
