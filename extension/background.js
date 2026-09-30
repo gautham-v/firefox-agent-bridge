@@ -848,9 +848,24 @@ function ask(panel, msg) {
   else answer(rid, offlineReply({ ...a, requestId: rid }));
 }
 
+// Like ask, for background's own use: resolves with the host's reply, or an empty one after a few seconds.
+function askHost(msg) {
+  if (!port) return Promise.resolve(offlineReply(msg));
+  return new Promise((resolve) => {
+    const rid = `b${++requestCount}`;
+    asked.set(rid, { reply: resolve });
+    port.postMessage({ ...msg, requestId: rid });
+    setTimeout(() => asked.delete(rid) && resolve(offlineReply(msg)), 5000);
+  });
+}
+
 function answer(rid, msg) {
   const a = asked.get(rid);
   if (!a) return;
+  if (a.reply) {
+    asked.delete(rid);
+    return a.reply(msg);
+  }
   const { chatId } = msg;
   if (msg.type !== "chat.transcript" || msg.done) asked.delete(rid);
   if (msg.type === "chat.transcript") {
@@ -865,6 +880,7 @@ function chatFromHost(msg) {
     const chat = chatFor(msg.chatId);
     record(chat, msg.event);
     trackFinished(chat, msg.event);
+    if (chat.finished && chat.omni && msg.event.kind === "result") notifyFinished(chat, msg.event);
     deliver(chat.id, msg);
   } else if (msg.requestId != null) {
     answer(msg.requestId, msg);
@@ -1121,6 +1137,120 @@ browser.runtime.onConnect.addListener((p) => {
     if (name !== "hello" && panel.chatId == null) return;
     Promise.resolve(panelCommands[name]?.(panel, m)).catch(() => {});
   });
+});
+
+// ---- Ask from the address bar
+// "c <task>" starts a chat in a new group without opening the sidebar or leaving the tab. It is
+// the panel's own start path (chatFor, bindChat, sendToHost) with the engine, model and effort the
+// panel last saved. Its group label shows Working and Done like any chat's; when a turn finishes
+// unseen, one system notification says so and takes the user to the group.
+
+const OMNI_PAGE = "⁣page⁣"; // suggestion contents; the default suggestion's is the typed text
+const OMNI_RESUME = "⁣resume⁣";
+let omniHistory = Promise.resolve([]);
+
+async function chatPrefs() {
+  const p = (await browser.storage.local.get("chatPrefs").catch(() => ({})))?.chatPrefs ?? {};
+  const engine = ENGINE_NAMES[p.engine] ? p.engine : "claude";
+  return { engine, model: p[engine]?.model || null, effort: p[engine]?.effort || null };
+}
+
+function whenLabel(ms, now = Date.now()) {
+  const days = Math.round((new Date(now).setHours(0, 0, 0, 0) - new Date(ms).setHours(0, 0, 0, 0)) / 86400000);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+// Suggestion descriptions are plain text, so the action follows the task after a dash.
+function omniSuggestions(text, history) {
+  const out = [];
+  if (text) out.push({ content: OMNI_PAGE + text, description: `${text} — Ask about this page` });
+  for (const c of history.slice(0, 2)) {
+    const info = { id: c.id, engine: c.engine, model: c.model, source: c.source, path: c.path };
+    out.push({ content: OMNI_RESUME + JSON.stringify(info), description: `Resume “${c.title}” — ${whenLabel(c.updatedAt)}` });
+  }
+  return out;
+}
+
+async function startOmniTask(text, withPage) {
+  const task = text.trim();
+  if (!task) return;
+  const chat = chatFor(crypto.randomUUID(), await lastNormalWindowId());
+  Object.assign(chat, await chatPrefs());
+  chat.omni = true;
+  // With the page, the tab being viewed joins in place (bindChat). Otherwise the group starts with
+  // a blank tab, which has to exist before the send so bindChat doesn't take the viewed tab.
+  if (!withPage) await createSessionTab(chat.id, ENGINE_NAMES[chat.engine], "about:blank", chat.windowId).catch(() => {});
+  chat.queue = chat.queue.then(() => sendToHost(chat, { text: task })).catch(() => {});
+}
+
+// Opens a past chat in the sidebar of the window the user is in. The address bar's input handler
+// counts as a user action, so the sidebar may open from it.
+async function resumeOmniChat(info) {
+  if (!validChatId(info?.id)) return;
+  const windowId = await lastNormalWindowId();
+  const shown = () => [...panels].find((p) => p.windowId === windowId && p.ready);
+  if (!shown()) {
+    await browser.sidebarAction.open().catch(() => {});
+    for (let i = 0; i < 30 && !shown(); i++) await new Promise((r) => setTimeout(r, 100));
+  }
+  const panel = shown();
+  if (panel) await panelCommands["chat.open"](panel, { chatId: info.id, source: info.source, path: info.path, engine: info.engine, model: info.model });
+  else windowChat.set(windowId, info.id);
+}
+
+// The first line of the last thing the agent said, without markdown marks.
+function replyHeadline(chat) {
+  const last = chat.events.findLast((e) => e.kind === "text" || e.kind === "text_delta");
+  const line = String(last?.text ?? "").split("\n").map((l) => l.replace(/^[\s#>*-]+|[*_`]/g, "").trim()).find(Boolean) ?? "";
+  return line.length > 120 ? `${line.slice(0, 119)}…` : line;
+}
+
+// Only when the user isn't on the group's tab: the label icon covers the rest.
+async function notifyFinished(chat, ev) {
+  const groupId = sessions.get(chat.id)?.groupId;
+  const [tab] = chat.windowId != null ? await browser.tabs.query({ active: true, windowId: chat.windowId }).catch(() => []) : [];
+  if (groupId == null || tab?.groupId === groupId) return;
+  const ok = ev.ok !== false;
+  browser.notifications?.create(`omni-${chat.id}`, {
+    type: "basic",
+    iconUrl: browser.runtime.getURL("icons/icon.svg"),
+    title: `${sessions.get(chat.id).label} ${ok ? "finished" : "stopped"}`,
+    message: (ok ? replyHeadline(chat) : ev.error) || "Open the group to see the result.",
+  });
+}
+
+async function showChatGroup(chat) {
+  const groupId = sessions.get(chat.id)?.groupId;
+  const [tab] = groupId == null ? [] : await browser.tabs.query({ groupId }).catch(() => []);
+  if (!tab) return;
+  await browser.tabs.update(tab.id, { active: true });
+  await browser.windows.update(tab.windowId, { focused: true }).catch(() => {});
+}
+
+if (browser.omnibox) {
+  browser.omnibox.onInputStarted.addListener(() => {
+    omniHistory = askHost({ type: "chat.history" }).then((m) => m.chats ?? []).catch(() => []);
+  });
+  browser.omnibox.onInputChanged.addListener(async (text, suggest) => {
+    const t = text.trim();
+    const name = ENGINE_NAMES[(await chatPrefs()).engine];
+    browser.omnibox.setDefaultSuggestion({ description: t ? `${t} — Start a ${name} task` : `Start a ${name} task` });
+    suggest(omniSuggestions(t, await omniHistory));
+  });
+  browser.omnibox.onInputEntered.addListener((text) => {
+    if (text.startsWith(OMNI_RESUME)) resumeOmniChat(JSON.parse(text.slice(OMNI_RESUME.length))).catch(() => {});
+    else if (text.startsWith(OMNI_PAGE)) startOmniTask(text.slice(OMNI_PAGE.length), true).catch(() => {});
+    else startOmniTask(text, false).catch(() => {});
+  });
+}
+
+browser.notifications?.onClicked.addListener((id) => {
+  if (!id.startsWith("omni-")) return;
+  browser.notifications.clear(id);
+  const chat = chats.get(id.slice(5));
+  if (chat) showChatGroup(chat);
 });
 
 // The toolbar button opens and closes the sidebar. toggle() must run in the click's own call

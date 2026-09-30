@@ -38,7 +38,20 @@ function mockBrowser({ store = {}, groups: initialGroups = [], noIcons = false, 
       onConnect: event(),
     },
     storage: { local: { get: async (k) => ({ [k]: store[k] }), set: async (o) => Object.assign(store, o), remove: async (k) => delete store[k] } },
+    omnibox: { onInputStarted: event(), onInputChanged: event(), onInputEntered: event(), setDefaultSuggestion: (d) => (action.defaultSuggestion = d) },
+    notifications: {
+      shown: [],
+      cleared: [],
+      create(id, o) {
+        this.shown.push({ id, ...o });
+      },
+      clear(id) {
+        this.cleared.push(id);
+      },
+      onClicked: event(),
+    },
     windows: {
+      update: async (id, o) => (action.focused = { id, ...o }),
       getLastFocused: async () => ({ id: 10, incognito: false }),
       create: async (o) => {
         action.popups.push(o);
@@ -47,6 +60,7 @@ function mockBrowser({ store = {}, groups: initialGroups = [], noIcons = false, 
     },
     sidebarAction: {
       toggle: () => action.toggles++,
+      open: async () => action.toggles++,
       setIcon: async ({ path }) => {
         action.sideIcon = path;
       },
@@ -60,7 +74,7 @@ function mockBrowser({ store = {}, groups: initialGroups = [], noIcons = false, 
       onDetached: event(),
       query: async (q = {}) =>
         [...tabs.values()]
-          .filter((t) => (q.active == null || t.active === q.active) && (q.windowId == null || t.windowId === q.windowId))
+          .filter((t) => (q.active == null || t.active === q.active) && (q.windowId == null || t.windowId === q.windowId) && (q.groupId == null || t.groupId === q.groupId))
           .map((t) => ({ ...t, index: t.id })),
       get: async (id) => {
         if (!tabs.has(id)) throw new Error("no tab");
@@ -902,4 +916,99 @@ test("earlier groups keep their icon while the session's own groups change aroun
   await env.browser.tabGroups.onMoved.fire({ id: 50 });
   await wait(150);
   assert.equal(env.browser.icons.get(50), "earlier");
+});
+
+// Types into the address bar like Firefox: input starts, changes, then the chosen suggestion is entered.
+async function omniType(env, text) {
+  const { omnibox } = env.browser;
+  await omnibox.onInputStarted.fire();
+  let got = null;
+  await omnibox.onInputChanged.fire(text, (s) => (got = s));
+  await wait(20);
+  return got;
+}
+
+test("c <task> starts a chat in a new group without switching tabs or opening the sidebar", async () => {
+  const env = await load({ store: { chatPrefs: { engine: "codex", codex: { model: "gpt-x", effort: "high" } } } });
+  const { browser } = env;
+  const hist = [1, 2, 3].map((n) => ({ id: `h${n}`, title: `Chat ${n}`, updatedAt: Date.now() - n * 86400000, engine: "claude", model: null, source: "panel", path: null }));
+  const typing = omniType(env, "find flights");
+  await wait(10);
+  const rid = env.sentToHost("chat.history")[0].requestId;
+  await env.host({ type: "chat.history", requestId: rid, chats: hist });
+  const suggestions = plain(await typing);
+  assert.match(browser.action.defaultSuggestion.description, /find flights .* Start a Codex task/);
+  assert.equal(suggestions.length, 3, "ask about this page and two recent chats");
+  assert.match(suggestions[0].description, /Ask about this page/);
+  assert.match(suggestions[1].description, /Resume .Chat 1. .* Yesterday/);
+
+  await browser.omnibox.onInputEntered.fire("find flights", "currentTab");
+  await wait(50);
+  const send = env.sentToHost("chat.send")[0];
+  assert.deepEqual([send.engine, send.model, send.effort, send.text], ["codex", "gpt-x", "high", "find flights"]);
+  const group = [...browser.groups.values()][0];
+  assert.equal(group.title, "Codex");
+  assert.equal(browser.tabsMap.get(1).groupId, -1, "the user's tab is left alone");
+  assert.equal(browser.tabsMap.get(1).active, true);
+  assert.equal(browser.action.toggles, 0);
+});
+
+test("Ask about this page puts the current tab in the group", async () => {
+  const env = await load();
+  const s = (await omniType(env, "summarize"))[0];
+  await env.browser.omnibox.onInputEntered.fire(s.content, "currentTab");
+  await wait(50);
+  assert.equal(env.browser.tabsMap.get(1).groupId, 100);
+  assert.deepEqual(env.sentToHost("chat.send")[0].context.tabs.map((t) => t.tabId), [1]);
+});
+
+test("an omnibox task that finishes unseen notifies once and the click shows its group", async () => {
+  const env = await load();
+  const { browser } = env;
+  await browser.omnibox.onInputEntered.fire("book it", "currentTab");
+  await wait(50);
+  const chatId = env.sentToHost("chat.send")[0].chatId;
+  await chatEvent(env, chatId, { kind: "status", status: "running" });
+  await chatEvent(env, chatId, { kind: "text", messageId: "m", text: "## JetBlue 916, Fri 7:05 am\nMore detail." });
+  await chatEvent(env, chatId, { kind: "result", ok: true });
+  await wait(50);
+  assert.deepEqual(plain(browser.notifications.shown.map(({ id, title, message }) => ({ id, title, message }))), [{ id: `omni-${chatId}`, title: "Claude finished", message: "JetBlue 916, Fri 7:05 am" }]);
+  await browser.notifications.onClicked.fire(`omni-${chatId}`);
+  await wait(20);
+  assert.equal(browser.tabsMap.get(2).active, true);
+  assert.deepEqual(browser.notifications.cleared, [`omni-${chatId}`]);
+});
+
+test("no notification for sidebar chats, or when the user is on the group's tab", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await a.send("chat.send", { engine: "claude", text: "hi" });
+  a.close();
+  await wait(20);
+  await chatEvent(env, a.chatId, { kind: "result", ok: true });
+  await wait(50);
+  await env.browser.omnibox.onInputEntered.fire("task", "currentTab");
+  await wait(50);
+  const chatId = env.sentToHost("chat.send").at(-1).chatId;
+  env.browser.tabsMap.get(1).active = false;
+  [...env.browser.tabsMap.values()].find((t) => t.groupId === 101).active = true;
+  await chatEvent(env, chatId, { kind: "result", ok: true });
+  await wait(50);
+  assert.equal(env.browser.notifications.shown.length, 0);
+});
+
+test("choosing a recent chat opens the sidebar on it", async () => {
+  const env = await load();
+  const typing = omniType(env, "");
+  await wait(10);
+  await env.host({ type: "chat.history", requestId: env.sentToHost("chat.history")[0].requestId, chats: [{ id: "h1", title: "Denver trip", updatedAt: Date.now(), engine: "claude", source: "panel", path: null }] });
+  const [resume] = plain(await typing);
+  assert.match(resume.description, /Denver trip.* Today/);
+  const opening = env.browser.omnibox.onInputEntered.fire(resume.content, "currentTab");
+  await wait(20);
+  assert.equal(env.browser.action.toggles, 1);
+  const p = await env.panel();
+  await opening;
+  await wait(300);
+  assert.equal(p.of("state").at(-1).chatId, "h1");
 });

@@ -205,6 +205,16 @@ count, not results replayed from a loaded transcript. A chat counts as connected
 *disconnected* state while it exists, even after its `claude` process idled out and its MCP client
 left.
 
+Address bar: the `omnibox` keyword `c` (background.js, "Ask from the address bar") starts a chat
+with no panel. It creates a chat like `hello` would, with the engine, model and effort from the
+`chatPrefs` the panel saved, marks it `omni`, and sends `chat.send` through the same queue. Without
+the page it first makes the group's blank tab, so `bindChat` doesn't take the viewed tab; with it,
+`bindChat` does. Suggestions come from `chat.history`, asked once when the address bar input starts
+(background asks the host itself, not for a panel). When an `omni` chat's `result` arrives unseen
+(`finished`) and the window's active tab isn't in its group, one notification `omni-<chatId>` is
+created; clicking it activates the group's first tab. Resuming a chat opens the sidebar and sends
+that panel `chat.open`.
+
 The extension reports the chat's agent to the bridge as `<client> (sidebar)` (from the MCP server,
 when `FIREFOX_AGENT_BRIDGE_SESSION` is set), so Disconnect on a terminal session of the same
 program doesn't block the panel's agent, or the reverse.

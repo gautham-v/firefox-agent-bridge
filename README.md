@@ -96,6 +96,12 @@ Nothing is billed beyond your existing subscription, and nothing runs until you 
   `~/.claude/projects/` (their working folder is `~/.firefox-agent-bridge/chat/`), and the panel
   keeps only its own index in `~/.firefox-agent-bridge/chat/chats.json`; Codex chats are kept in
   Codex's own history. Attachments go to `~/.firefox-agent-bridge/chat/uploads/`.
+- **Address bar.** Type `c` and a space, then a task: Enter starts it in a new tab group (with the
+  engine, model and effort the panel last used) without opening the sidebar or leaving your tab.
+  "Ask about this page" starts it with the viewed tab in the group, and the two most recent chats
+  are offered to resume in the sidebar. The group label shows Working and Done as usual; if the
+  task finishes while you're elsewhere, one notification ("Claude 2 finished" and the first line
+  of the reply) takes you to the group when clicked.
 - **Errors.** A usage limit, a missing sign-in and a missing `claude` or `codex` binary each show
   a banner. The host finds the binaries from `CLAUDE_BIN` / `CODEX_BIN` (baked into its launcher
   by `scripts/install.sh`), then common install paths and your login shell.
