@@ -11,7 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { HIDDEN_TOOLS, classifyError, clip, contextBlock, parseResetTime, summarizePermission, summarizeToolResult, summarizeToolUse, toolTab } from "./chat-format.mjs";
+import { HIDDEN_TOOLS, classifyError, clip, contextBlock, parseResetTime, summarizePermission, summarizeToolResult, summarizeToolUse, toolMasked, toolTab } from "./chat-format.mjs";
 import { chunkItems, claudeSessionMeta, claudeTitle, claudeTranscript, codexTranscript, encodeCwd, findCodexRollout, scanTerminalSessions } from "./chat-history.mjs";
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -482,7 +482,7 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
 
   function onClaudeUser(c, p, j) {
     for (const b of Array.isArray(j.message?.content) ? j.message.content : []) {
-      if (b.type === "tool_result" && p.tools.has(b.tool_use_id)) emit(c.id, { kind: "tool_end", toolUseId: b.tool_use_id, ok: !b.is_error, summary: summarizeToolResult(p.tools.get(b.tool_use_id) ?? "", b.content, b.is_error) });
+      if (b.type === "tool_result" && p.tools.has(b.tool_use_id)) emit(c.id, { kind: "tool_end", toolUseId: b.tool_use_id, ok: !b.is_error, summary: summarizeToolResult(p.tools.get(b.tool_use_id) ?? "", b.content, b.is_error), ...toolMasked(p.tools.get(b.tool_use_id) ?? "", b.content) });
     }
   }
 
@@ -765,7 +765,7 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     const ok = it.status !== "failed" && !it.error && (it.exit_code == null || it.exit_code === 0);
     const text = it.result?.content?.filter((b) => b.type === "text").map((b) => b.text).join("\n") ?? "";
     const summary = ok ? summarizeToolResult(name, it.result?.content?.some((b) => b.type === "image") ? [{ type: "image" }] : text, false) : clip(it.error?.message ?? it.error ?? "Failed", 120);
-    emit(c.id, { kind: "tool_end", toolUseId: it.id, ok, summary });
+    emit(c.id, { kind: "tool_end", toolUseId: it.id, ok, summary, ...toolMasked(name, it.result?.content) });
   }
 
   function onCodexExit(c, p, code, signal) {

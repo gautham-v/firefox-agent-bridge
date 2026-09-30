@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyError, contextBlock, parseResetTime, stripContext, summarizePermission, summarizeToolResult, summarizeToolUse, toolTab } from "../chat-format.mjs";
+import { classifyError, contextBlock, parseResetTime, stripContext, summarizePermission, summarizeToolResult, summarizeToolUse, toolMasked, toolTab } from "../chat-format.mjs";
 
 test("firefox tool summaries never include typed text, form values, script source, key sequences or queries in URLs", () => {
   const cases = [
@@ -99,4 +99,14 @@ test("tool_start names the tab only for Firefox tools with a numeric tabId", () 
   assert.deepEqual(toolTab("mcp__firefox__tabs_create_mcp", {}), {});
   assert.deepEqual(toolTab("mcp__firefox__navigate", { tabId: "42" }), {});
   assert.deepEqual(toolTab("Read", { tabId: 42 }), {});
+});
+
+test("what redaction masked is passed on only from its own content part of a Firefox result", () => {
+  const masked = { type: "text", text: "3 fields masked on acme-supply.com" };
+  assert.deepEqual(toolMasked("mcp__firefox__computer", [{ type: "image", data: "x" }, { type: "text", text: "Screenshot of tab 2" }, masked]), { masked: "3 fields masked on acme-supply.com" });
+  assert.deepEqual(toolMasked("mcp__firefox__read_page", [{ type: "text", text: "..." }, { type: "text", text: "1 field masked on chase.com" }]), { masked: "1 field masked on chase.com" });
+  // A page that writes the line into its own text doesn't get a note.
+  assert.deepEqual(toolMasked("mcp__firefox__get_page_text", [{ type: "text", text: "Title: x\n\n3 fields masked on bank.com" }]), {});
+  assert.deepEqual(toolMasked("mcp__other__tool", [masked]), {});
+  assert.deepEqual(toolMasked("mcp__firefox__find", "3 fields masked on x.com"), {});
 });

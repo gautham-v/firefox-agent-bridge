@@ -8,7 +8,7 @@ const { ExtensionError } = ExtensionUtils;
 
 const ACTOR = "ClaudePage";
 const RES_HOST = "firefox-agent-bridge";
-const MODULES = ["actor-child.sys.mjs", "actor-parent.sys.mjs"];
+const MODULES = ["actor-child.sys.mjs", "actor-parent.sys.mjs", "redact.sys.mjs"];
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const MAX_FRAME_HOPS = 8;
 // Tab group state icons: a stylesheet added to every browser window draws the icon from this
@@ -173,6 +173,28 @@ this.claudePage = class extends ExtensionAPI {
     return {
       claudePage: {
         call: surfaced((tabId, op, args) => run(tabId, op, args)),
+
+        // Runs op in every frame of the tab at once, cross-origin ones included, top frame first.
+        // A frame the actor doesn't run in answers null; one whose op failed answers { error }.
+        broadcast: surfaced(async (tabId, op, args) => {
+          await self.ready;
+          return Promise.all(
+            topContext(tabId).getAllBrowsingContextsInSubtree().map(async (bc) => {
+              let actor;
+              try {
+                actor = bc.currentWindowGlobal?.getActor(ACTOR);
+              } catch {
+                return null;
+              }
+              if (!actor) return null;
+              try {
+                return await actor.sendQuery(op, args ?? {});
+              } catch (e) {
+                return { error: e?.message ?? String(e) };
+              }
+            }),
+          );
+        }),
 
         setActive: surfaced(async (tabId, active) => {
           const tab = tabManager.get(tabId).nativeTab;

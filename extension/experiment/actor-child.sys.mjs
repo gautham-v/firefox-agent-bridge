@@ -3,6 +3,7 @@
 // and work in background tabs and unfocused windows without touching the OS cursor.
 
 import { setTimeout, clearTimeout } from "resource://gre/modules/Timer.sys.mjs";
+import { barLabel, fieldKind, marker, markLabels, scrub, selectorKind, siteSelectors } from "resource://firefox-agent-bridge/redact.sys.mjs";
 
 const INTERACTIVE_ROLES = new Set([
   "button", "link", "textbox", "searchbox", "combobox", "checkbox", "radio", "switch", "slider",
@@ -195,8 +196,9 @@ function isInteractive(el, role) {
   return tabindex !== null && Number(tabindex) >= 0 && el.tagName !== "IFRAME";
 }
 
-function describe(el, role, name) {
+function describe(el, role, name, red) {
   const tag = el.tagName.toLowerCase();
+  const masked = red?.mask(el);
   const explicit = el.getAttribute("role");
   const native = TAG_ROLES[el.tagName]?.(el);
   // e.g. a <button role="link">: say so, since it has no href to read
@@ -204,6 +206,7 @@ function describe(el, role, name) {
   const parts = [label];
   if (name) parts.push(JSON.stringify(name));
   parts.push(`[${refFor(el)}]`);
+  if (masked && !isField(el)) parts.push(red.marker(el));
   if (role === "link") {
     const href = el.getAttribute("href");
     if (href && !href.startsWith("javascript:")) parts.push(`href=${JSON.stringify(clean(href, 200))}`);
@@ -214,15 +217,21 @@ function describe(el, role, name) {
   }
   if (el.tagName === "INPUT" && !["checkbox", "radio", "button", "submit", "reset", "file", "hidden"].includes(el.type)) {
     if (el.type !== "text") parts.push(`type=${el.type}`);
-    if (el.type === "password") {
+    if (masked) {
+      parts.push(`value=${red.marker(el)}`);
+    } else if (el.type === "password") {
       if (el.value) parts.push("value=(set)");
     } else if (el.value) {
       parts.push(`value=${JSON.stringify(clean(el.value, 100))}`);
     }
     if (el.placeholder && el.placeholder !== name) parts.push(`placeholder=${JSON.stringify(clean(el.placeholder, 80))}`);
   }
-  if (el.tagName === "TEXTAREA" && el.value) parts.push(`value=${JSON.stringify(clean(el.value, 100))}`);
-  if (el.tagName === "SELECT") {
+  if (el.tagName === "TEXTAREA" && masked) parts.push(`value=${red.marker(el)}`);
+  else if (el.tagName === "TEXTAREA" && el.value) parts.push(`value=${JSON.stringify(clean(el.value, 100))}`);
+  if (el.tagName === "SELECT" && masked) {
+    parts.push(`selected=${red.marker(el)}`);
+    parts.push(`options=${el.options.length}`);
+  } else if (el.tagName === "SELECT") {
     const selected = Array.from(el.selectedOptions).map((o) => clean(o.textContent, 60));
     parts.push(`selected=${JSON.stringify(selected.join(", "))}`);
     parts.push(`options=${el.options.length}`);
@@ -232,7 +241,7 @@ function describe(el, role, name) {
     if (el.accept) parts.push(`accept=${JSON.stringify(el.accept)}`);
   }
   if (el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio")) {
-    parts.push(el.checked ? "checked" : "unchecked");
+    parts.push(masked ? red.marker(el) : el.checked ? "checked" : "unchecked");
   } else {
     const ariaChecked = el.getAttribute("aria-checked");
     if (ariaChecked) parts.push(`checked=${ariaChecked}`);
@@ -265,10 +274,239 @@ function renderedChildren(node) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Redaction. Fields the user's rules mark sensitive (redact.sys.mjs; background.js passes the
+// rules in as `redact`) never have their values leave Firefox: text results read
+// "[redacted: <kind>, filled|empty]" in their place, and screenshots are taken with a labeled bar
+// drawn over each one. Typing into them works as usual.
+
+const FIELD_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
+const isField = (el) => FIELD_TAGS.has(el.tagName);
+
+function isFilled(el) {
+  if (!isField(el)) return !!(el.textContent ?? "").trim();
+  if (el.type === "checkbox" || el.type === "radio") return el.checked;
+  return el.value !== "";
+}
+
+// The page's site as the user would name it (checkout.acme-supply.com is acme-supply.com).
+function siteOf(doc) {
+  const host = doc.location?.hostname ?? "";
+  try {
+    return Services.eTLD.getBaseDomainFromHost(host);
+  } catch {
+    return host.replace(/^www\./, "") || "this page";
+  }
+}
+
+// The document and every shadow root in it (open or closed), for finding masked elements that
+// read_page and find would reach.
+function allRoots(doc) {
+  const roots = [doc];
+  for (let i = 0; i < roots.length; i++) {
+    for (const el of roots[i].querySelectorAll("*")) {
+      const shadow = el.openOrClosedShadowRoot;
+      if (shadow && !shadow.isUAWidget()) roots.push(shadow);
+    }
+  }
+  return roots;
+}
+
+// One per op: which elements are masked in this document, and which of them the op's output
+// masked, for the "N fields masked on <site>" line.
+function redactor(doc, rules) {
+  const selectors = siteSelectors(rules, doc.location?.hostname);
+  const cache = new Map();
+  const used = new Set();
+  let found = null;
+  let secrets = null;
+
+  // { kind, filled } for a masked element, else null. A field inside an element a site rule
+  // matches is masked too.
+  function mask(el) {
+    if (cache.has(el)) return cache.get(el);
+    let kind = isField(el) ? fieldKind(rules, { tag: el.tagName, type: el.type, autocomplete: el.getAttribute("autocomplete") }) : null;
+    for (const sel of kind ? [] : selectors) {
+      let hit = null;
+      try {
+        hit = el.closest(sel);
+      } catch {
+        // not a valid selector
+      }
+      if (hit) {
+        kind = selectorKind(sel);
+        break;
+      }
+    }
+    const m = kind ? { kind, filled: isFilled(el) } : null;
+    cache.set(el, m);
+    return m;
+  }
+
+  // Every masked element in the document, shadow trees included.
+  function elements() {
+    if (found) return found;
+    if (!rules?.always?.length && !selectors.length) return (found = []);
+    const set = new Set();
+    for (const root of allRoots(doc)) {
+      for (const el of root.querySelectorAll("input, textarea, select")) if (mask(el)) set.add(el);
+      for (const sel of selectors) {
+        try {
+          for (const el of root.querySelectorAll(sel)) set.add(el);
+        } catch {
+          // not a valid selector
+        }
+      }
+    }
+    found = [...set].filter((el) => mask(el));
+    return found;
+  }
+
+  // What each masked element would give away: a field's value (and a select's option text), and
+  // the text of anything else, whole and node by node.
+  function secretList() {
+    if (secrets) return secrets;
+    secrets = [];
+    for (const el of elements()) {
+      const m = marker(mask(el).kind, mask(el).filled);
+      const add = (text, echo) => text && secrets.push({ text, marker: m, echo, el });
+      if (el.tagName === "SELECT") {
+        for (const o of el.selectedOptions) {
+          add(o.value, true);
+          add(clean(o.textContent), true);
+        }
+      } else if (isField(el)) {
+        add(el.value, true);
+      } else {
+        add(clean(el.innerText ?? el.textContent, 100000), false);
+        const walker = doc.createTreeWalker(el, 4 /* NodeFilter.SHOW_TEXT */);
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) add(clean(n.data, 100000), true);
+      }
+    }
+    return secrets;
+  }
+
+  return {
+    mask,
+    elements,
+    siteRules: selectors.length > 0,
+    marker(el) {
+      used.add(el);
+      const m = mask(el);
+      return marker(m.kind, m.filled);
+    },
+    // Masked values and text found anywhere in the output. count: false for text that is only
+    // matched against, never returned.
+    scrub(text, count = true) {
+      const list = secretList();
+      if (!list.length || !text) return text;
+      const out = scrub(text, list);
+      if (count) for (const i of out.hits) used.add(list[i].el);
+      return out.text;
+    },
+    // Page text has no field values, so masked fields are marked after their <label>'s line.
+    markLabels(text) {
+      const fields = elements().filter((el) => isField(el) && el.labels?.length && isRendered(el));
+      if (!fields.length) return text;
+      const out = markLabels(text, fields.map((el) => ({ label: labelText(el.labels[0]), marker: marker(mask(el).kind, mask(el).filled) })));
+      for (const i of out.hits) used.add(fields[i]);
+      return out.text;
+    },
+    site: () => siteOf(doc),
+    // The op's answer: plain text, or with what was masked when anything was.
+    result(text) {
+      return used.size ? { text, masked: { count: used.size, site: siteOf(doc) } } : text;
+    },
+  };
+}
+
+// Bars over masked fields while a screenshot is taken. Like the cursor they're anonymous
+// content, so the page can't see or remove them; they're removed right after the capture, or
+// after a few seconds if the capture never says it's done.
+const MASK_MAX_MS = 5000;
+const masks = new WeakMap(); // document -> { content, timer }
+
+const MASK_CSS = `
+  :host { all: initial; }
+  .layer { position: fixed; inset: 0; pointer-events: none; z-index: 2147483647; overflow: hidden; }
+  .bar {
+    position: absolute; box-sizing: border-box; border-radius: 4px; background: #1c1b22; color: #fbfbfe;
+    display: flex; align-items: center; padding: 0 8px; overflow: hidden;
+    font: 11px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif; letter-spacing: .02em;
+  }
+  .bar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+`;
+
+function clearMask(doc) {
+  const m = masks.get(doc);
+  if (!m) return;
+  masks.delete(doc);
+  clearTimeout(m.timer);
+  try {
+    doc.removeAnonymousContent(m.content);
+  } catch {
+    // document going away
+  }
+}
+
+function drawMask(doc, red) {
+  const win = doc.defaultView;
+  const els = red.elements().filter((el) => isRendered(el));
+  // A masked element inside another one is already covered.
+  const outer = els.filter((el) => !els.some((o) => o !== el && o.contains(el)));
+  const bars = [];
+  for (const el of outer) {
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height || r.bottom <= 0 || r.right <= 0 || r.top >= win.innerHeight || r.left >= win.innerWidth) continue;
+    bars.push({ el, r });
+  }
+  if (!bars.length) return 0;
+  let content;
+  try {
+    content = doc.insertAnonymousContent();
+  } catch {
+    throw new Error("Could not draw over sensitive fields in this frame.");
+  }
+  const style = doc.createElement("style");
+  style.textContent = MASK_CSS;
+  const layer = doc.createElement("div");
+  layer.className = "layer";
+  for (const { el, r } of bars) {
+    // Inset a little, like the field's own border, when there's room.
+    const inset = r.height >= 16 && r.width >= 24 ? 2 : 0;
+    const bar = doc.createElement("div");
+    bar.className = "bar";
+    bar.style.cssText = `left: ${r.left + inset}px; top: ${r.top + inset}px; width: ${r.width - 2 * inset}px; height: ${r.height - 2 * inset}px;`;
+    if (r.height >= 14 && r.width >= 48) {
+      const m = red.mask(el);
+      const label = doc.createElement("span");
+      label.textContent = barLabel(m.kind, m.filled);
+      bar.appendChild(label);
+    }
+    layer.appendChild(bar);
+  }
+  content.root.append(style, layer);
+  masks.set(doc, { content, timer: setTimeout(() => clearMask(doc), MASK_MAX_MS) });
+  return bars.length;
+}
+
+// Sent to every frame of a tab around a capture: on hides the agent cursor and covers masked
+// fields; off undoes both. Answers how many fields were covered, the site, and whether this is
+// the top frame (whose site the result names).
+function capture(doc, { on, redact }) {
+  cursorVisible(doc, { visible: !on });
+  clearMask(doc);
+  const top = !doc.defaultView.browsingContext.parent;
+  if (!on) return { masked: 0, top };
+  const red = redactor(doc, redact);
+  return { masked: drawMask(doc, red), site: red.site(), top };
+}
+
+// ---------------------------------------------------------------------------------------------
 // read_page
 
-function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, frameScale = 1 } = {}) {
+function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, frameScale = 1, redact } = {}) {
   const interactiveOnly = filter === "interactive";
+  const red = redactor(doc, redact);
   const lines = [];
   let chars = 0;
   let truncated = false;
@@ -308,9 +546,17 @@ function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, fr
       const role = roleOf(el);
       const interactive = isInteractive(el, role);
       const include = interactive || (!interactiveOnly && role && STRUCTURAL_ROLES.has(role));
+      // A masked element (not a field) reads as one marker; the fields inside it still show,
+      // its text doesn't.
+      if (red.mask(el) && !isField(el)) {
+        if (depthLeft <= 0) return;
+        if (!push(`${"  ".repeat(level)}${include ? describe(el, role, "", red) : `text ${red.marker(el)}`}`)) return;
+        for (const child of renderedChildren(node)) walk(child, level + 1, depthLeft - 1, true);
+        return;
+      }
       if (include) {
         if (depthLeft <= 0) return;
-        if (!push(`${"  ".repeat(level)}${describe(el, role, nameOf(el, role))}`)) return;
+        if (!push(`${"  ".repeat(level)}${describe(el, role, nameOf(el, role), red)}`)) return;
         nextLevel = level + 1;
         nextDepth = depthLeft - 1;
         if (role && NAME_FROM_CONTENT.has(role)) named = true;
@@ -333,7 +579,7 @@ function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, fr
   if (truncated) {
     out += `\n\n[Truncated at ${maxChars} characters. Use filter "interactive", a smaller depth, or ref_id to focus on part of the page.]`;
   }
-  return out;
+  return red.result(red.scrub(out));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -369,7 +615,10 @@ const ROLE_WORDS = {
   modal: ["dialog", "alertdialog"],
 };
 
-function findElements(doc, { query, frameScale = 1 }) {
+function findElements(doc, { query, frameScale = 1, redact }) {
+  const red = redactor(doc, redact);
+  // What is scored is masked too, so a query can't probe for a masked value.
+  const hide = (s) => red.scrub(s, false);
   const tokens = query.toLowerCase().split(/[^\p{L}\p{N}$]+/u).filter((t) => t && !STOPWORDS.has(t));
   const phrase = query.toLowerCase().trim();
   const win = doc.defaultView;
@@ -381,7 +630,7 @@ function findElements(doc, { query, frameScale = 1 }) {
       if (SKIP_TAGS.has(el.tagName) || el.getAttribute("aria-hidden") === "true") return;
       const role = roleOf(el);
       const interactive = isInteractive(el, role);
-      const ownText = !interactive && ownTextOf(el);
+      const ownText = !interactive && !(red.mask(el) && !isField(el)) && hide(ownTextOf(el));
       if (ownText && isRendered(el)) {
         const hay = ownText.toLowerCase();
         let score = 0;
@@ -394,14 +643,14 @@ function findElements(doc, { query, frameScale = 1 }) {
         const rendered = isRendered(el);
         // Hidden file inputs are the usual upload target, so they stay findable.
         if (rendered || fileInput) {
-          const name = nameOf(el, role).toLowerCase();
+          const name = hide(nameOf(el, role)).toLowerCase();
           const extra = [
             el.id, el.getAttribute("name"), el.getAttribute("placeholder"), el.getAttribute("title"),
             el.getAttribute("data-test-id"), el.getAttribute("data-testid"), el.getAttribute("aria-describedby") ? "" : "",
             el.tagName === "A" ? el.getAttribute("href") : "",
             role === "heading" || role === "listitem" || role === "article" ? "" : clean(el.textContent, 300),
             el.tagName === "INPUT" ? `${el.type} ${el.accept ?? ""}` : "",
-          ].filter(Boolean).join(" ").toLowerCase();
+          ].filter(Boolean).map(hide).join(" ").toLowerCase();
           let score = 0;
           for (const t of tokens) {
             const word = new RegExp(`(^|[^\\p{L}\\p{N}])${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\p{L}\\p{N}])`, "u");
@@ -438,10 +687,11 @@ function findElements(doc, { query, frameScale = 1 }) {
     const cy = Math.round((rect.top + rect.height / 2) * frameScale);
     const onScreen = rect.bottom > 0 && rect.right > 0 && rect.top < win.innerHeight && rect.left < win.innerWidth;
     const where = !(rect.width || rect.height) ? " (not rendered)" : onScreen ? ` at (${cx}, ${cy})` : " (off-screen; click by ref, or scroll_to first)";
-    return `${describe(el, role, text ?? nameOf(el, role))}${where}`;
+    const name = red.mask(el) && !isField(el) ? "" : text ?? nameOf(el, role);
+    return `${describe(el, role, name, red)}${where}`;
   });
   const more = matches.length === 20 && scored.length > 20 ? `\n[More than 20 matches; showing the best 20. Use a more specific query.]` : "";
-  return `Found ${matches.length} element(s) for "${query}" (coordinates match the screenshot frame; clicking by ref is more reliable):\n${lines.join("\n")}${more}`;
+  return red.result(red.scrub(`Found ${matches.length} element(s) for "${query}" (coordinates match the screenshot frame; clicking by ref is more reliable):\n${lines.join("\n")}${more}`));
 }
 
 // Text directly inside an element (not in child elements), for elements like spans and divs
@@ -459,14 +709,16 @@ function ownTextOf(el) {
 // ---------------------------------------------------------------------------------------------
 // get_page_text
 
-function pageText(doc) {
+function pageText(doc, { redact } = {}) {
+  const red = redactor(doc, redact);
   const source = doc.body ?? doc.documentElement;
-  const text = (source.innerText ?? source.textContent ?? "")
+  const raw = (source.innerText ?? source.textContent ?? "")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+  const text = red.scrub(red.markLabels(raw));
   const limit = 200000;
-  return `Title: ${doc.title}\nURL: ${doc.location?.href}\n\n${text.length > limit ? text.slice(0, limit) + "\n[Truncated]" : text}`;
+  return red.result(red.scrub(`Title: ${doc.title}\nURL: ${doc.location?.href}\n\n`) + (text.length > limit ? text.slice(0, limit) + "\n[Truncated]" : text));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -719,7 +971,11 @@ async function click(doc, args) {
     el.dispatchEvent(new win.MouseEvent("contextmenu", { bubbles: true, cancelable: true, composed: true, view: win, ...base, buttons: 0 }));
   }
   pressCursor(doc, false);
-  return `Clicked ${clickedLabel(el)}`;
+  // What was clicked is named from its text, which only a site rule can mask; without one the
+  // page isn't searched, so clicks stay fast.
+  const red = redactor(doc, args.redact);
+  if (!red.siteRules) return `Clicked ${clickedLabel(el)}`;
+  return red.result(red.scrub(`Clicked ${clickedLabel(el)}`));
 }
 
 async function hover(doc, args) {
@@ -914,9 +1170,11 @@ function key(doc, { keys, repeat = 1 }) {
 // ---------------------------------------------------------------------------------------------
 // form_input
 
-function formInput(doc, { ref, value }) {
+// Filling a masked field works as usual; only what the result reads back is masked.
+function formInput(doc, { ref, value, redact }) {
   const el = resolveRef(doc, ref);
   const win = doc.defaultView;
+  const red = redactor(doc, redact);
   const dispatch = (type) => el.dispatchEvent(new win.Event(type, { bubbles: true }));
 
   if (el.tagName === "SELECT") {
@@ -934,12 +1192,14 @@ function formInput(doc, { ref, value }) {
     option.selected = true;
     dispatch("input");
     dispatch("change");
+    if (red.mask(el)) return red.result(`Selected an option in ${ref} ${red.marker(el)}`);
     return `Selected ${JSON.stringify(clean(option.textContent, 80))} in ${ref}`;
   }
 
   if (el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio")) {
     const want = value === true || value === "true" || value === 1 || value === "on" || value === "checked";
     if (el.checked !== want) el.click();
+    if (red.mask(el)) return red.result(`Set ${ref} ${red.marker(el)}`);
     return `${ref} is now ${el.checked ? "checked" : "unchecked"}`;
   }
 
@@ -963,6 +1223,7 @@ function formInput(doc, { ref, value }) {
     el.value = String(value);
     el.dispatchEvent(new win.InputEvent("input", { bubbles: true, inputType: "insertReplacementText", data: String(value) }));
     dispatch("change");
+    if (red.mask(el)) return red.result(`Set ${ref} ${red.marker(el)}`);
     return `Set ${ref} to ${JSON.stringify(clean(el.value, 100))}`;
   }
 
@@ -1072,7 +1333,9 @@ function sandboxRunner() {
 
 const SANDBOX_RUNNER = `(${sandboxRunner})()`;
 
-async function evaluate(doc, { code }) {
+// A masked field's value in the script's result (or error) is masked like anywhere else. That
+// only catches the value as it is: a script can still read it and return it transformed.
+async function evaluate(doc, { code, redact }) {
   const win = doc.defaultView;
   let sandbox = sandboxes.get(win);
   if (!sandbox) {
@@ -1088,9 +1351,10 @@ async function evaluate(doc, { code }) {
   const outcome = await Cu.evalInSandbox("__claudeRun", sandbox)(code);
   const value = String(outcome.value);
   const limit = 100000;
-  const text = value.length > limit ? value.slice(0, limit) + "\n[Truncated]" : value;
+  const red = redactor(doc, redact);
+  const text = red.scrub(value.length > limit ? value.slice(0, limit) + "\n[Truncated]" : value);
   if (!outcome.ok) throw new Error(text);
-  return text;
+  return red.result(text);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1177,6 +1441,7 @@ const OPS = {
   viewport,
   textSize,
   cursorVisible,
+  capture,
   readPage,
   find: findElements,
   text: pageText,

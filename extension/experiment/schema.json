@@ -24,6 +24,26 @@
         ]
       },
       {
+        "name": "broadcast",
+        "type": "function",
+        "async": true,
+        "description": "Run one page operation in every frame of a tab. Resolves to each frame's answer, top frame first: null where the actor doesn't run, { error } where the operation failed.",
+        "parameters": [
+          {
+            "name": "tabId",
+            "type": "integer"
+          },
+          {
+            "name": "op",
+            "type": "string"
+          },
+          {
+            "name": "args",
+            "type": "any"
+          }
+        ]
+      },
+      {
         "name": "upload",
         "type": "function",
         "async": true,

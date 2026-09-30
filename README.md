@@ -22,6 +22,8 @@ Unofficial. Not affiliated with Anthropic, OpenAI or Mozilla.
   screenshots are taken.
 - Page scripts run without being blocked by the page's CSP. File inputs are filled directly,
   without opening a native picker.
+- Password, card and one-time-code fields are [redacted](#redaction) before a screenshot or page
+  read leaves Firefox. The agent can still fill them.
 
 ## How it works
 
@@ -160,6 +162,50 @@ client and call, and Stop or Disconnect cuts them off.
 
 Paused and blocked calls fail with a message telling the agent to ask you, not to retry.
 
+## Redaction
+
+Sensitive fields are masked in what the agent sees and reads, before it leaves Firefox:
+
+- **Screenshots.** Before `computer` takes a screenshot or zoom, every frame of the tab, including
+  cross-origin iframes such as a payment provider's card fields, covers each sensitive field with
+  a solid bar labeled with what it is and whether it's filled ("card number · filled"). The bars
+  are drawn as anonymous content, like the cursor, so the page can't see or remove them, and
+  they're removed right after the capture. If a frame can't draw its bars, the screenshot fails
+  instead of going out unmasked.
+- **Text.** `read_page`, `find`, `get_page_text` and the read-back from `form_input` show
+  `[redacted: <kind>, filled|empty]` in place of the value, e.g. `value=[redacted: cc-number, filled]`.
+  Page text marks a field after its label. A field's value (4 characters or more) is also masked
+  where the page repeats it elsewhere, and `find` never matches a masked value.
+- **Filling works.** `form_input` and typing into a masked field are allowed; only reading the value
+  back is blocked.
+- Each result that masked something ends with a line such as `3 fields masked on acme-supply.com`,
+  which the sidebar shows under the steps as a note with a lock.
+
+Sensitive means an input of type `password`, a field whose `autocomplete` is a `cc-*` token,
+`one-time-code`, `new-password` or `current-password`, and anything a per-site CSS selector
+matches (with its text, for elements that aren't fields). The rules live in
+`~/.firefox-agent-bridge/redact.json`, written with the defaults the first time the host runs:
+
+```json
+{
+  "always": ["password", "cc-*", "one-time-code", "new-password", "current-password"],
+  "sites": { "chase.com": [".account-number"] }
+}
+```
+
+`always` lists input types and autocomplete tokens (a trailing `*` matches a prefix). A site key
+covers its subdomains. The host rereads the file when it changes, so edits apply to the next call;
+if it can't be parsed, the defaults apply.
+
+Limits:
+
+- `javascript_tool` can still read field values. A masked field's current value is cut out of the
+  script's result, but a script can return it transformed (split, reversed, encoded) and get it out.
+- Masking follows the rules, not the meaning: a card number typed into a field without
+  `autocomplete="cc-number"`, or shown as plain text, isn't masked unless a site rule covers it.
+- `read_page`, `find` and `get_page_text` only read the top frame, so fields in iframes never show
+  up in them; screenshots cover iframes as described above.
+
 ## Security
 
 - Signature checks are off for the whole profile, so use a separate Developer Edition profile.
@@ -169,7 +215,8 @@ Paused and blocked calls fail with a message telling the agent to ask you, not t
 - There is no shared-secret token on the socket. Any process that can reach the socket runs as
   your user and could read a token file just as easily, so a token would add nothing. Names are
   self-reported, so a blocked name can be dodged by another program running as you.
-- `javascript_tool` runs in the page and ignores its CSP.
+- `javascript_tool` runs in the page and ignores its CSP, and it can read the values
+  [redaction](#redaction) masks elsewhere.
 
 ## Install
 
@@ -242,6 +289,7 @@ Codex can run on either of these instead:
     OpenAI account.
   - The last two save screenshots to `SHOTS_DIR` (default `<tmpdir>/firefox-agent-bridge-shots`);
     `KEEP=1` keeps their temp dir.
+- Redaction rules are in `~/.firefox-agent-bridge/redact.json`.
 - Logs are in `~/.firefox-agent-bridge/host.log`. Screenshots saved with `save_to_disk` go to
   `~/.firefox-agent-bridge/screenshots/`.
 

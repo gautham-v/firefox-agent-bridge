@@ -508,7 +508,7 @@ function applyEvent(ev, replay = false) {
         t.steps.push(s);
         if (!t.blocks.some((b) => b.type === "steps")) t.blocks.push({ type: "steps" });
       }
-      Object.assign(s, { done: true, ok: ev.ok !== false, end: now, result: ev.summary ?? "" });
+      Object.assign(s, { done: true, ok: ev.ok !== false, end: now, result: ev.summary ?? "", masked: typeof ev.masked === "string" ? ev.masked : null });
       t.dirty = true;
       break;
     }
@@ -780,6 +780,14 @@ function stepRow(t, s, current) {
   return el("div", { class: cls, title: [words.detail, s.result].filter(Boolean).join(" — ") }, icon(mark), el("span", { class: "w", text: verb }), el("span", { class: "d", text: detail }), tm);
 }
 
+// What redaction masked during the turn, one line per site ("3 fields masked on acme-supply.com"),
+// with the latest call's count for each.
+function maskedNotes(t) {
+  const bySite = new Map();
+  for (const s of t.steps) if (s.masked) bySite.set(s.masked.replace(/^.* masked on /, ""), s.masked);
+  return [...bySite.values()].map((line) => el("div", { class: "note" }, icon("lock"), el("span", { text: line })));
+}
+
 function stepsBlock(t) {
   const running = !t.done;
   const cur = running ? t.steps.findLast((s) => !s.done) : null;
@@ -805,7 +813,7 @@ function stepsBlock(t) {
         icon("chevr"),
       ),
     );
-    if (!t.open) return kids;
+    if (!t.open) return [...kids, ...maskedNotes(t)];
   }
   const site = workSite(t);
   const { name } = site;
@@ -816,7 +824,7 @@ function stepsBlock(t) {
     el("span", { class: "st", text: usedFirefox ? `${running ? "Using" : "Used"} Firefox${name ? ` in ${name}` : ""}` : running ? "Working" : "Steps" }),
     el("span", { class: "n", text: S.paused && running ? "Paused" : plural(t.steps.length, "step") }),
   );
-  kids.push(el("div", { class: `steps${t.done ? " open" : ""}` }, head, el("div", { class: "list" }, t.steps.map((s) => stepRow(t, s, s === cur)))));
+  kids.push(el("div", { class: `steps${t.done ? " open" : ""}` }, head, el("div", { class: "list" }, t.steps.map((s) => stepRow(t, s, s === cur))), ...maskedNotes(t)));
   return kids;
 }
 
