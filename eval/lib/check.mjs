@@ -26,6 +26,19 @@ export function lastJson(text) {
   return null;
 }
 
+// The answer is the last JSON in the final message. When that message has none, it is the last
+// JSON in an earlier message: since tabs_context_mcp says "Created tab N ... close it", a run can
+// answer, then close its tab and end on "I closed the tab. The answer is above."
+export function answerOf(finalText, events) {
+  const fromFinal = lastJson(finalText);
+  if (fromFinal) return { answer: fromFinal, answerSource: "final" };
+  let answer = null;
+  for (const e of events)
+    if (e.type === "assistant" && !e.parent_tool_use_id)
+      for (const b of e.message?.content ?? []) if (b.type === "text") answer = lastJson(b.text) ?? answer;
+  return { answer, answerSource: answer ? "earlier_text" : null };
+}
+
 export const norm = (s) =>
   String(s ?? "")
     .toLowerCase()

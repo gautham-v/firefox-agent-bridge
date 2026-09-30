@@ -6,6 +6,7 @@
 //
 //   node eval/report.mjs [--runs eval/results/runs.jsonl] [--compare eval/results/browsers.jsonl]
 //                        [--after eval/results/browsers-after.jsonl] [--devtools eval/results/browsers-devtools.jsonl]
+//                        [--after2 eval/results/browsers-after-2.jsonl]
 //                        [--out eval/results/report.md]
 
 import fs from "node:fs";
@@ -464,6 +465,71 @@ if (devtoolsRows.length) {
     `Sources: off is \`${path.relative(EVAL, AFTER)}\`; on is \`${path.relative(EVAL, DEVTOOLS)}\`, the same tasks with the MCP server started with FIREFOX_BRIDGE_DEVTOOLS=1 (\`run.mjs --devtools\`), run right after. With it on, the model is offered one more tool (devtools) and the extension keeps each session tab's console and network log from page load. The model called devtools ${dtCalls} time(s) in ${devtoolsRows.length} runs.`,
     "",
     compareSets(cols, { ratioOf: [1, 0], taskIds: ids }),
+    "### Per call",
+    "",
+    callFacts(cols),
+  );
+}
+
+// ---- re-measure 2: the fixes from the first re-measure, after a second restart ---------------
+
+// What each fix was meant to change, counted from the traces.
+function fixChecks(cols) {
+  const lines = [`| check | ${cols.map(([l]) => l).join(" | ")} |`, `| --- | ${cols.map(() => "---").join(" | ")} |`];
+  const facts = cols.map(([, rs]) => {
+    let finds = 0;
+    let afterFind = 0;
+    const notOffered = {};
+    let created = 0;
+    const scrollFrame = [];
+    let apiFetches = 0;
+    let open = 0;
+    for (const r of rs) {
+      const tr = traceOf(r);
+      const offered = new Set(r.tools_available ?? []);
+      let closed = false;
+      tr.forEach((c, i) => {
+        if (c.short === "find") finds++;
+        if (offered.size && !offered.has(c.tool) && c.tool !== "Agent") {
+          notOffered[shortTool(c.tool)] = (notOffered[shortTool(c.tool)] ?? 0) + 1;
+          if (tr[i - 1]?.short === "find") afterFind++;
+        }
+        if (/^Created tab \d+/.test(c.text_head ?? "")) created++;
+        if (c.short === "computer" && c.action === "scroll_to" && /@f\d+/.test(c.args)) scrollFrame.push((c.text_head ?? "").match(/\((-?\d+), (-?\d+)\)/)?.[0] ?? "?");
+        const text = `${c.args ?? ""} ${JSON.stringify(c.batch_actions ?? "")}`;
+        if (r.task.startsWith("data-") && (c.short === "javascript_tool" || c.short === "batch") && /fetch\(/.test(text) && /\/api|algolia|\.json/.test(text)) apiFetches++;
+        if (c.short === "tabs_close_mcp" || (c.short === "batch" && /tabs_close/.test(text))) closed = true;
+      });
+      if (!closed && !r.tool_calls_by_tool?.mcp__firefox__tabs_close_mcp) open++;
+    }
+    const hn = rs.filter((r) => r.task === "data-hn-readability");
+    return { rs, finds, afterFind, notOffered, created, scrollFrame, apiFetches, open, hn };
+  });
+  const row = (label, fn) => lines.push(`| ${label} | ${facts.map(fn).join(" | ")} |`);
+  row("calls to a tool not offered, right after a find (find calls)", (f) => `${f.afterFind} (${f.finds})`);
+  row("calls to tools not offered, all", (f) => Object.entries(f.notOffered).map(([t, n]) => `${t} ${n}`).join(", ") || "0");
+  row("computer scroll_to on a frame ref: the center it reported", (f) => (f.scrollFrame.length ? [...new Set(f.scrollFrame)].map((p) => `${p} x${f.scrollFrame.filter((q) => q === p).length}`).join(", ") : "–"));
+  row("runs that never closed their tab", (f) => `${f.open} of ${f.rs.length}`);
+  row('results that start "Created tab N"', (f) => f.created);
+  row("javascript_tool fetches of an API or JSON in data tasks", (f) => f.apiFetches);
+  row("data-hn-readability input tokens, median [min–max]", (f) => spread(f.hn.map(inputTokens), k));
+  lines.push("");
+  return lines.join("\n");
+}
+
+const AFTER2 = opt("after2", path.join(EVAL, "results/browsers-after-2.jsonl"));
+const after2Rows = readJsonl(AFTER2).filter((r) => browserOf(r) === "firefox" && r.arm === "baseline");
+if (after2Rows.length) {
+  const ids = TASKS.map((t) => t.id).filter((id) => after2Rows.some((r) => r.task === id));
+  const cols = [["firefox after", afterRows.filter((r) => ids.includes(r.task))], ["firefox after-2", after2Rows], ["chrome", chromeRows.filter((r) => ids.includes(r.task))]];
+  out.push("## Re-measure 2: the re-measure's fixes, after another restart (baseline arm)", "");
+  out.push(
+    `Sources: Firefox after is \`${path.relative(EVAL, AFTER)}\` (the first re-measure); Firefox after-2 is \`${path.relative(EVAL, AFTER2)}\`, the same ${ids.length} tasks, model and prompt, once Firefox had restarted with main at c1ad4bb. It loads what the first re-measure's traces led to: find's header names \`computer left_click\`, scroll_to on a frame ref reports screenshot coordinates, tabs_context_mcp and navigate say "Created tab N ... close it", javascript_tool says to fetch pages rather than the site's API, computer's description says it has no separate screenshot or click tools, and typing fires change on Tab or a click away in background tabs. Chrome is the rows in \`${path.relative(EVAL, COMPARE)}\`, not run again.`,
+    "",
+    compareSets(cols, { ratioOf: [1, 0], taskIds: ids }),
+    "### What each fix was meant to change",
+    "",
+    fixChecks(cols.slice(0, 2)),
     "### Per call",
     "",
     callFacts(cols),

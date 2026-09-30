@@ -29,7 +29,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { lastJson } from "./lib/check.mjs";
+import { answerOf } from "./lib/check.mjs";
 import { startMcp } from "./lib/mcp-client.mjs";
 import { childEnv, summarize } from "./lib/stream.mjs";
 import * as round1 from "./models-tasks.mjs";
@@ -245,7 +245,7 @@ async function runOne(cell) {
 
   const m = summarize(events);
   const { state, errors: inspectErrors, tabsLeft } = await inspectAndClose(session, task);
-  const answer = lastJson(m.final_text);
+  const { answer, answerSource } = answerOf(m.final_text, events);
   // The agent's tool calls, for tasks whose rules limit the tools (the hard tier's no-JS tasks).
   const trace = events.filter((e) => e.type === "assistant" && !e.parent_tool_use_id).flatMap((e) => (e.message?.content ?? []).filter((b) => b.type === "tool_use").map((b) => ({ name: b.name, input: b.input })));
   let fields = {};
@@ -275,7 +275,7 @@ async function runOne(cell) {
     task: cell.task, config: config.id, model: config.model, effort: config.effort, round: cell.round, order: cell.order, tag: TAG,
     started_at: new Date(started).toISOString(), wall_ms, first_tool_ms: m.first_tool_ms,
     timeout: timedOut, infra_error: infraError, rate_limited: rateLimited,
-    score: sc, pass, fields, answer, final_text: m.final_text?.slice(-1500) ?? null,
+    score: sc, pass, fields, answer, answer_source: answerSource, final_text: m.final_text?.slice(-1500) ?? null,
     state, inspect_errors: inspectErrors, tabs_left: tabsLeft,
     model_reported: m.model, per_turn_effort_active: m.per_turn_effort_active,
     thinking_blocks: m.thinking_blocks, thinking_signature_chars: m.thinking_signature_chars, thinking_text_chars: m.thinking_text_chars,

@@ -4,7 +4,10 @@
 // and Pareto flags (score vs cost, score vs time). Rows that failed for infrastructure reasons
 // (no result from the CLI) are left out; timeouts count as score 0.
 //
-//   node eval/models-report.mjs [--in eval/results/models/runs.jsonl]
+//   node eval/models-report.mjs [--in eval/results/models/runs.jsonl] [--prefix sonnet-rerun-]
+//
+// --prefix names the outputs <prefix>report.md and <prefix>summary.json, so a rerun into its own
+// file doesn't overwrite the round's report.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -15,6 +18,8 @@ const argv = process.argv.slice(2);
 const i = argv.indexOf("--in");
 const IN = path.resolve(i >= 0 ? argv[i + 1] : path.join(EVAL, "results/models/runs.jsonl"));
 const DIR = path.dirname(IN);
+const p = argv.indexOf("--prefix");
+const PREFIX = p >= 0 ? argv[p + 1] : "";
 
 const rows = fs
   .readFileSync(IN, "utf8")
@@ -144,7 +149,7 @@ const summary = {
   per_task_config: perTaskConfig,
   effort_steps: effortSteps,
 };
-fs.writeFileSync(path.join(DIR, "summary.json"), JSON.stringify(summary, null, 2) + "\n");
+fs.writeFileSync(path.join(DIR, `${PREFIX}summary.json`), JSON.stringify(summary, null, 2) + "\n");
 
 // ---- markdown ------------------------------------------------------------------------------
 
@@ -183,5 +188,5 @@ for (const t of tasks) {
   const n = rows.filter((r) => r.task === t).length;
   md += `\nSub-goal miss rate: ${Object.entries(fails).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${pct(v / n)}`).join(", ")}\n`;
 }
-fs.writeFileSync(path.join(DIR, "report.md"), md);
-console.log(`wrote ${path.relative(process.cwd(), path.join(DIR, "report.md"))} and summary.json (${rows.length} runs)`);
+fs.writeFileSync(path.join(DIR, `${PREFIX}report.md`), md);
+console.log(`wrote ${path.relative(process.cwd(), path.join(DIR, `${PREFIX}report.md`))} and ${PREFIX}summary.json (${rows.length} runs)`);
