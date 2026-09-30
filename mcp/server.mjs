@@ -256,6 +256,8 @@ if (on("pageTextCap")) {
   });
 }
 if (on("screenshotAlias")) {
+  const c = toolDef("computer");
+  c.description = c.description.replace("there are no separate screenshot or click tools", "there are no separate click tools (screenshot also has its own)");
   TOOLS.push({
     name: "screenshot",
     description: "Screenshot of a tab; the same as computer's screenshot action.",

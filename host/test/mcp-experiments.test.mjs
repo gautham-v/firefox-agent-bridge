@@ -109,7 +109,7 @@ const FIXTURE_TOOLS = JSON.parse(fs.readFileSync(FIXTURE, "utf8")).tools;
 const CHANGES = {
   batchHint: ["computer", "batch"],
   fewerShots: ["computer"],
-  screenshotAlias: ["screenshot", "batch"],
+  screenshotAlias: ["computer", "screenshot", "batch"],
   quietTabs: ["navigate"],
   pageTextCap: ["get_page_text"],
   fastNavigate: [],
