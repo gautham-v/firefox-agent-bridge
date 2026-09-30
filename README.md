@@ -66,9 +66,9 @@ Its extension hasn't changed since, so it wasn't run again.
     it took 9 calls, 18s and 72k tokens. In all 3 runs, `find` returned the select with a frame
     ref and `form_input` set it through that ref. No run used JavaScript or opened the frame on
     its own.
-  - **Clicks** took 0.70s each, because a click waited 500ms for a tab it might open. Now it
-    waits 100ms (longer only for a link that opens a new tab) and skips the cursor animation in
-    background tabs, so a click takes 0.12s.
+  - **Clicks** took 0.70s each, because a click waited 500ms for a tab it might open. In the
+    rerun it waited 100ms (longer only for a link that opens a new tab) and skipped the cursor
+    animation in background tabs, so a click took 0.12s. It now waits only when it opened a tab.
 - **Background work.** Agent tabs run in their own tab group in the background, and screenshots
   work without the window on screen. Claude in Chrome needs its window visible to take
   screenshots.
@@ -159,6 +159,8 @@ Differences from Chrome:
   (`get_page_text`, `find`) gets the page as parsed so far: the HTML is all there, but content
   that scripts add later may not be. A redirect that lands later replaces the page, and a read
   caught in the switch fails; reading again reads the new page.
+- A click waits only when it opened a tab, to name that tab in its result. A click that opened
+  nothing answers at once, so keys and typing sent right after it aren't held up.
 - There is no `gif_creator` or shortcuts. Console and network reading is one opt-in tool,
   `devtools`, below.
 

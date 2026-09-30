@@ -2127,29 +2127,51 @@ async function clickEnv({ answer = 'Clicked button "Go"', onClick } = {}) {
     }
     return op === "textSize" ? 10 : "done";
   };
-  // The page in tab 2 opens tab 3 after `ms`.
-  const openAfter = (ms) =>
-    setTimeout(() => {
-      const t3 = { id: 3, windowId: 10, groupId: -1, active: false, openerTabId: 2, url: "https://x.example/new", status: "complete", title: "New" };
-      env.browser.tabsMap.set(3, t3);
-      env.browser.tabs.onCreated.fire({ ...t3 });
-    }, ms);
+  // The page in tab 2 opens tab 3: the tab exists (tabs.query lists it) after `made` ms, as a
+  // tab window.open made does before the click answers, and onCreated sees it after `seen`.
+  const openAfter = (seen, made = seen) => {
+    const t3 = { id: 3, windowId: 10, groupId: -1, active: false, openerTabId: 2, url: "https://x.example/new", status: "complete", title: "New" };
+    const make = () => env.browser.tabsMap.set(3, t3);
+    if (made <= 0) make();
+    else setTimeout(make, made);
+    setTimeout(() => env.browser.tabs.onCreated.fire({ ...t3 }), seen);
+  };
   return { ...env, calls, openAfter };
 }
 
-test("a click that opens no tab answers after a short grace period, not half a second", async () => {
+test("a click that opens no tab answers at once, so keys right after it aren't held up", async () => {
   const env = await clickEnv();
   const t0 = Date.now();
   const r = await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] });
+  await env.callTool("computer", { action: "key", tabId: 2, text: "Tab" });
   const took = Date.now() - t0;
   assert.equal(r.result.content[0].text, 'Clicked button "Go"');
-  assert.ok(took < 300, `took ${took}ms`);
+  assert.ok(took < 95, `click and key took ${took}ms`);
 });
 
-test("a click that opens a tab within the grace period names it", async () => {
-  const env = await clickEnv({ onClick: () => env.openAfter(40) });
+test("a click whose page opened a tab (window.open) waits for onCreated and names it", async () => {
+  const env = await clickEnv({ onClick: () => env.openAfter(40, 0) });
   const r = await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] }, "s1", undefined, 4000);
   assert.match(r.result.content[0].text, /^Clicked button "Go"\nThe click opened a new tab in this session's group: tab 3: https:\/\/x\.example\/new \(New\)$/);
+});
+
+test("a tab the page opens after the click answered isn't waited for, but still joins the group", async () => {
+  const env = await clickEnv({ onClick: () => env.openAfter(40) });
+  const t0 = Date.now();
+  const r = await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] });
+  assert.ok(Date.now() - t0 < 95, `took ${Date.now() - t0}ms`);
+  assert.equal(r.result.content[0].text, 'Clicked button "Go"');
+  await wait(100);
+  assert.equal(env.browser.tabsMap.get(3).groupId, env.browser.tabsMap.get(2).groupId);
+});
+
+test("a tab the page opened before the click doesn't make the click wait", async () => {
+  const env = await clickEnv();
+  env.browser.tabsMap.set(3, { id: 3, windowId: 10, groupId: -1, active: false, openerTabId: 2, url: "https://x.example/old", status: "complete", title: "Old" });
+  const t0 = Date.now();
+  const r = await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] });
+  assert.ok(Date.now() - t0 < 95, `took ${Date.now() - t0}ms`);
+  assert.equal(r.result.content[0].text, 'Clicked button "Go"');
 });
 
 test("a click on a link that targets a new tab waits longer for it", async () => {

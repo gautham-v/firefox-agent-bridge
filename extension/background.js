@@ -671,12 +671,14 @@ async function toCss(tabId, coordinate) {
 const frameScale = async (tabId) => 1 / (await ratioFor(tabId));
 
 // ---------------------------------------------------------------------------------------------
-// Tabs opened by a session tab (target=_blank, window.open), reported back after clicks. A tab a
-// click opens is created at once but reaches onCreated a moment later, so a click waits up to
-// OPEN_GRACE_MS for one, or OPEN_WAIT_MS when it was on a link or form that targets a new tab,
-// and goes on as soon as one arrives.
+// Tabs opened by a session tab (target=_blank, window.open), reported back after clicks. A click
+// waits only when it opened one: window.open has made its tab before the click's answer comes
+// back, so tabs.query already lists it (openerTabs), and a link or form that targets a new tab
+// opens one just after (the page says so, result.opens). onCreated, which records the tab in
+// openedBy, sees it a moment later; the click waits up to OPEN_WAIT_MS for that, and goes on as
+// soon as it arrives. A click that opened nothing answers at once, so keys sent right after it
+// aren't held up; a tab a script opens later still joins the group, unreported.
 
-const OPEN_GRACE_MS = 100;
 const OPEN_WAIT_MS = 500;
 const openedBy = new Map(); // opener tab id -> [{ tabId, at }]
 const openWaiters = new Map(); // opener tab id -> Set of callbacks waiting for a tab it opens
@@ -700,9 +702,14 @@ function untilTabOpened(tabId, ms) {
   });
 }
 
-async function openedTabsNote(tabId, since, wait = OPEN_GRACE_MS) {
+// The ids of the tabs this tab opened (openerTabId), in every window.
+async function openerTabs(tabId) {
+  return new Set((await browser.tabs.query({})).filter((t) => t.openerTabId === tabId).map((t) => t.id));
+}
+
+async function openedTabsNote(tabId, since) {
   const opened = () => (openedBy.get(tabId) ?? []).filter((o) => o.at >= since);
-  if (!opened().length) await untilTabOpened(tabId, wait);
+  if (!opened().length) await untilTabOpened(tabId, OPEN_WAIT_MS);
   const fresh = opened();
   if (!fresh.length) return "";
   const notes = [];
@@ -907,8 +914,10 @@ async function computer(session, args) {
       const clickCount = { double_click: 2, triple_click: 3 }[action] ?? 1;
       const button = action === "right_click" ? 2 : 0;
       const since = Date.now();
-      const result = await page(tabId, "click", { ...(await toCss(tabId, args.coordinate)), ref: args.ref, button, clickCount, modifiers: args.modifiers, animate });
-      return pageContent(result, await openedTabsNote(tabId, since, result?.opens ? OPEN_WAIT_MS : OPEN_GRACE_MS));
+      const [point, before] = await Promise.all([toCss(tabId, args.coordinate), openerTabs(tabId)]);
+      const result = await page(tabId, "click", { ...point, ref: args.ref, button, clickCount, modifiers: args.modifiers, animate });
+      const opened = result?.opens || [...(await openerTabs(tabId))].some((id) => !before.has(id));
+      return pageContent(result, opened ? await openedTabsNote(tabId, since) : "");
     }
     case "hover":
       needsTarget();
