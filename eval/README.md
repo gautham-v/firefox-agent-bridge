@@ -158,6 +158,20 @@ the wording and the arithmetic; these need a Firefox restart and a rerun to conf
   times; the task's median input tokens went from 58k to 111k. The description now adds "Fetch the pages you would have
   navigated to, not the site's API." **Check**: API calls from `javascript_tool` in data tasks.
 
+Seen in the hard tier (round 2), and fixed since (branch `fix/typing-change-event`); these also
+need a restart and a rerun of `--tier hard`:
+
+- Typing with `computer` never fired `change`: in a background tab Gecko moves focus without
+  blur or focus events, and its text fields fire `change` from their blur. After the agent's
+  click, key or type moves focus in a document that doesn't have focus, the actor now dispatches
+  blur/focusout and focus/focusin itself (`experiment/focus.sys.mjs`). **Check**: uitp-no-js's
+  text-box goal passes without `form_input` (it was all 3 Sonnet misses on that task), and
+  todomvc-flow's rename still saves.
+- Sonnet called `mcp__firefox__screenshot` 13–15 times per 18 runs. The `computer` description
+  now opens with "Screenshots, clicks, typing and scrolling in a Firefox tab are all actions of
+  this one tool; there are no separate screenshot or click tools." **Check**: calls to tools not
+  offered, per config, against 13–15 per 18 runs for Sonnet.
+
 `scripts/test-firefox.mjs` has steps for frames and keys but runs on Linux under Xvfb, so it
 wasn't run here.
 

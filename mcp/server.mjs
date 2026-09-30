@@ -62,7 +62,7 @@ const TOOLS = [
   {
     name: "computer",
     description:
-      "Mouse, keyboard and screenshots for a Firefox tab. Input is trusted (isTrusted, user activation) and works while the tab is in the background, without moving the real cursor.\n* Take a screenshot to find coordinates before clicking by coordinate; clicking by ref from find/read_page is more reliable.\n* Click the center of elements, not their edges.\n* Do not click file inputs or upload buttons (native pickers can't be driven); use file_upload.",
+      "Screenshots, clicks, typing and scrolling in a Firefox tab are all actions of this one tool; there are no separate screenshot or click tools. Input is trusted (isTrusted, user activation) and works while the tab is in the background, without moving the real cursor.\n* Take a screenshot to find coordinates before clicking by coordinate; clicking by ref from find/read_page is more reliable.\n* Click the center of elements, not their edges.\n* Do not click file inputs or upload buttons (native pickers can't be driven); use file_upload.",
     inputSchema: {
       type: "object",
       properties: {
