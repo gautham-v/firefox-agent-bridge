@@ -780,6 +780,83 @@ function stepRow(t, s, current) {
   return el("div", { class: cls, title: [words.detail, s.result].filter(Boolean).join(" — ") }, icon(mark), el("span", { class: "w", text: verb }), el("span", { class: "d", text: detail }), tm);
 }
 
+// The agent cam: a live thumbnail of the tab the running turn last acted on, in the steps card.
+// The sidebar captures it itself (tabs.captureTab, unlike tool screenshots, keeps the agent
+// cursor on the page), a few frames a second, only while the turn runs, the panel is visible
+// and the card is on screen.
+const CAM_MS = 400;
+const CAM_SCALE = 0.25;
+const CAM_MAX_FAILS = 3;
+const cam = { tabId: null, busy: false, fails: 0, img: null, el: null };
+
+function camEl() {
+  if (!cam.el) {
+    cam.img = el("img", { alt: "Live view of the agent's tab", draggable: "false" });
+    cam.el = el(
+      "div",
+      { class: "cam" },
+      cam.img,
+      el("button", { class: "exp", title: "Switch to this tab", "aria-label": "Switch to this tab", onclick: () => cam.tabId != null && browser.tabs.update(cam.tabId, { active: true }).catch(() => {}) }, icon("popout")),
+    );
+  }
+  return cam.el;
+}
+
+// The tab to watch: the running turn's latest step that names a tab still in the group.
+function camTarget() {
+  const t = activeTurn();
+  if (!t) return null;
+  const id = [...t.steps].reverse().find((s) => s.tabId != null)?.tabId;
+  return id != null && S.group?.tabs?.some((x) => x.tabId === id) ? id : null;
+}
+
+// Drops the frame, so a finished turn or another tab never shows a stale one.
+function camClear() {
+  cam.fails = 0;
+  if (cam.tabId == null && !cam.img?.src) return;
+  cam.tabId = null;
+  cam.img?.removeAttribute("src");
+  const t = activeTurn();
+  if (t) t.dirty = true;
+  render("body");
+}
+
+function camInView() {
+  const card = activeTurn()?.el?.querySelector(".steps");
+  if (!card) return false;
+  const r = card.getBoundingClientRect();
+  const box = $("scroll").getBoundingClientRect();
+  return r.bottom > box.top && r.top < box.bottom;
+}
+
+async function camTick() {
+  const id = camTarget();
+  if (id == null) return camClear();
+  if (id !== cam.tabId) {
+    camClear();
+    cam.tabId = id;
+  }
+  if (cam.busy || document.hidden || !camInView()) return;
+  cam.busy = true;
+  try {
+    const url = await browser.tabs.captureTab(id, { format: "jpeg", quality: 60, scale: CAM_SCALE });
+    if (camTarget() !== id) return;
+    const first = !cam.img?.src;
+    camEl();
+    cam.img.src = url;
+    cam.fails = 0;
+    if (first) {
+      activeTurn().dirty = true;
+      render("body");
+    }
+  } catch {
+    // a page that can't be captured (about:, a discarded tab) shows no frame
+    if (++cam.fails >= CAM_MAX_FAILS) camClear();
+  } finally {
+    cam.busy = false;
+  }
+}
+
 function stepsBlock(t) {
   const running = !t.done;
   const cur = running ? t.steps.findLast((s) => !s.done) : null;
@@ -816,7 +893,8 @@ function stepsBlock(t) {
     el("span", { class: "st", text: usedFirefox ? `${running ? "Using" : "Used"} Firefox${name ? ` in ${name}` : ""}` : running ? "Working" : "Steps" }),
     el("span", { class: "n", text: S.paused && running ? "Paused" : plural(t.steps.length, "step") }),
   );
-  kids.push(el("div", { class: `steps${t.done ? " open" : ""}` }, head, el("div", { class: "list" }, t.steps.map((s) => stepRow(t, s, s === cur)))));
+  const live = running && cam.img?.getAttribute("src") && cam.tabId === camTarget() ? camEl() : null;
+  kids.push(el("div", { class: `steps${t.done ? " open" : ""}` }, head, live, el("div", { class: "list" }, t.steps.map((s) => stepRow(t, s, s === cur)))));
   return kids;
 }
 
@@ -1728,6 +1806,7 @@ function wire() {
   setInterval(() => {
     for (const n of document.querySelectorAll(".tm[data-live]")) n.textContent = clock(Date.now() - Number(n.dataset.live));
   }, 1000);
+  setInterval(camTick, CAM_MS);
 }
 
 function connect() {

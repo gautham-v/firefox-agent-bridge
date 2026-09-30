@@ -83,6 +83,10 @@ Nothing is billed beyond your existing subscription, and nothing runs until you 
   lists your Claude Code skills, connectors and plugins (read-only). The model menu picks the
   engine, model and effort. Enter sends; while a task runs, Stop interrupts it, and a message you
   send instead is added to the task.
+- **Agent cam.** While a task runs, the steps card shows a live thumbnail of the tab the agent last
+  acted on, with its cursor, refreshed about twice a second; the button in its corner switches to
+  that tab. It pauses while the panel is hidden or the card is scrolled out of view, and goes away
+  when the task ends.
 - **Permissions.** Firefox tools run without asking. Anything else, such as a shell command, a file
   edit, a read outside the chat folder or a web fetch, shows an Allow once / Always allow in this
   chat / Deny card with what it would do, and waits. Always allow covers the exact command (or the
