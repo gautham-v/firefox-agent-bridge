@@ -1028,8 +1028,7 @@ test("choosing a recent chat opens the sidebar on it", async () => {
   const [resume] = plain(await typing);
   assert.match(resume.description, /Denver trip.* Today/);
   const opening = env.browser.omnibox.onInputEntered.fire(resume.content, "currentTab");
-  await wait(20);
-  assert.equal(env.browser.action.toggles, 1);
+  assert.equal(env.browser.action.toggles, 1, "the sidebar opens in the handler's own call stack, before anything is awaited");
   const p = await env.panel();
   await opening;
   await wait(300);

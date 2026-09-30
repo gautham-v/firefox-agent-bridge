@@ -1586,15 +1586,13 @@ async function startOmniTask(text, withPage) {
 }
 
 // Opens a past chat in the sidebar of the window the user is in. The address bar's input handler
-// counts as a user action, so the sidebar may open from it.
+// counts as a user action, so the sidebar may open from it, but only in the handler's own call
+// stack: the caller opens it before anything is awaited, and this waits for its panel.
 async function resumeOmniChat(info) {
   if (!validChatId(info?.id)) return;
   const windowId = await lastNormalWindowId();
   const shown = () => [...panels].find((p) => p.windowId === windowId && p.ready);
-  if (!shown()) {
-    await browser.sidebarAction.open().catch(() => {});
-    for (let i = 0; i < 30 && !shown(); i++) await new Promise((r) => setTimeout(r, 100));
-  }
+  for (let i = 0; i < 30 && !shown(); i++) await new Promise((r) => setTimeout(r, 100));
   const panel = shown();
   if (panel) await panelCommands["chat.open"](panel, { chatId: info.id, source: info.source, path: info.path, engine: info.engine, model: info.model });
   else windowChat.set(windowId, info.id);
@@ -1640,8 +1638,16 @@ if (browser.omnibox) {
     suggest(omniSuggestions(t, await omniHistory));
   });
   browser.omnibox.onInputEntered.addListener((text) => {
-    if (text.startsWith(OMNI_RESUME)) resumeOmniChat(JSON.parse(text.slice(OMNI_RESUME.length))).catch(() => {});
-    else if (text.startsWith(OMNI_PAGE)) startOmniTask(text.slice(OMNI_PAGE.length), true).catch(() => {});
+    if (text.startsWith(OMNI_RESUME)) {
+      let info = null;
+      try {
+        info = JSON.parse(text.slice(OMNI_RESUME.length));
+      } catch {
+        return;
+      }
+      browser.sidebarAction.open().catch(() => {});
+      resumeOmniChat(info).catch(() => {});
+    } else if (text.startsWith(OMNI_PAGE)) startOmniTask(text.slice(OMNI_PAGE.length), true).catch(() => {});
     else startOmniTask(text, false).catch(() => {});
   });
 }
