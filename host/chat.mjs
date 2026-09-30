@@ -168,10 +168,13 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
 
   // How the firefox MCP server is launched for a chat. Passing it explicitly (a --mcp-config
   // entry replaces a same-named user-scope server) means chats work without install.sh having
-  // registered it with this engine, and always run this checkout's server.
+  // registered it with this engine, and always run this checkout's server. The opt-in devtools
+  // tool is on for chats only when the host itself runs with FIREFOX_BRIDGE_DEVTOOLS=1; it's set
+  // either way so an engine's own env settings can't turn it on.
   const firefoxServer = (chatId) => {
     const s = mcpServer ?? { command: process.execPath, args: [path.join(REPO, "mcp/server.mjs")] };
-    return { ...s, env: { ...s.env, FIREFOX_AGENT_BRIDGE_SESSION: chatId } };
+    const devtools = env.FIREFOX_BRIDGE_DEVTOOLS === "1" ? "1" : "0";
+    return { ...s, env: { ...s.env, FIREFOX_AGENT_BRIDGE_SESSION: chatId, FIREFOX_BRIDGE_DEVTOOLS: devtools } };
   };
 
   // ---- chat registry ------------------------------------------------------------------------

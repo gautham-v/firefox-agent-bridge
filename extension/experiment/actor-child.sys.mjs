@@ -2217,6 +2217,187 @@ function viewport(doc) {
   };
 }
 
+// ---------------------------------------------------------------------------------------------
+// devtools (the opt-in tool): in a tab the extension watches, api.js sends "consoleWatch" to
+// every frame, and again to each document that loads there later. The frame then takes its own
+// window's console messages and script errors: those logged before it was told, which the
+// console keeps per window, and each one after. They go to the parent in batches, with masked
+// field values cut out first, as they are from javascript_tool's result.
+
+const CONSOLE_FLUSH_MS = 250;
+const CONSOLE_BATCH_MAX = 200;
+const CONSOLE_ARG_CHARS = 1000;
+// inner window id (as a string, the console's own key) -> { actor, pending, dropped, timer, rules }
+const consoleWatchers = new Map();
+let consoleListening = false;
+
+// An argument as text, without running page code: page objects are seen through Xrays, which
+// hide getters and page-defined methods, and objects are only shown one level deep.
+function consoleArg(v, nested = false) {
+  try {
+    if (v === null) return "null";
+    if (typeof v === "string") return nested ? JSON.stringify(v.slice(0, 200)) : v;
+    if (typeof v !== "object" && typeof v !== "function") return String(v);
+    if (typeof v === "function") return `ƒ ${v.name || "anonymous"}`;
+    const cls = ChromeUtils.getClassName(v, true);
+    if (/Error$/.test(cls)) return `${v.name || cls}: ${v.message ?? ""}`;
+    if (typeof v.nodeType === "number") return v.nodeType === 1 ? `<${v.localName}${v.id ? `#${v.id}` : ""}>` : v.nodeName;
+    if (nested) return Array.isArray(v) ? `Array(${v.length})` : cls;
+    if (Array.isArray(v)) return `[${Array.from(v).slice(0, 20).map((x) => consoleArg(x, true)).join(", ")}${v.length > 20 ? ", …" : ""}]`;
+    const keys = Object.keys(v);
+    const shown = keys.slice(0, 20).map((k) => {
+      const d = Object.getOwnPropertyDescriptor(v, k);
+      return `${k}: ${d && "value" in d ? consoleArg(d.value, true) : "…"}`;
+    });
+    return `${cls === "Object" ? "" : `${cls} `}{${shown.join(", ")}${keys.length > 20 ? ", …" : ""}}`;
+  } catch {
+    return "[object]";
+  }
+}
+
+// console.log's arguments as one line, with %s-style substitutions applied and %c styles dropped.
+function consoleText(msg) {
+  const args = Array.from(msg.arguments ?? []);
+  if (msg.level === "timeEnd" || msg.level === "timeLog") return `${msg.timer?.name ?? "default"}: ${msg.timer?.duration ?? "?"}ms`;
+  if (msg.level === "count") return `${msg.counter?.label ?? "default"}: ${msg.counter?.count ?? "?"}`;
+  const parts = [];
+  if (typeof args[0] === "string" && args[0].includes("%")) {
+    const format = args.shift();
+    parts.push(
+      format.replace(/%[sdifoOc%]/g, (m) => {
+        if (m === "%%") return "%";
+        if (!args.length) return m;
+        const v = args.shift();
+        if (m === "%c") return "";
+        if (m === "%d" || m === "%i") return String(parseInt(typeof v === "object" ? NaN : v, 10));
+        if (m === "%f") return String(typeof v === "object" ? NaN : Number(v));
+        return consoleArg(v);
+      }),
+    );
+  }
+  for (const v of args) parts.push(consoleArg(v));
+  return parts.join(" ").slice(0, CONSOLE_ARG_CHARS);
+}
+
+function apiEntry(msg) {
+  return { level: msg.level, text: consoleText(msg), source: msg.filename, line: msg.lineNumber, time: msg.timeStamp };
+}
+
+function errorEntry(msg) {
+  const level = msg.flags & Ci.nsIScriptError.warningFlag ? "warning" : msg.flags & Ci.nsIScriptError.infoFlag ? "info" : "error";
+  return { level, text: String(msg.errorMessage ?? "").slice(0, CONSOLE_ARG_CHARS), source: msg.sourceName, line: msg.lineNumber, time: msg.timeStamp };
+}
+
+// Console API calls in this process. The console names the window each came from.
+const consoleApiObserver = {
+  observe(subject, topic, id) {
+    const msg = subject?.wrappedJSObject ?? subject;
+    const w = consoleWatchers.get(String(id)) ?? consoleWatchers.get(String(msg?.innerID));
+    if (w && !msg.chromeContext) queue(w, apiEntry(msg));
+  },
+};
+
+// Script errors and warnings (uncaught exceptions, CSP, failed loads) in this process.
+const consoleErrorListener = {
+  observe(msg) {
+    if (!(msg instanceof Ci.nsIScriptError) || msg.isFromChromeContext) return;
+    const w = consoleWatchers.get(String(msg.innerWindowID));
+    if (w) queue(w, errorEntry(msg));
+  },
+};
+
+function listenConsole(on) {
+  if (on === consoleListening) return;
+  consoleListening = on;
+  if (on) {
+    Services.obs.addObserver(consoleApiObserver, "console-api-log-event");
+    Services.console.registerListener(consoleErrorListener);
+  } else {
+    Services.obs.removeObserver(consoleApiObserver, "console-api-log-event");
+    Services.console.unregisterListener(consoleErrorListener);
+  }
+}
+
+function queue(w, entry) {
+  if (w.pending.length >= CONSOLE_BATCH_MAX) {
+    w.pending.shift();
+    w.dropped++;
+  }
+  w.pending.push(entry);
+  if (!w.timer) w.timer = setTimeout(() => flushConsole(w), CONSOLE_FLUSH_MS);
+}
+
+// Sends what's pending. Masked field values are cut out first; if the page can't be checked for
+// them, the messages' text isn't sent at all.
+function flushConsole(w) {
+  clearTimeout(w.timer);
+  w.timer = null;
+  if (!w.pending.length && !w.dropped) return;
+  let entries = w.pending;
+  const dropped = w.dropped;
+  w.pending = [];
+  w.dropped = 0;
+  if (w.rules) {
+    try {
+      const red = redactor(w.actor.document, w.rules);
+      entries = entries.map((e) => ({ ...e, text: red.scrub(e.text, false) }));
+    } catch {
+      entries = entries.map((e) => ({ ...e, text: "(not shown: couldn't check it for masked field values)" }));
+    }
+  }
+  try {
+    w.actor.sendAsyncMessage("console", { entries, dropped });
+  } catch {
+    // the window is gone
+  }
+}
+
+function consoleWatch(actor, { on, redact }) {
+  const id = String(actor.manager.innerWindowId);
+  const known = consoleWatchers.get(id);
+  if (!on) {
+    if (known) stopConsole(id);
+    return false;
+  }
+  if (known) {
+    known.rules = redact ?? null;
+    return true;
+  }
+  const w = { actor, pending: [], dropped: 0, timer: null, rules: redact ?? null };
+  consoleWatchers.set(id, w);
+  actor.consoleId = id;
+  // What this window logged before now, from the console's own caches, oldest first.
+  const earlier = [];
+  try {
+    const storage = Cc["@mozilla.org/consoleAPI-storage;1"].getService(Ci.nsIConsoleAPIStorage);
+    for (const m of storage.getEvents(id) ?? []) {
+      const msg = m?.wrappedJSObject ?? m;
+      if (!msg.chromeContext) earlier.push(apiEntry(msg));
+    }
+  } catch {
+    // no console storage in this process
+  }
+  try {
+    for (const m of Services.console.getMessageArray() ?? []) {
+      if (m instanceof Ci.nsIScriptError && !m.isFromChromeContext && String(m.innerWindowID) === id) earlier.push(errorEntry(m));
+    }
+  } catch {
+    // nothing kept
+  }
+  earlier.sort((a, b) => a.time - b.time);
+  for (const e of earlier) queue(w, e);
+  listenConsole(true);
+  return true;
+}
+
+function stopConsole(id) {
+  const w = consoleWatchers.get(id);
+  if (!w) return;
+  clearTimeout(w.timer);
+  consoleWatchers.delete(id);
+  if (!consoleWatchers.size) listenConsole(false);
+}
+
 const OPS = {
   viewport,
   textSize,
@@ -2248,6 +2429,7 @@ const OPS = {
 
 export class ClaudePageChild extends JSWindowActorChild {
   receiveMessage({ name, data }) {
+    if (name === "consoleWatch") return consoleWatch(this, data ?? {});
     const op = OPS[name];
     if (!op) throw new Error(`Unknown op ${name}`);
     const doc = this.document;
@@ -2260,6 +2442,11 @@ export class ClaudePageChild extends JSWindowActorChild {
   // swallowed is a pick, not a step.
   handleEvent(event) {
     if (!event.isTrusted) return;
+    // A page going away sends its console messages now, before its window can't.
+    if (event.type === "pagehide" && this.consoleId) {
+      const w = consoleWatchers.get(this.consoleId);
+      if (w) flushConsole(w);
+    }
     let doc;
     try {
       doc = this.document;
@@ -2270,5 +2457,9 @@ export class ClaudePageChild extends JSWindowActorChild {
     if (p?.armed) onPointEvent(this, doc, p, event);
     if (event.defaultPrevented && p?.armed) return;
     if (isRecording(this)) onRecordEvent(this, event);
+  }
+
+  didDestroy() {
+    if (this.consoleId) stopConsole(this.consoleId);
   }
 }

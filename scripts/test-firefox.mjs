@@ -60,6 +60,17 @@ const PAGE_HTML = `<!doctype html>
 
 const OTHER_HTML = `<!doctype html><title>Other page</title><p>Opened by target=_blank</p>`;
 
+// For the devtools tool: messages and a failed request while the page loads, before any call.
+const DEVTOOLS_HTML = `<!doctype html><title>Devtools page</title>
+<input type="password" id="pw" value="hunter2-secret">
+<script>
+  console.log("devtools-log-1", { a: 1 });
+  console.warn("devtools-warn https://x.example/cb?token=abc");
+  console.log("typed:", document.getElementById("pw").value);
+  fetch("/missing.json").catch(() => {});
+  setTimeout(() => { throw new Error("boom at load"); }, 0);
+</script>`;
+
 // The select sits in a shadow root, as MDN's live samples do.
 const FRAME_HTML = `<!doctype html>
 <html><head><style>body { margin: 0; } #fbtn { position: absolute; left: 20px; top: 20px; width: 140px; height: 50px; }
@@ -110,7 +121,7 @@ async function screenshotScale(client, tabId, file) {
 let mn;
 let failed = false;
 try {
-  await h.serve(PAGE_PORT, { "/": PAGE_HTML, "/other": OTHER_HTML });
+  await h.serve(PAGE_PORT, { "/": PAGE_HTML, "/other": OTHER_HTML, "/devtools": DEVTOOLS_HTML });
   await h.serve(FRAME_PORT, { "/frame": FRAME_HTML });
   const UPLOAD = path.join(h.TMP, "upload-test.txt");
   fs.writeFileSync(UPLOAD, "upload body 123\n");
@@ -380,6 +391,34 @@ try {
     assert.equal(back.isError, false, back.text);
     assert.match(back.text, /purple-giraffe-42/);
     await helper.ok("tabs_close_mcp", { tabId: htab });
+  });
+
+  await h.step("devtools (FIREFOX_BRIDGE_DEVTOOLS=1) keeps a tab's console and requests from page load on, across a navigation", async () => {
+    const dev = h.mcpClient("devtools-client", { FIREFOX_BRIDGE_DEVTOOLS: "1" });
+    await dev.init();
+    dev.notify("notifications/initialized");
+    assert.ok((await dev.request("tools/list")).result.tools.some((t) => t.name === "devtools"));
+    const dtab = tabIdIn((await dev.ok("tabs_create_mcp")).text);
+    await dev.ok("navigate", { tabId: dtab, url: `${PAGE}/devtools` });
+    const read = async (args) => (await dev.ok("devtools", { tabId: dtab, ...args })).text;
+    await until("load-time console messages", async () => /boom at load/.test(await read({ kind: "console" })), 5000);
+    const con = await read({ kind: "console" });
+    assert.match(con, / log devtools-log-1 \{a: 1\}/);
+    assert.match(con, / warning devtools-warn https:\/\/x\.example\/cb\?token=\[redacted\]/);
+    assert.match(con, / error Uncaught Error: boom at load \(http:\/\/localhost:\d+\/devtools:\d+\)/);
+    // A masked field's value is cut out where the page logs it.
+    assert.match(con, /typed: \[redacted: password, filled\]/);
+    assert.doesNotMatch(con, /hunter2/);
+    const net = await read({ kind: "network" });
+    assert.match(net, /GET 200 document .*\/devtools$/m);
+    assert.match(net, /GET 404 xhr .*\/missing\.json$/m);
+    // Both survive a navigation.
+    await dev.ok("navigate", { tabId: dtab, url: `${PAGE}/other` });
+    assert.match(await read({ kind: "network", onlyFailed: true }), /404 .*missing\.json/);
+    assert.match(await read({ kind: "console", level: "error" }), /boom at load/);
+    assert.match(await read({ kind: "network", clear: true }), /\/other$/m);
+    assert.match(await read({ kind: "network" }), /: 0 requests\.$/);
+    await dev.ok("tabs_close_mcp", { tabId: dtab });
   });
 
   await h.step("tabs_close_mcp closes the session's tabs", async () => {

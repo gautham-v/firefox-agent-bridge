@@ -267,5 +267,7 @@ test("helpers", () => {
   assert.equal(pageOrigin("https://a.b:8080/x?y"), "https://a.b:8080");
   assert.equal(pageOrigin(undefined), null);
   assert.equal(summarizeArgs("computer", { action: "key", text: "cmd+a", tabId: 1 }).detail, "5-char key sequence");
+  // devtools logs its kind, never the pattern.
+  assert.deepEqual(summarizeArgs("devtools", { kind: "network", pattern: "secret", tabId: 3 }), { action: "network", tabId: 3, detail: null });
   assert.equal(logError("find", {}, "x".repeat(500)).length, 160);
 });

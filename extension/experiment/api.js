@@ -35,6 +35,8 @@ const RECORDING_KEY = "firefox-agent-bridge:recording";
 // The redaction rules while recording, so fields they mask are recorded like secret ones.
 const RECORD_REDACT_KEY = "firefox-agent-bridge:record-redact";
 const RECORD_TOPIC = "firefox-agent-bridge:record";
+// devtools: batches of console messages from watched tabs' frames, as {browserId, entries, dropped}.
+const CONSOLE_TOPIC = "firefox-agent-bridge:console";
 // The user input the child actor records. Capturing at the top of the chain, the actor sees
 // each event before the page does, whatever the page does with it. A page going away only
 // matters to an actor that is holding typing.
@@ -68,6 +70,23 @@ function unregisterActor() {
   } catch {
     // not registered
   }
+}
+
+// Tells every frame in a tab's <browser> whether its console is captured (devtools).
+function watchConsoleFrames(browser, on, redact) {
+  for (const bc of browser.browsingContext?.getAllBrowsingContextsInSubtree() ?? []) {
+    try {
+      bc.currentWindowGlobal?.getActor(ACTOR).sendAsyncMessage("consoleWatch", { on, redact });
+    } catch {
+      // frame going away
+    }
+  }
+}
+
+// A script error as the devtools tool keeps it; the actor makes the same from its own process.
+function scriptErrorEntry(msg) {
+  const level = msg.flags & Ci.nsIScriptError.warningFlag ? "warning" : msg.flags & Ci.nsIScriptError.infoFlag ? "info" : "error";
+  return { level, text: msg.errorMessage, source: msg.sourceName, line: msg.lineNumber, time: msg.timeStamp };
 }
 
 // Tells every frame in a tab's <browser> whether point and ask is on.
@@ -156,16 +175,43 @@ this.claudePage = class extends ExtensionAPI {
     this.clickFrames = new WeakMap(); // tab's top browsing context -> { id, window } of the child frame last clicked in
   }
 
-  // Documents that load in an armed tab (a navigation, a late iframe) are armed as they appear.
+  // Documents that load in an armed tab (a navigation, a late iframe) are armed as they appear,
+  // and in a tab whose console is captured, they're told to capture theirs.
   watchFrames() {
     this.pointing = new Map(); // browserId -> <browser>, the tabs armed for point and ask
+    this.consoleTabs = new Map(); // browserId -> <browser>, the tabs whose console is captured
+    this.consoleRules = null;
     this.frameObserver = {
       observe: (wgp) => {
-        if (!this.pointing.has(wgp?.browsingContext?.browserId)) return;
-        this.ready.then(() => wgp.getActor(ACTOR).sendAsyncMessage("pointArm", { on: true })).catch(() => {});
+        const id = wgp?.browsingContext?.browserId;
+        if (this.pointing.has(id)) this.ready.then(() => wgp.getActor(ACTOR).sendAsyncMessage("pointArm", { on: true })).catch(() => {});
+        if (this.consoleTabs.has(id)) this.ready.then(() => wgp.getActor(ACTOR).sendAsyncMessage("consoleWatch", { on: true, redact: this.consoleRules })).catch(() => {});
       },
     };
     Services.obs.addObserver(this.frameObserver, "window-global-created");
+    // Errors Firefox reports from the parent process about a page (blocked CORS requests, for
+    // one) never reach its content process, so the actor can't see them; they're taken here.
+    // Ones forwarded from a content process are the actor's.
+    this.parentConsole = {
+      observe: (msg) => {
+        if (!(msg instanceof Ci.nsIScriptError) || msg.isForwardedFromContentProcess || !msg.innerWindowID) return;
+        for (const [browserId, browser] of this.consoleTabs) {
+          const frames = browser.browsingContext?.getAllBrowsingContextsInSubtree() ?? [];
+          if (!frames.some((bc) => bc.currentWindowGlobal?.innerWindowId === msg.innerWindowID)) continue;
+          Services.obs.notifyObservers(null, CONSOLE_TOPIC, JSON.stringify({ browserId, entries: [scriptErrorEntry(msg)], dropped: 0 }));
+          return;
+        }
+      },
+    };
+    this.listeningConsole = false;
+  }
+
+  // The parent's console listener is only registered while some tab is watched.
+  listenConsole(on) {
+    if (on === this.listeningConsole) return;
+    this.listeningConsole = on;
+    if (on) Services.console.registerListener(this.parentConsole);
+    else Services.console.unregisterListener(this.parentConsole);
   }
 
   // Every browser window, existing and future, gets the state stylesheet.
@@ -226,6 +272,8 @@ this.claudePage = class extends ExtensionAPI {
     if (isAppShutdown) return;
     Services.obs.removeObserver(this.frameObserver, "window-global-created");
     for (const browser of this.pointing.values()) armFrames(browser, false);
+    for (const browser of this.consoleTabs.values()) watchConsoleFrames(browser, false);
+    this.listenConsole(false);
     this.removeSheets();
     for (const win of this.renderingWindows) {
       try {
@@ -464,6 +512,48 @@ this.claudePage = class extends ExtensionAPI {
             };
             Services.obs.addObserver(observer, RECORD_TOPIC);
             return () => Services.obs.removeObserver(observer, RECORD_TOPIC);
+          },
+        }).api(),
+
+        // Captures the console in these tabs (devtools) and stops in the rest. The rules go to
+        // each frame, which cuts masked field values out of messages before sending them.
+        devtoolsWatch: surfaced(async (tabIds, redact) => {
+          await self.ready;
+          const next = new Map();
+          for (const id of tabIds) {
+            try {
+              const browser = tabManager.get(id).nativeTab.linkedBrowser;
+              next.set(browser.browserId, browser);
+            } catch {
+              // tab closed
+            }
+          }
+          const before = self.consoleTabs;
+          self.consoleTabs = next;
+          self.consoleRules = redact && typeof redact === "object" ? JSON.parse(JSON.stringify(redact)) : null;
+          for (const [id, browser] of before) if (!next.has(id)) watchConsoleFrames(browser, false);
+          for (const browser of next.values()) watchConsoleFrames(browser, true, self.consoleRules);
+          self.listenConsole(next.size > 0);
+          return next.size;
+        }),
+
+        onConsole: new ExtensionCommon.EventManager({
+          context,
+          name: "claudePage.onConsole",
+          register: (fire) => {
+            const observer = (subject, topic, data) => {
+              let msg;
+              try {
+                msg = JSON.parse(data);
+              } catch {
+                return;
+              }
+              if (!self.consoleTabs.has(msg.browserId)) return;
+              const tabId = tabIdOf(msg.browserId);
+              if (tabId != null) fire.async(tabId, { entries: msg.entries, dropped: msg.dropped });
+            };
+            Services.obs.addObserver(observer, CONSOLE_TOPIC);
+            return () => Services.obs.removeObserver(observer, CONSOLE_TOPIC);
           },
         }).api(),
 

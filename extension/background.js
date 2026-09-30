@@ -49,9 +49,13 @@ const control = createControl({
 
 function onRequest(msg) {
   if (msg.type?.startsWith("chat.") || msg.type?.startsWith("teach.")) return chatFromHost(msg);
-  if (msg.type === "client") return control.clientEvent(msg);
+  if (msg.type === "client") {
+    devtoolsClient(msg);
+    return control.clientEvent(msg);
+  }
   if (msg.type === "redact") return setRedactRules(msg.rules);
   if (msg.type !== "call") return;
+  if (devtoolsClients.has(msg.client?.id)) devtoolsSessions.set(msg.session, msg.client.id);
   control.handleCall(msg, runTool, async (tabId) => (await browser.tabs.get(tabId)).url);
 }
 
@@ -61,6 +65,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function setRedactRules(rules) {
   if (!Array.isArray(rules?.always) || !rules.sites || typeof rules.sites !== "object") return;
   redactRules = { always: rules.always.filter((t) => typeof t === "string"), sites: rules.sites };
+  syncDevtools();
 }
 
 // "3 fields masked on acme-supply.com", in a content part of its own after the result, so the
@@ -273,7 +278,10 @@ async function keepRendering(groupIds) {
 
 // Tabs leaving a session's group (closed, ungrouped, moved to another window) change which
 // windows that covers.
-browser.tabs.onRemoved.addListener(() => scheduleRefresh());
+browser.tabs.onRemoved.addListener((tabId) => {
+  devtools.forget(tabId);
+  scheduleRefresh();
+});
 browser.tabs.onAttached.addListener(() => scheduleRefresh());
 browser.tabs.onUpdated.addListener((tabId, change) => {
   if ("groupId" in change) scheduleRefresh();
@@ -311,6 +319,8 @@ async function createSessionTab(session, client, url = "about:blank", preferWind
     // not supported on this version
   }
   await keepActive(tab.id);
+  // Captured from its first page on, when the session has the devtools tool.
+  await syncDevtools();
   scheduleGroupPush(session);
   return tab;
 }
@@ -817,6 +827,8 @@ async function computer(session, args) {
 }
 
 async function runTool(session, tool, args, client) {
+  // A tab the session already had (a chat's adopted tab) is watched before the call acts in it.
+  if (devtoolsSessions.has(session)) await syncDevtools();
   switch (tool) {
     case "tabs_context_mcp":
       return [text(JSON.stringify(await tabContext(session, args.createIfEmpty, client), null, 2))];
@@ -884,8 +896,84 @@ async function runTool(session, tool, args, client) {
     case "replay_steps":
       return replaySteps(session, args, client);
 
+    case "devtools":
+      await requireTab(session, args.tabId);
+      if (!watchedTabs.has(args.tabId) && !devtools.has(args.tabId)) {
+        throw new Error("Nothing is captured for this tab: the devtools tool is off for this session. It is on when the MCP server runs with FIREFOX_BRIDGE_DEVTOOLS=1.");
+      }
+      return [text(devtools.read(args.tabId, args))];
+
     default:
       throw new Error(`Unknown tool ${tool}`);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// devtools (opt-in): console messages and network requests of the tabs of sessions whose MCP
+// server lists the tool (it says so in its hello, with FIREFOX_BRIDGE_DEVTOOLS=1), kept per tab
+// in devtools.js from when the tab joins such a session until it closes, across navigations.
+// While no such session has tabs nothing is captured: the webRequest listeners are removed and
+// the experiment watches no frames. Console messages come from the ClaudePage actor in each of
+// the tab's frames, with masked field values already cut out there.
+
+const devtools = createDevtools();
+const devtoolsClients = new Set(); // client ids whose MCP server lists the tool
+const devtoolsSessions = new Map(); // session -> the client id that made its calls
+let watchedTabs = new Set(); // tab ids being captured
+let watchedRules = null; // the redaction rules the experiment last got with them
+
+function devtoolsClient(msg) {
+  const id = msg.client?.id;
+  if (msg.event === "connected" && msg.client?.devtools === true) return devtoolsClients.add(id);
+  if (msg.event !== "disconnected") return;
+  devtoolsClients.delete(id);
+  for (const [session, clientId] of devtoolsSessions) if (clientId === id) devtoolsSessions.delete(session);
+  syncDevtools();
+}
+
+// Brings the watched tabs up to date with the devtools sessions' groups. Runs one at a time, so
+// an older answer never overwrites a newer one; costs nothing while the tool is off.
+let devtoolsQueue = Promise.resolve();
+function syncDevtools() {
+  devtoolsQueue = devtoolsQueue.then(watchDevtoolsTabs).catch(() => {});
+  return devtoolsQueue;
+}
+
+async function watchDevtoolsTabs() {
+  if (!devtoolsSessions.size && !watchedTabs.size) return;
+  const groups = new Set();
+  for (const session of devtoolsSessions.keys()) {
+    const id = await sessionGroupId(session);
+    if (id != null) groups.add(id);
+  }
+  const ids = groups.size ? (await browser.tabs.query({})).filter((t) => groups.has(t.groupId)).map((t) => t.id) : [];
+  if (ids.length === watchedTabs.size && ids.every((id) => watchedTabs.has(id)) && watchedRules === redactRules) return;
+  watchedTabs = new Set(ids);
+  watchedRules = redactRules;
+  listenRequests(ids.length > 0);
+  if (typeof browser.claudePage.devtoolsWatch === "function") await browser.claudePage.devtoolsWatch(ids, redactRules);
+}
+
+browser.claudePage.onConsole?.addListener((tabId, batch) => {
+  if (watchedTabs.has(tabId)) devtools.consoleBatch(tabId, batch);
+});
+
+const requestStarted = (d) => watchedTabs.has(d.tabId) && devtools.requestStarted(d);
+const requestRedirected = (d) => devtools.requestEnded(d, "redirect");
+const requestCompleted = (d) => devtools.requestEnded(d, "done");
+const requestFailed = (d) => devtools.requestEnded(d, "failed");
+let listeningRequests = false;
+
+// Every request in Firefox would pass through these listeners, so they're only added while
+// there are tabs to capture.
+function listenRequests(on) {
+  const wr = browser.webRequest;
+  if (!wr || on === listeningRequests) return;
+  listeningRequests = on;
+  const pairs = [[wr.onBeforeRequest, requestStarted], [wr.onBeforeRedirect, requestRedirected], [wr.onCompleted, requestCompleted], [wr.onErrorOccurred, requestFailed]];
+  for (const [event, listener] of pairs) {
+    if (on) event.addListener(listener, { urls: ["<all_urls>"] });
+    else event.removeListener(listener);
   }
 }
 
@@ -1095,6 +1183,7 @@ browser.tabs.onCreated.addListener(async (tab) => {
   justOpened.add(tab.id);
   setTimeout(() => justOpened.delete(tab.id), 3000);
   await browser.tabs.group({ tabIds: [tab.id], groupId: opener.groupId }).catch(() => {});
+  syncDevtools();
   await keepActive(tab.id);
   const current = await browser.tabs.get(tab.id).catch(() => null);
   if (current?.active) await restoreUserTab(tab.windowId, tab.id);
@@ -1162,6 +1251,7 @@ function popupState() {
 function refresh() {
   refreshQueued = false;
   syncGroups().catch(() => {});
+  syncDevtools();
   const status = control.status();
   const titles = {
     acting: "Firefox Agent Bridge: an agent is acting in Firefox",
