@@ -25,10 +25,11 @@ export const CLAUDE_MODELS = [
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const DEFAULT_EFFORT = "high";
 
-// Never asked about: the firefox tools (the point of the panel) and two built-ins that touch
-// nothing. Reads outside the chat folder, web fetches and searches go through the panel's card
-// like they do in a terminal, since a page the agent reads could try to steer them.
-const ALLOWED_TOOLS = ["mcp__firefox", "Skill", "TodoWrite"];
+// Never asked about: the firefox tools (the point of the panel), two built-ins that touch
+// nothing, and sub-agents (Task, called Agent in newer Claude Code), whose own calls are asked
+// about like the agent's. Reads outside the chat folder, web fetches and searches go through the
+// panel's card like they do in a terminal, since a page the agent reads could try to steer them.
+const ALLOWED_TOOLS = ["mcp__firefox", "Skill", "TodoWrite", "Task", "Agent"];
 
 const SYSTEM_PROMPT =
   "You are running in the Firefox sidebar chat of the Firefox Agent Bridge, on the user's own computer. " +
@@ -37,6 +38,17 @@ const SYSTEM_PROMPT =
   "current tabs and attached files; the user did not type it. Prefer find and get_page_text over reading a whole page, " +
   "and if a large result is saved to a file, open it with the Read tool, not shell commands, which need the user's approval. " +
   "Keep answers short.";
+
+// Claude Code only (Codex has no sub-agents). From an eval of compare-several-pages tasks: fanning
+// out cut the median time 18-41% at 2.75x the cost, the gain is small below 4 pages, and most of
+// the cost was sub-agents reading whole pages and listing tabs they didn't need to.
+const FANOUT_PROMPT =
+  "When a task needs the same facts from 4 or more independent pages (comparing products, packages or listings), fan out: " +
+  "start one Task sub-agent per page, all in a single message, at most 5 at a time, each with a cheaper model (model: \"sonnet\") when the Task tool takes one. " +
+  "Give each sub-agent the exact URL and the exact fields to return, and tell it to: open its own tab with tabs_create_mcp without calling tabs_context_mcp first; " +
+  "navigate; read only those fields with find or a targeted javascript_tool read, falling back to get_page_text if a selector returns null; " +
+  "close its tab with tabs_close_mcp; and reply with only the values. Then merge their replies into one table. " +
+  "With fewer than 4 pages, read them yourself, one after another in one tab.";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i; // Claude Code's session ids
 const MODEL_ID = /^[A-Za-z0-9][\w.:\-[\]]{0,80}$/; // never a flag
@@ -367,7 +379,7 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
       "--permission-prompt-tool", "stdio",
       "--allowedTools", ALLOWED_TOOLS.join(","),
       "--mcp-config", JSON.stringify({ mcpServers: { firefox: firefoxServer(c.id) } }),
-      "--append-system-prompt", SYSTEM_PROMPT,
+      "--append-system-prompt", `${SYSTEM_PROMPT} ${FANOUT_PROMPT}`,
     ];
     emit(c.id, { kind: "status", status: "starting" });
     const child = spawn(bin, args, { cwd, env: childEnv(bin, { FIREFOX_AGENT_BRIDGE_SESSION: c.id, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" }), stdio: ["pipe", "pipe", "pipe"] }); // a page-steered agent shouldn't get to write memory that persists
@@ -425,8 +437,10 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
 
   function onClaude(c, p, j) {
     if (c.proc !== p) return;
-    // Sub-agent chatter stays out of the panel; only the top-level agent's work is shown.
-    if (j.parent_tool_use_id && (j.type === "assistant" || j.type === "user" || j.type === "stream_event")) return;
+    // A sub-agent's tool calls are shown under its Task step (`parent`); its text and stream stay
+    // out of the panel, which shows only the top-level agent's words.
+    if (j.parent_tool_use_id && (j.type === "assistant" || j.type === "user")) return onSubagent(c, p, j);
+    if (j.parent_tool_use_id && j.type === "stream_event") return;
     switch (j.type) {
       case "stream_event":
         return onClaudeStream(c, p, j.event);
@@ -483,6 +497,18 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
   function onClaudeUser(c, p, j) {
     for (const b of Array.isArray(j.message?.content) ? j.message.content : []) {
       if (b.type === "tool_result" && p.tools.has(b.tool_use_id)) emit(c.id, { kind: "tool_end", toolUseId: b.tool_use_id, ok: !b.is_error, summary: summarizeToolResult(p.tools.get(b.tool_use_id) ?? "", b.content, b.is_error) });
+    }
+  }
+
+  // Sub-agents run in the same process and reach Firefox through the same MCP server, so their
+  // tabs land in the chat's group; only their tool calls are passed on, tagged with the Task call.
+  function onSubagent(c, p, j) {
+    if (j.type === "user") return onClaudeUser(c, p, j);
+    if (j.error || j.isApiErrorMessage) return; // the Task call's own result reports it
+    for (const b of Array.isArray(j.message?.content) ? j.message.content : []) {
+      if (b.type !== "tool_use" || p.tools.has(b.id) || HIDDEN_TOOLS.has(b.name)) continue;
+      p.tools.set(b.id, b.name);
+      emit(c.id, { kind: "tool_start", toolUseId: b.id, name: b.name, summary: summarizeToolUse(b.name, b.input), ...toolTab(b.name, b.input), parent: String(j.parent_tool_use_id) });
     }
   }
 
