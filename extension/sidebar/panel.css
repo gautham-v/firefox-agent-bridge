@@ -275,11 +275,6 @@ p, ul, ol, pre, blockquote, h4 { margin: 0; }
 .empty .bs { grid-column: auto; justify-content: center; margin-top: 4px; }
 .empty.offline { gap: 10px; padding: 12px 28px; }
 .empty.offline .glyph .ico { width: 30px; height: 30px; stroke-width: 1.2; }
-.sugg { width: 100%; display: grid; gap: 2px; text-align: left; }
-.sugg button { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-radius: 7px; color: var(--p-ink2); width: 100%; }
-.sugg button:hover { background: var(--p-wash); color: var(--p-ink); }
-.sugg .ico { width: 13px; height: 13px; color: var(--p-ink3); }
-.sugg span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* menus */
 .scrim { position: absolute; inset: 0; z-index: 5; }

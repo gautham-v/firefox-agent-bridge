@@ -1263,34 +1263,8 @@ function renderEmpty() {
     );
     return;
   }
-  const { name } = activeSite();
-  const suggestions = [
-    ["file", "Summarize this page", "Summarize this page"],
-    ["pointer", name ? `Pull out the key details from ${name}` : "Pull out the key details", name ? `Pull out the key details from ${name}` : "Pull out the key details from this page"],
-    ["search", `Find something${name ? ` on ${name}` : ""}…`, "Find "],
-  ];
   box.className = "empty";
-  box.replaceChildren(
-    el("div", { class: "glyph" }, icon("pointer")),
-    el("h3", { text: `What should ${e.short} do${name ? ` in ${name}` : ""}?` }),
-    el(
-      "div",
-      { class: "sugg" },
-      suggestions.map(([ic, label, text]) =>
-        el(
-          "button",
-          {
-            onclick: () => {
-              setInput(text);
-              $("input").focus();
-            },
-          },
-          icon(ic),
-          el("span", { text: label }),
-        ),
-      ),
-    ),
-  );
+  box.replaceChildren();
 }
 
 // ---- Banners
@@ -1466,14 +1440,6 @@ function autosize() {
   const ta = $("input");
   ta.style.height = "auto";
   ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
-}
-
-function setInput(text) {
-  const ta = $("input");
-  ta.value = text;
-  autosize();
-  syncSend();
-  ta.setSelectionRange(text.length, text.length);
 }
 
 function renderAtts() {
