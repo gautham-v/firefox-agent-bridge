@@ -7,6 +7,10 @@
 //   node eval/run.mjs [--max-minutes 8] [--concurrency 3] [--runs 3] [--model claude-sonnet-5-5]
 //                     [--tasks id,id] [--arms baseline,strip] [--out eval/results/runs.jsonl]
 //                     [--browser firefox|chrome|firefox,chrome] [--run-timeout-min 7] [--dry-run]
+//                     [--devtools] [--streams dir]
+//
+// --devtools starts the Firefox MCP server with FIREFOX_BRIDGE_DEVTOOLS=1 (the opt-in devtools
+// tool); rows then carry devtools: true. --streams saves each run's raw stream-json to dir.
 //
 // Every Firefox run's MCP config points at THIS worktree's mcp/server.mjs, so all arms see the
 // same tools even if main changes. Chrome runs use Claude in Chrome (`claude -p --chrome`) with an
@@ -41,13 +45,17 @@ const CONCURRENCY = Number(opt("concurrency", 3));
 const RUNS = Number(opt("runs", 3));
 const MODEL = opt("model", "claude-sonnet-5-5");
 const RUN_CAP_MIN = Number(opt("run-timeout-min", Math.min(7, MAX_MIN)));
-const OUT = path.resolve(opt("out", path.join(EVAL, "results/runs.jsonl")));
+// Real path, so trace_file stays relative to eval/ when --out goes through a symlink.
+const realOut = (p) => (fs.existsSync(path.dirname(p)) ? path.join(fs.realpathSync(path.dirname(p)), path.basename(p)) : p);
+const OUT = realOut(path.resolve(opt("out", path.join(EVAL, "results/runs.jsonl"))));
 const ONLY_TASKS = opt("tasks")?.split(",");
 const ONLY_ARMS = opt("arms")?.split(",");
 const BROWSERS = opt("browser", "firefox").split(",");
 for (const b of BROWSERS) if (!["firefox", "chrome"].includes(b)) throw new Error(`unknown --browser ${b}`);
 const TRACES = path.join(path.dirname(OUT), "traces");
 const CLAUDE = process.env.CLAUDE_BIN || "claude";
+const DEVTOOLS = flag("devtools");
+const STREAMS = opt("streams") ? path.resolve(opt("streams")) : null;
 const DEFAULT_EXPECTED_MS = 4 * 60_000;
 
 const t0 = Date.now();
@@ -112,7 +120,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "fab-eval-"));
 const MCP_CONFIG = path.join(TMP, "mcp.json");
 fs.writeFileSync(
   MCP_CONFIG,
-  JSON.stringify({ mcpServers: { firefox: { type: "stdio", command: process.execPath, args: [path.join(ROOT, "mcp/server.mjs")] } } }, null, 2),
+  JSON.stringify({ mcpServers: { firefox: { type: "stdio", command: process.execPath, args: [path.join(ROOT, "mcp/server.mjs")], ...(DEVTOOLS ? { env: { FIREFOX_BRIDGE_DEVTOOLS: "1" } } : {}) } } }, null, 2),
 );
 // Chrome runs: no MCP servers from config, so the Firefox tools aren't offered; --chrome adds
 // the claude-in-chrome tools.
@@ -124,7 +132,7 @@ const STRIP_ENV = [
   "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
   "CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
   "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_EXECPATH", "CLAUDE_PID", "CLAUDE_EFFORT", "AI_AGENT",
-  "FIREFOX_AGENT_BRIDGE_SESSION",
+  "FIREFOX_AGENT_BRIDGE_SESSION", "FIREFOX_BRIDGE_DEVTOOLS",
 ];
 
 export function claudeArgs(task, arm, browser = "firefox") {
@@ -286,6 +294,10 @@ async function finish(cell, r) {
   const run_id = `${cell.task}.${cell.arm}.${cell.browser}.${cell.run}.${new Date(r.started).toISOString().replace(/[:.]/g, "-")}`;
   fs.mkdirSync(TRACES, { recursive: true });
   fs.writeFileSync(path.join(TRACES, `${run_id}.jsonl`), trace.map((c) => JSON.stringify(c)).join("\n") + (trace.length ? "\n" : ""));
+  if (STREAMS) {
+    fs.mkdirSync(STREAMS, { recursive: true });
+    fs.writeFileSync(path.join(STREAMS, `${run_id}.jsonl`), r.events.map((x) => JSON.stringify(x)).join("\n") + "\n");
+  }
   const answer = lastJson(m.final_text);
   let key = task.key;
   let key_source = "static";
@@ -309,6 +321,7 @@ async function finish(cell, r) {
   if (m.chrome_not_connected) errors.push("chrome extension not connected");
   return {
     task: cell.task, arm: cell.arm, run: cell.run, browser: cell.browser, run_id, kind: task.kind,
+    ...(DEVTOOLS && cell.browser === "firefox" ? { devtools: true } : {}),
     started_at: new Date(r.started).toISOString(), wall_ms: r.wall_ms,
     model: m.model ?? MODEL, session_id: m.session_id,
     pass: check.pass, fields: check.fields, pass_static_key: staticCheck?.pass ?? null,
@@ -323,7 +336,7 @@ async function finish(cell, r) {
     usage: m.usage, tokens_all_models: m.tokens_all_models ?? null, model_usage: m.model_usage,
     cost_usd: m.cost_usd, duration_ms: m.duration_ms, duration_api_ms: m.duration_api_ms,
     tools_available: m.tools_available, errors,
-    harness: { claude_args_tools: cell.browser === "chrome" ? "" : ARM_TOOLS[cell.arm] ?? "", concurrency: CONCURRENCY, browsers_in_chunk: BROWSERS },
+    harness: { claude_args_tools: cell.browser === "chrome" ? "" : ARM_TOOLS[cell.arm] ?? "", concurrency: CONCURRENCY, browsers_in_chunk: BROWSERS, devtools: DEVTOOLS },
     chrome_not_connected: m.chrome_not_connected ?? false,
   };
 }
@@ -333,7 +346,7 @@ async function finish(cell, r) {
 const done = readRuns();
 const doneKeys = new Set(done.map(cellKey));
 const pending = allCells().filter((c) => !doneKeys.has(cellKey(c)));
-log(`${allCells().length} cells, ${done.length} recorded in ${path.relative(process.cwd(), OUT)}, ${pending.length} pending; browsers ${BROWSERS.join(",")}, model ${MODEL}, concurrency ${CONCURRENCY}, ${MAX_MIN} min`);
+log(`${allCells().length} cells, ${done.length} recorded in ${path.relative(process.cwd(), OUT)}, ${pending.length} pending; browsers ${BROWSERS.join(",")}${DEVTOOLS ? " (devtools on)" : ""}, model ${MODEL}, concurrency ${CONCURRENCY}, ${MAX_MIN} min`);
 
 if (flag("dry-run")) {
   for (const c of pending) log("pending", cellKey(c));
