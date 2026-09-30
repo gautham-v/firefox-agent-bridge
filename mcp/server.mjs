@@ -110,7 +110,7 @@ const TOOLS = [
   {
     name: "find",
     description:
-      'Find elements by what they are or say (e.g. "Easy Apply button", "search box", "resume file input"). Matching is keyword-based over names, roles, labels and attributes, so use words that appear on the page. Returns up to 20 matches with refs and coordinates.',
+      'Find elements by what they are or say (e.g. "Easy Apply button", "search box", "resume file input"). Matching is keyword-based over names, roles, labels and attributes, so use words that appear on the page. Returns the best 8 with refs and coordinates.',
     inputSchema: {
       type: "object",
       properties: { query: { type: "string", description: "What to look for." }, tabId: tabId() },

@@ -128,7 +128,8 @@ the session's current tab when `tabId` is left out.
 Differences from Chrome:
 
 - `find` matches keywords over element names, roles, labels and attributes. It doesn't call a
-  model, so use words that appear on the page.
+  model, so use words that appear on the page. It answers with the best 8 matches, names and
+  hrefs clipped, and says how many more were close, to keep the answer small.
 - `read_page` and `find` walk child frames too, cross-origin ones and ones inside shadow roots
   included: a frame's tree goes under its iframe's line, and `find` gives a frame's matches
   coordinates in the top frame's screenshot. A ref from a child frame names its frame, as in

@@ -677,7 +677,31 @@ async function readPageAll(tabId, args) {
 }
 
 // find in every frame of the tab at once, merged by score. A frame's matches have refs naming
-// it and coordinates in the top frame's viewport, so they are clicked like any other.
+// it and coordinates in the top frame's viewport, so they are clicked like any other. The answer
+// is kept short, since it is read again on every later turn: the best few matches, names and
+// hrefs clipped.
+const FIND_MAX = 8;
+const FIND_KEEP = 0.5; // of the best score
+const FIND_NAME_MAX = 50;
+const FIND_HREF_MAX = 50;
+
+const clip = (s, max) => (s.length > max ? s.slice(0, max - 1) + "…" : s);
+// A long href loses its query string first, which is where the noise is.
+function clipHref(s, max) {
+  if (s.length <= max) return s;
+  const q = s.search(/[?#]/);
+  return q > 0 && q < max - 1 ? s.slice(0, q + 1) + "…" : clip(s, max);
+}
+
+// `role "name" [ref] href="..." ...` as the actor wrote it, with the name and href clipped.
+function clipFindLine(line) {
+  const head = line.match(/^[^\s"]+ ("(?:[^"\\]|\\.)*")/);
+  if (!head) return line;
+  const name = JSON.stringify(clip(JSON.parse(head[1]), FIND_NAME_MAX));
+  const rest = line.slice(head[0].length).replace(/ href=("(?:[^"\\]|\\.)*")/, (_, h) => ` href=${JSON.stringify(clipHref(JSON.parse(h), FIND_HREF_MAX))}`);
+  return line.slice(0, head[0].length - head[1].length) + name + rest;
+}
+
 async function findAll(tabId, query) {
   const scale = await frameScale(tabId);
   const vp = await page(tabId, "viewport", {});
@@ -687,11 +711,13 @@ async function findAll(tabId, query) {
   const answered = frames.filter((f) => Array.isArray(f?.matches));
   const scored = answered.flatMap((f) => f.matches).sort((a, b) => b.score - a.score);
   const best = scored.length ? scored[0].score : 0;
-  const matches = scored.filter((m) => m.score >= Math.max(1, best * 0.4)).slice(0, 20);
-  if (!matches.length) return `No elements matched "${query}". Try read_page with filter "interactive".`;
-  const total = answered.reduce((n, f) => n + (f.total ?? 0), 0);
-  const more = matches.length === 20 && total > 20 ? `\n[More than 20 matches; showing the best 20. Use a more specific query.]` : "";
-  const out = `Found ${matches.length} element(s) for "${query}" (coordinates match the screenshot frame; clicking by ref is more reliable):\n${matches.map((m) => m.line).join("\n")}${more}`;
+  const floor = Math.max(1, best * FIND_KEEP);
+  const close = scored.filter((m) => m.score >= floor);
+  if (!close.length) return `No elements matched "${query}". Try read_page with filter "interactive".`;
+  const shown = close.slice(0, FIND_MAX);
+  // Behind the shown ones: the rest of the close matches here, and each frame's own that it left out.
+  const more = close.length - shown.length + answered.reduce((n, f) => n + (f.rest ?? []).filter((s) => s >= floor).length, 0);
+  const out = `Found ${shown.length} for "${query}" (screenshot coordinates; click by ref if off-screen):\n${shown.map((m) => clipFindLine(m.line)).join("\n")}${more ? `\n(+${more} more, refine the query)` : ""}`;
   const masked = answered.reduce((m, f) => addMasked(m, f.masked), null);
   return masked ? { text: out, masked } : out;
 }
