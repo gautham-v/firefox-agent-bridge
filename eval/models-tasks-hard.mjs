@@ -18,7 +18,7 @@
 // the final JSON, state tasks checked in the tabs the agent leaves open.
 //
 // Answer keys and how they were checked (2026-09-29):
-// - sudoku-no-js: websudoku.com Hard puzzle 2,718,281,828; its solution (embedded in the page's
+// - sudoku-no-js: websudoku.com Evil puzzle 1,234,567,890; its solution (embedded in the page's
 //   script, which the no-JS tools don't expose) matches a brute-force solver, which finds exactly
 //   one solution.
 // - hockey-no-js: all 582 rows of scrapethissite.com/pages/forms fetched (per_page=100, 6 pages)
@@ -99,15 +99,15 @@ const TODO_JS = String.raw`(async () => {
   return JSON.stringify({ hash, visible, all });
 })()`;
 
-const SUDOKU_SOLUTION = "419856273357219468268437195586923714194675382723148659841792536975364821632581947";
+const SUDOKU_SOLUTION = "576429381493817562812536947231784695749653218685192734968245173157368429324971856";
 
 export const TASKS = [
   // 1 ---------------------------------------------------------------------------------------
   {
     id: "sudoku-no-js",
-    desc: "No JavaScript: solve a Hard websudoku puzzle (28 givens, one solution) by reasoning and enter all 53 digits through the page; checked from the grid's inputs, row by row",
+    desc: "No JavaScript: solve an Evil websudoku puzzle (26 givens, one solution) by reasoning and enter all 55 digits through the page; checked from the grid's inputs, row by row",
     kind: "state",
-    prompt: `Solve the Sudoku puzzle at https://nine.websudoku.com/?level=3&set_id=2718281828 (Web Sudoku, "Hard" puzzle 2,718,281,828) and fill in every empty cell on that page. Work out the solution yourself; don't look for it in the page's source or on other sites. The page's "How am I doing?" button checks your progress if you want it.
+    prompt: `Solve the Sudoku puzzle at https://nine.websudoku.com/?level=4&set_id=1234567890 (Web Sudoku, "Evil" puzzle 1,234,567,890) and fill in every empty cell on that page. Work out the solution yourself; don't look for it in the page's source or on other sites. Don't press the page's buttons once every cell is filled: on a full grid "How am I doing?" submits the puzzle and loads a different page, and the grid is checked in this tab.
 ${NO_JS}
 
 ${stateRules("Leave that tab open with the filled-in grid when you're done (don't press Clear or load another puzzle).", '{"solved": true}')}`,
@@ -128,17 +128,18 @@ ${stateRules("Leave that tab open with the filled-in grid when you're done (don'
   // 2 ---------------------------------------------------------------------------------------
   {
     id: "hockey-no-js",
-    desc: "No JavaScript: exact counts over 582 rows read as text (6 pages at 100 rows, sorted by team, so per-year maxima span every page), with ties, and a franchise whose 2011 name was used by a different club in the 1990s",
+    desc: "No JavaScript: exact counts over 582 rows read as text (6 pages at 100 rows, sorted by team, so per-year maxima span every page), with ties, a franchise whose 2011 name was used by a different club in the 1990s, and a 63-number signed sum",
     kind: "answer",
     prompt: `Answer from the table at https://www.scrapethissite.com/pages/forms/ (Hockey Teams: 582 NHL team-seasons from 1990 to 2011; Year is the year the season started; +/- is the goal differential). Every number must come from that table.
 a) How many team-seasons have 50 or more wins?
 b) How many of those also have a +/- of +60 or more?
 c) For each Year, take the team(s) with the most wins that year and the team(s) with the best +/- that year (ties count as all of them). List the years in which none of the teams with the most wins also has the best +/-.
 d) Total wins on the page of the franchise that played the 2011 season as the Winnipeg Jets (it played its earlier seasons under another name).
+e) The sum of the +/- column over every row of the teams whose names start with "New" (all of their seasons).
 ${NO_JS}
 
-${answerRules('{"a_50_win_seasons": 0, "b_also_plus_60": 0, "c_years": [0], "d_wins": 0}')}`,
-    key: { a_50_win_seasons: 34, b_also_plus_60: 20, c_years: [1990, 1993, 2000, 2003, 2005, 2011], d_wins: 379 },
+${answerRules('{"a_50_win_seasons": 0, "b_also_plus_60": 0, "c_years": [0], "d_wins": 0, "e_new_plus_minus_sum": 0}')}`,
+    key: { a_50_win_seasons: 34, b_also_plus_60: 20, c_years: [1990, 1993, 2000, 2003, 2005, 2011], d_wins: 379, e_new_plus_minus_sum: 224 },
     check: noJs(function (a) {
       const years = get(a, "c_years");
       return {
@@ -149,6 +150,8 @@ ${answerRules('{"a_50_win_seasons": 0, "b_also_plus_60": 0, "c_years": [0], "d_w
         c_years: Array.isArray(years) && sameList(years.map((y) => String(toNumber(y))).sort(), ["1990", "1993", "2000", "2003", "2005", "2011"]),
         // Atlanta Thrashers 1999-2010 (342) + Winnipeg Jets 2011 (37); not the 1990-95 Jets.
         d_franchise_wins: num(379)(get(a, "d_wins")),
+        // 63 signed numbers: New Jersey Devils, New York Islanders, New York Rangers.
+        e_new_sum: num(224)(get(a, "e_new_plus_minus_sum")),
       };
     }),
   },
@@ -313,7 +316,7 @@ ${stateRules("Leave the tabs from steps 1-8 open when you're done.", '{"ajax_lab
     prompt: `On the tldraw canvas at https://examples.tldraw.com/basic/full (an in-memory demo), draw a six-step loop:
 - six rectangles whose own labels (text typed into the shape, not separate text shapes) read Plan, Build, Test, Ship, Measure and Learn;
 - laid out as a grid of two rows and three columns: Plan, Build, Test left to right in the top row, and Ship, Measure, Learn left to right in the bottom row;
-- all six the same width and height (within 5 px), the tops of each row aligned (within 2 px), and the left edges of each column aligned (within 2 px);
+- all six the same width and height (within 5 px), the tops of each row aligned (within 2 px), the left edges of each column aligned (within 2 px), and the two gaps between neighboring rectangles in each row equal (within 2 px);
 - the top-row rectangles colored blue and the bottom-row rectangles colored green (use the style panel);
 - arrows whose ends are attached (bound) to the rectangles, forming a cycle: Plan → Build, Build → Test, Test → Learn, Learn → Measure, Measure → Ship, Ship → Plan;
 - the Test → Learn arrow labeled deploy, and the Ship → Plan arrow labeled next cycle;
@@ -344,6 +347,7 @@ ${stateRules("Leave that tab open on the canvas when you're done.", '{"shapes": 
         same_size: all && spread(rects.map((s) => s.w)) <= 5 && spread(rects.map((s) => s.h)) <= 5,
         rows_aligned: all && spread(top.map((s) => s.y)) <= 2 && spread(bottom.map((s) => s.y)) <= 2,
         columns_aligned: all && [0, 1, 2].every((i) => Math.abs(top[i].x - bottom[i].x) <= 2),
+        even_gaps: all && [top, bottom].every((row) => Math.abs(row[1].x - (row[0].x + row[0].w) - (row[2].x - (row[1].x + row[1].w))) <= 2),
         row_colors: all && top.every((s) => s.color === "blue") && bottom.every((s) => s.color === "green"),
         arrows_bound: cycle.every(([f, t]) => arrow(r[f], r[t])),
         arrow_labels: norm(arrow(r.test, r.learn)?.text) === "deploy" && norm(arrow(r.ship, r.plan)?.text) === "next cycle",
