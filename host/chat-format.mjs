@@ -192,3 +192,47 @@ export function stripContext(text) {
 
 const MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", pdf: "application/pdf", txt: "text/plain", md: "text/markdown", json: "application/json", csv: "text/csv" };
 export const mimeFromName = (name) => MIME[String(name).split(".").pop().toLowerCase()] ?? "application/octet-stream";
+
+// ---- skills the user runs from the panel ---------------------------------------------------------
+
+// A skill name as Claude Code and Codex spell them (`plugin:skill` for a plugin's); anything else is dropped.
+export const skillName = (v) => (typeof v === "string" && /^[\w][\w.:-]{0,79}$/.test(v) ? v : null);
+
+// The sites a skill says it is for: `sites: linkedin.com, greenhouse.io` (or a `[a, b]` list) in its frontmatter.
+export function skillSites(md) {
+  const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(String(md).slice(0, 4000))?.[1] ?? "";
+  const line = /^sites:[ \t]*(.*)$/m.exec(front)?.[1] ?? "";
+  return line
+    .replace(/^\[|\]$/g, "")
+    .split(",")
+    .map((s) => s.trim().replace(/^["']|["']$/g, "").toLowerCase())
+    .filter((s) => /^[\w.*-]+$/.test(s))
+    .slice(0, 10);
+}
+
+// Claude Code runs a message that starts with /name as that user-invoked skill, with the rest as
+// its arguments. Codex has no slash skills, so it is told to read the skill's file.
+export function skillPrompt(engine, skill, typed, context) {
+  if (engine === "codex") return `${context}${CODEX_SKILL_LINE(skill)}\n\n${typed}`;
+  return `/${skill}${typed ? ` ${typed}` : ""}${context ? `\n\n${context.trimEnd()}` : ""}`;
+}
+
+const CODEX_SKILL_LINE = (skill) => `Use the ${skill} skill for this request: read ~/.codex/skills/${skill}/SKILL.md and follow it.`;
+
+// Splits a stored Codex user message that carries the line above.
+export function stripCodexSkill(text) {
+  const m = /^Use the ([\w.:-]+) skill for this request: read ~\/\.codex\/skills\/[^\n]*and follow it\.\n\n/.exec(text);
+  return m ? { skill: m[1], text: text.slice(m[0].length) } : { skill: null, text };
+}
+
+// A stored Claude Code entry for a skill the user ran: `<command-name>/name</command-name>` and
+// `<command-args>` (which holds the typed text and then the panel's context block).
+export function stripClaudeSkill(text) {
+  const name = /<command-name>\/([^<\n]+)<\/command-name>/.exec(text)?.[1];
+  if (!name) return null;
+  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1] ?? "";
+  const at = args.indexOf(`\n\n${CONTEXT_OPEN}`);
+  const typed = at >= 0 ? args.slice(0, at) : args.startsWith(CONTEXT_OPEN) ? "" : args;
+  const files = (at >= 0 ? stripContext(args.slice(at + 2)) : stripContext(args)).files;
+  return { skill: name, text: typed.trim(), files };
+}

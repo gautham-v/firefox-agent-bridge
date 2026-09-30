@@ -1017,6 +1017,7 @@ async function sendToHost(chat, m) {
     effort: chat.effort,
     text: m.text,
     attachments: m.attachments ?? [],
+    skill: m.skill ?? null,
     context: { tabs },
     resume,
   });

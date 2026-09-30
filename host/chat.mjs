@@ -11,7 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { HIDDEN_TOOLS, classifyError, clip, contextBlock, parseResetTime, summarizePermission, summarizeToolResult, summarizeToolUse, toolTab } from "./chat-format.mjs";
+import { HIDDEN_TOOLS, classifyError, clip, contextBlock, parseResetTime, skillName, skillPrompt, skillSites, summarizePermission, summarizeToolResult, summarizeToolUse, toolTab } from "./chat-format.mjs";
 import { chunkItems, claudeSessionMeta, claudeTitle, claudeTranscript, codexTranscript, encodeCwd, findCodexRollout, scanTerminalSessions } from "./chat-history.mjs";
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -316,7 +316,9 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
       else files.push({ name: safeName(a.name), path: file });
     }
     const tabs = Array.isArray(msg.context?.tabs) ? msg.context.tabs : [];
-    return { text: contextBlock(tabs, files) + String(msg.text ?? ""), images };
+    const context = contextBlock(tabs, files);
+    const skill = skillName(msg.skill);
+    return { text: skill ? skillPrompt(c.engine, skill, String(msg.text ?? "").trim(), context) : context + String(msg.text ?? ""), images, skill };
   }
 
   // ---- Claude Code --------------------------------------------------------------------------
@@ -421,6 +423,14 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     ];
     writeJson(p, { type: "user", message: { role: "user", content } });
     emit(c.id, { kind: "status", status: "running" });
+    // A /skill message loads the skill without a Skill tool call, so the steps card is told here.
+    if (prep.skill) skillStep(c, prep.skill);
+  }
+
+  function skillStep(c, skill) {
+    const toolUseId = `skill-${Date.now().toString(36)}`;
+    emit(c.id, { kind: "tool_start", toolUseId, name: "Skill", summary: summarizeToolUse("Skill", { skill }) });
+    emit(c.id, { kind: "tool_end", toolUseId, ok: true, summary: "" });
   }
 
   function onClaude(c, p, j) {
@@ -683,6 +693,7 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     c.proc = p;
     child.stdin.end(prep.text || "(no text)");
     emit(c.id, { kind: "status", status: "running" });
+    if (prep.skill) skillStep(c, prep.skill);
     child.stderr.on("data", (d) => (p.stderr = (p.stderr + d).slice(-4000)));
     let buf = "";
     child.stdout.setEncoding("utf8");
@@ -789,8 +800,9 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     if (typeof msg.effort === "string") c.effort = EFFORTS.includes(msg.effort) ? msg.effort : null;
     const text = String(msg.text ?? "");
     const attachments = (Array.isArray(msg.attachments) ? msg.attachments : []).map((a) => ({ name: clip(a?.name ?? "file", 200), mime: clip(a?.mime ?? "", 100) }));
-    emitText(c, null, "user", text, { attachments });
-    if (!c.title && text.trim()) setTitle(c, clip(text, 60));
+    const skill = skillName(msg.skill);
+    emitText(c, null, "user", text, { attachments, ...(skill ? { skill } : {}) });
+    if (!c.title && (text.trim() || skill)) setTitle(c, clip(text.trim() || `/${skill}`, 60));
     c.turns++;
     c.turnError = false;
     // Sends run one at a time so a spawn in progress isn't raced by the next message.
@@ -955,6 +967,15 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     });
   }
 
+  // The `sites:` a user skill's frontmatter names, for the panel's "For <site>" section.
+  function sitesOf(dir) {
+    try {
+      return skillSites(fs.readFileSync(path.join(dir, "SKILL.md"), "utf8"));
+    } catch {
+      return [];
+    }
+  }
+
   async function claudeCapabilities() {
     const caps = { engine: "claude", available: false, version: null, error: null, skills: [], plugins: [], connectors: [], models: CLAUDE_MODELS.map((m) => ({ ...m })), efforts: EFFORTS };
     const bin = await findBin("claude");
@@ -969,7 +990,7 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     }
     caps.available = loggedIn;
     if (!loggedIn) caps.error = "Not signed in to Claude Code. Run `claude auth login` in a terminal.";
-    caps.skills = probe.commands.filter((c) => !c.builtin).map((c) => ({ name: c.name, description: clip(c.description, 200) }));
+    caps.skills = probe.commands.filter((c) => !c.builtin).map((c) => ({ name: c.name, description: clip(c.description, 200), sites: sitesOf(path.join(dirs.claude, "skills", c.name)) }));
     try {
       caps.plugins = JSON.parse(plugins.stdout).filter((p) => p.enabled).map((p) => ({ name: String(p.id).split("@")[0] }));
     } catch {
@@ -1013,7 +1034,7 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
         const md = path.join(dirs.codex, "skills", d, "SKILL.md");
         if (!fs.existsSync(md)) continue;
         const description = /^description:\s*(.+)$/m.exec(fs.readFileSync(md, "utf8").slice(0, 4000))?.[1] ?? "";
-        caps.skills.push({ name: d, description: clip(description, 200) });
+        caps.skills.push({ name: d, description: clip(description, 200), sites: sitesOf(path.join(dirs.codex, "skills", d)) });
       }
     } catch {
       // no skills folder

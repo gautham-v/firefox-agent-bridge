@@ -359,6 +359,7 @@ test("first chat.send groups the viewed tab in place and the chat's MCP calls fi
     effort: "low",
     text: "hi",
     attachments: [],
+    skill: null,
     context: { tabs: [{ tabId: 1, title: "user", url: "https://user.example/", current: true }] },
     resume: false,
   });

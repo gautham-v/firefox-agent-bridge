@@ -39,6 +39,14 @@ Out of scope for now: turning connectors on and off per chat, and voice input.
   `mcp/server.mjs`, session env pinned); an entry there replaces a user-scope server of the same
   name, so there is no duplicate and chats work even if the server was never registered with
   Claude Code. The user's own default permission mode is overridden with `--permission-mode default`.
+- A message with a `skill` runs it as a user-invoked skill. Claude Code: the text is
+  `/<skill> <typed text>` followed by the context block (`claude -p` runs a message that starts
+  with `/name` as that skill, the rest being its arguments; the session file then records it as
+  `<command-name>` markup, which history reads back into `user` + `skill`). Codex has no slash
+  skills, so the prompt starts with a line telling it to read `~/.codex/skills/<skill>/SKILL.md`.
+  Neither engine makes a Skill tool call, so the host emits a `Skill` `tool_start`/`tool_end` pair
+  itself for the steps card. A skill's `sites` are read from the `sites:` line of the frontmatter
+  in `~/.claude/skills/<name>/SKILL.md` (or Codex's folder); the panel does the matching.
 - Every user message is prefixed with a `<panel-context>...</panel-context>` block (the group's
   tabs, and the paths of attached files that weren't sent inline). It is stripped again when a
   transcript is loaded. Images (png, jpeg, gif, webp, up to about 3.5 MB) go inline as base64
@@ -94,7 +102,7 @@ Extension to host:
 
 | Message | Fields |
 | --- | --- |
-| `chat.send` | `chatId` (`[\w-]{1,64}`), `engine` (`claude` \| `codex`), `model`, `effort` (empty string: the default), `text`, `attachments: [{name, mime, data}]` (base64), `context: {tabs: [{tabId, title, url, current}]}`, `resume` (true when reopening a chat from history) |
+| `chat.send` | `chatId` (`[\w-]{1,64}`), `engine` (`claude` \| `codex`), `model`, `effort` (empty string: the default), `text`, `attachments: [{name, mime, data}]` (base64), `skill` (name of a skill picked in the panel, else null), `context: {tabs: [{tabId, title, url, current}]}`, `resume` (true when reopening a chat from history) |
 | `chat.interrupt` | `chatId` |
 | `chat.permission` | `chatId`, `requestId`, `decision` (`allow` \| `allow_always` \| `deny`) |
 | `chat.close` | `chatId` (kill its process) |
@@ -109,7 +117,7 @@ Host to extension:
 | `chat.event` | `chatId`, `event` (below) |
 | `chat.history` | `requestId`, `chats: [{id, title, updatedAt, engine, model, source, cwd, path, running}]`, newest first; `updatedAt` is epoch ms; `running` means a turn is in progress; `source: "terminal"` for Claude Code sessions outside the chat folder that used `mcp__firefox__` tools in the last 14 days (at most 30; panel chats at most 100) |
 | `chat.transcript` | `requestId`, `chatId`, `items` (the same shapes as events, each with its `kind`: `user`, `text`, `tool_start`, `tool_end`, `result`), `done`; the last 1500 items, in chunks under 600 KB |
-| `chat.capabilities` | `requestId`, `engine`, `available`, `version`, `error`, `skills: [{name, description}]`, `plugins: [{name}]`, `connectors: [{name, status}]`, `models: [{id, label, efforts?, default?}]`, `efforts` |
+| `chat.capabilities` | `requestId`, `engine`, `available`, `version`, `error`, `skills: [{name, description, sites}]`, `plugins: [{name}]`, `connectors: [{name, status}]`, `models: [{id, label, efforts?, default?}]`, `efforts` |
 
 Capabilities cost no model tokens: for Claude Code the host asks a prompt-less `claude -p` for its
 `initialize` and `mcp_status` control responses (skills are the non-built-in slash commands;
@@ -130,7 +138,7 @@ Events (`chat.event`'s `event`):
 | kind | Fields |
 | --- | --- |
 | `status` | `status`: `starting` \| `running` \| `idle` \| `exited` (`starting` when a process is spawned, `running` once the message is written, `idle` after each turn's result, `exited` when a Claude process ends) |
-| `user` | `text`, `attachments: [{name, mime}]` (echo, so every panel shows it) |
+| `user` | `text`, `attachments: [{name, mime}]`, `skill` (only when one was picked) (echo, so every panel shows it) |
 | `text_delta` | `messageId` (`<api message id>:<n>` for the nth text block), `text` |
 | `text` | `messageId` (same scheme), `text` (full text of a finished assistant text block) |
 | `tool_start` | `toolUseId`, `name` (e.g. `mcp__firefox__navigate`), `summary` (short, no typed text, form values, script source, key sequences or URL queries; `ToolSearch` is not reported), `tabId` (Firefox tools that name a tab; the steps card says "Using Firefox in <site>" from the latest one) |

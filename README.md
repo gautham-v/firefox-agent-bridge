@@ -80,9 +80,16 @@ Nothing is billed beyond your existing subscription, and nothing runs until you 
   into the group; each message tells the agent which tabs are in it. If the viewed tab is pinned or
   already belongs to another chat, the chat starts with a blank tab instead.
 - **Composer.** The + menu attaches files or photos (paste and drop work too), adds a tab, and
-  lists your Claude Code skills, connectors and plugins (read-only). The model menu picks the
+  lists your skills, connectors and plugins. The model menu picks the
   engine, model and effort. Enter sends; while a task runs, Stop interrupts it, and a message you
   send instead is added to the task.
+- **Skills.** Typing `/` at the start of the composer opens a menu of your skills (Codex's own
+  skills when Codex is the engine). Skills for the site you're on come first: those whose
+  `sites:` frontmatter names it (`sites: linkedin.com, greenhouse.io`), or, with no `sites:`,
+  whose name or description mentions the site's main label. Arrow keys and Enter or Tab pick one,
+  Esc closes. The pick becomes a chip in the composer and in your message, and sending runs it on
+  the current tab: Claude Code gets `/skill-name <your text>`, Codex is told to read the skill's
+  file. The steps card shows "Loaded skill <name>".
 - **Permissions.** Firefox tools run without asking. Anything else, such as a shell command, a file
   edit, a read outside the chat folder or a web fetch, shows an Allow once / Always allow in this
   chat / Deny card with what it would do, and waits. Always allow covers the exact command (or the

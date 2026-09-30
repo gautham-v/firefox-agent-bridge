@@ -241,6 +241,7 @@ p, ul, ol, pre, blockquote, h4 { margin: 0; }
 .menu { position: absolute; background: var(--p-elev); border-radius: 10px; box-shadow: var(--p-shadow); padding: 5px; z-index: 6; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--p-ink3) transparent; min-width: 190px; }
 .mi { display: flex; align-items: center; gap: 9px; width: 100%; padding: 4px 9px; min-height: 26px; border-radius: 6px; min-width: 0; }
 button.mi:hover, button.mi:focus-visible { background: var(--p-wash); outline: 0; }
+.mi.hi { background: var(--p-wash); }
 .mi:disabled { color: var(--p-ink3); background: none !important; }
 .mi > .ico { width: 14px; height: 14px; color: var(--p-ink2); }
 .mi .l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -257,6 +258,9 @@ button.mi:hover, button.mi:focus-visible { background: var(--p-wash); outline: 0
 .dotc.bad { background: var(--warn); }
 .msep { height: 1px; background: var(--p-sep); margin: 4px 8px; }
 .mcap { font-size: 11px; color: var(--p-ink3); padding: 4px 9px 2px; }
+.mcap.fav-cap { display: flex; align-items: center; gap: 6px; }
+.mcap .fav { width: 12px; height: 12px; font-size: 7px; }
+.menu.slash .mi.two .l { white-space: nowrap; }
 .mcap.back { display: flex; align-items: center; gap: 6px; }
 .eff { display: flex; gap: 2px; background: var(--p-fill); border-radius: 7px; padding: 2px; margin: 2px 6px 4px; }
 .eff button { flex: 1; text-align: center; font-size: 12px; padding: 3px 0; border-radius: 5px; color: var(--p-ink2); min-width: 0; }
