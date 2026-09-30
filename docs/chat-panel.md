@@ -180,7 +180,8 @@ binds the chat first), `chat.interrupt`,
 new ones), `stopAll` (pauses Firefox calls and also sends `chat.interrupt` for every chat whose
 turn is running; the Alt+Shift+X shortcut and the activity sheet's Stop do the same), `popout`,
 `mark {tabId, ref, label, reveal, clear}` (outline an element the agent linked; only tabs in the
-chat's group, and `reveal` switches to the tab), `point.clear` (Alt was let go in the panel).
+chat's group, and `reveal` switches to the tab), `point.clear` (Alt was let go in the panel),
+`cam.frame {tabId, scale, requestId}` (an agent cam frame; only tabs in the chat's group).
 
 Background to panel: `state {windowId, chatId, events, group, activeTab, paused, engine, model, effort, teach}`
 on hello and on chat switches; `chat.event`, `chat.history`, `chat.transcript`,
@@ -191,7 +192,11 @@ its title, URL or icon does;
 `paused {paused}` when the chat's session is paused or resumed; `teach {recording | error}` and `teach.step {recordingId, step, shot}` for a Teach recording; `hostUp` when the native host
 (re)connects, so a panel showing "not connected" asks for capabilities again; `pick {chatId,
 element: {tabId, ref, role, name, text, image}}` when the user Alt+clicks an element (`image` is a
-PNG data URL, or null); `markFailed {error}` when a clicked element link can't be shown.
+PNG data URL, or null); `markFailed {error}` when a clicked element link can't be shown;
+`cam.frame {requestId, shot, masks | error}` answering the panel's, where `shot` is a JPEG data
+URL and `masks` the masked fields in it as fractions of the viewport (`{x, y, width, height,
+label}`), or null when a frame of the tab couldn't say (the panel then doesn't keep it for Save
+as GIF).
 
 Point and ask: background calls the experiment's `setPointTabs` with the active tab of every
 window that has a panel open (web pages only), again when those change, and on `point.clear`.
