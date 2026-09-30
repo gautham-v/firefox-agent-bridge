@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Composites one Firefox take and one Chrome take from race.mjs into the race video: each
 // browser window cropped out of its screen recording, both aligned to t=0 = the agent process
-// starting, scaled to one height, side by side (Firefox left), a label and a running timer over
+// starting, scaled to one height, side by side (Claude in Chrome left), a label and a running timer over
 // each, the timer stopping when that side's result arrives, a "done in 12.4s" badge from then on,
 // and the faster side's last frame held until the slower one finishes.
 //
@@ -42,12 +42,13 @@ const TAIL = Number(opt("tail", 3));
 const HOLD = opt("hold", "close");
 if (!["close", "result"].includes(HOLD)) throw new Error("--hold is close or result");
 const LABELS = { firefox: "Firefox Agent Bridge", chrome: "Claude in Chrome" };
-const CAPTION = "Same task, model and prompt · one take each";
+const MODEL_NAMES = { "claude-sonnet-5-5": "Sonnet 5.5", "claude-opus-5-5": "Opus 5.5", "claude-fable-5-1": "Fable 5.1", "claude-haiku-4-5-20251001": "Haiku 4.5" };
+const cap1 = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 const COLORS = { canvas: "#161618", strip: "rgba(0,0,0,0.55)", text: "#F5F5F7", muted: "#A1A1A6", badge: "rgba(12,12,14,0.78)" };
 
 const firstFile = (...files) => files.find((f) => f && fs.existsSync(f));
-const FONT = firstFile(opt("font"), path.join(os.homedir(), "Library/Fonts/Inter-Medium.ttf"), path.join(os.homedir(), "Library/Fonts/InterVariable.ttf"), "/Library/Fonts/Inter-Medium.ttf", "/System/Library/Fonts/SFNS.ttf", "/System/Library/Fonts/Helvetica.ttc");
-const MONO = firstFile(opt("mono-font"), "/System/Library/Fonts/SFNSMono.ttf", "/System/Library/Fonts/Menlo.ttc", FONT);
+const FONT = firstFile(opt("font"), path.join(os.homedir(), "Library/Fonts/Archivo[wdth,wght].ttf"), path.join(os.homedir(), "Library/Fonts/Inter-Medium.ttf"), path.join(os.homedir(), "Library/Fonts/InterVariable.ttf"), "/Library/Fonts/Inter-Medium.ttf", "/System/Library/Fonts/SFNS.ttf", "/System/Library/Fonts/Helvetica.ttc");
+const MONO = firstFile(opt("mono-font"), path.join(os.homedir(), "Library/Fonts/GeistMono-Regular.otf"), "/System/Library/Fonts/SFNSMono.ttf", "/System/Library/Fonts/Menlo.ttc", FONT);
 
 // ---- pick the takes --------------------------------------------------------------------------
 
@@ -71,9 +72,11 @@ function pick(browser) {
   return chosen;
 }
 
-const takes = [pick("firefox"), pick("chrome")];
+const takes = [pick("chrome"), pick("firefox")]; // Claude in Chrome left, Firefox right
 if (takes[0].task !== takes[1].task) throw new Error(`the takes are of different tasks: ${takes[0].task}, ${takes[1].task}`);
 const outDir = DIR ?? path.dirname(takes[0]._file);
+const modelName = MODEL_NAMES[String(takes[0].model).replace(/\[.*\]$/, "")] ?? takes[0].model;
+const CAPTION = opt("caption") ?? [modelName + (takes[0].effort ? ` ${cap1(takes[0].effort)}` : ""), "same task and prompt", "one take each"].join(" · ");
 const OUT = path.resolve(opt("out", path.join(outDir, `race-${takes[0].task}.mp4`)));
 const SOCIAL = path.resolve(opt("social-out", OUT.replace(/\.mp4$/, "") + "-social.mp4"));
 

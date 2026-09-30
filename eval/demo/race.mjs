@@ -5,7 +5,7 @@
 // at a time, Firefox's first, then Chrome's; never both at once.
 //
 //   node eval/demo/race.mjs --task gen-apg-datepicker [--browser firefox,chrome] [--takes 3]
-//        [--dir ~/Movies/fab-race/<task>-<time>] [--model claude-sonnet-5-5] [--screen <id>]
+//        [--dir ~/Movies/fab-race/<task>-<time>] [--model claude-sonnet-5-5] [--effort high] [--screen <id>]
 //        [--firefox-window <id>] [--lead-in 2] [--tail 2] [--gap 5] [--run-timeout-min 7]
 //        [--no-show-tabs] [--no-export] [--no-activate] [--dry-run]
 //
@@ -37,6 +37,7 @@ import { browserClaudeArgs, firefoxMcpConfig } from "../lib/claude-args.mjs";
 import { childEnv, summarize } from "../lib/stream.mjs";
 import { toolTrace } from "../lib/trace.mjs";
 import { taskById } from "../tasks.mjs";
+import { demoTaskById } from "./tasks.mjs";
 import { firstFrameAt, parseNdjson, pickWindow, recordingIdOf, runTimes } from "./lib.mjs";
 
 const run = promisify(execFile);
@@ -50,13 +51,14 @@ const opt = (name, dflt) => {
 };
 const flag = (name) => argv.includes(`--${name}`);
 
-const TASK = taskById(opt("task", ""));
-if (!TASK) throw new Error(`--task must be a task id from eval/tasks.mjs (e.g. gen-apg-datepicker)`);
+const TASK = taskById(opt("task", "")) ?? demoTaskById(opt("task", ""));
+if (!TASK) throw new Error(`--task must be a task id from eval/tasks.mjs or eval/demo/tasks.mjs (e.g. gen-apg-datepicker)`);
 const BROWSERS = opt("browser", "firefox,chrome").split(",");
 for (const b of BROWSERS) if (!["firefox", "chrome"].includes(b)) throw new Error(`unknown --browser ${b}`);
 BROWSERS.sort((a, b) => (a === "firefox" ? -1 : b === "firefox" ? 1 : 0)); // Firefox's takes first
 const TAKES = Number(opt("takes", 1));
 const MODEL = opt("model", "claude-sonnet-5-5");
+const EFFORT = opt("effort"); // passed to both browsers as --effort; unset keeps the CLI default, as the eval does
 const LEAD_IN_MS = Number(opt("lead-in", 2)) * 1000;
 const TAIL_MS = Number(opt("tail", 2)) * 1000;
 const GAP_MS = Number(opt("gap", 5)) * 1000;
@@ -87,7 +89,7 @@ const FF_CONFIG = path.join(TMP, "mcp.json");
 fs.writeFileSync(FF_CONFIG, JSON.stringify(firefoxMcpConfig(path.join(ROOT, "mcp/server.mjs"), SHOW_TABS ? { FIREFOX_BRIDGE_SHOW_TABS: "1" } : {}), null, 2));
 const EMPTY_CONFIG = path.join(TMP, "mcp-empty.json");
 fs.writeFileSync(EMPTY_CONFIG, JSON.stringify({ mcpServers: {} }));
-const argsFor = (browser) => browserClaudeArgs({ task: TASK, arm: "baseline", browser, model: MODEL, mcpConfig: FF_CONFIG, emptyMcpConfig: EMPTY_CONFIG });
+const argsFor = (browser) => browserClaudeArgs({ task: TASK, arm: "baseline", browser, model: MODEL, effort: EFFORT, mcpConfig: FF_CONFIG, emptyMcpConfig: EMPTY_CONFIG });
 
 let screen = { id: opt("screen"), logical: null, physical: null };
 if (!DRY) {
@@ -254,7 +256,7 @@ async function take(browser, n) {
   fs.writeFileSync(`${base}.trace.jsonl`, toolTrace(events).map((c) => JSON.stringify(c)).join("\n") + "\n");
   const sidecar = {
     version: 1,
-    task: TASK.id, browser, take: n, model: m.model ?? MODEL,
+    task: TASK.id, browser, take: n, model: m.model ?? MODEL, effort: EFFORT ?? null,
     prompt_sha1: crypto.createHash("sha1").update(args[1]).digest("hex"),
     show_tabs: browser === "firefox" ? SHOW_TABS : null,
     agent_started_at: agentStarted,

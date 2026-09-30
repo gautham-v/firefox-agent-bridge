@@ -8,13 +8,14 @@
 import { ARM_PROMPTS, ARM_TOOLS } from "../arms.mjs";
 import { promptFor } from "../tasks.mjs";
 
-export function browserClaudeArgs({ task, arm = "baseline", browser = "firefox", model, mcpConfig, emptyMcpConfig }) {
+export function browserClaudeArgs({ task, arm = "baseline", browser = "firefox", model, effort, mcpConfig, emptyMcpConfig }) {
+  const effortArgs = effort ? ["--effort", effort] : [];
   if (browser === "chrome")
     return [
       "-p", promptFor(task, browser),
       "--chrome",
       "--output-format", "stream-json", "--verbose",
-      "--model", model,
+      "--model", model, ...effortArgs,
       "--strict-mcp-config", "--mcp-config", emptyMcpConfig,
       "--tools", "",
       "--allowedTools", "mcp__claude-in-chrome__*",
@@ -24,7 +25,7 @@ export function browserClaudeArgs({ task, arm = "baseline", browser = "firefox",
   const args = [
     "-p", promptFor(task, browser),
     "--output-format", "stream-json", "--verbose",
-    "--model", model,
+    "--model", model, ...effortArgs,
     "--strict-mcp-config", "--mcp-config", mcpConfig,
     "--tools", ARM_TOOLS[arm] ?? "",
     // The sub-agent tool is listed as "Task" but its tool_use blocks are named "Agent".
