@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HIDDEN_TOOLS, classifyError, clip, contextBlock, parseResetTime, summarizePermission, summarizeToolResult, summarizeToolUse, toolTab } from "./chat-format.mjs";
-import { chunkItems, claudeSessionMeta, claudeTitle, claudeTranscript, codexTranscript, encodeCwd, findCodexRollout, scanTerminalSessions } from "./chat-history.mjs";
+import { chunkItems, claudeSessionMeta, claudeTitle, claudeTranscript, codexTranscript, encodeCwd, findCodexRollout, isPhoneSession, scanTerminalSessions } from "./chat-history.mjs";
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -854,8 +854,10 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
       const file = path.join(ownDir, name);
       const st = fs.statSync(file);
       const meta = await claudeSessionMeta(file, st.size).catch(() => ({}));
+      // The panel never connects a phone, so a bridged session here came from `claude remote-control`.
+      const phone = await isPhoneSession(file, st.size).catch(() => false);
       seen.add(id);
-      out.push({ id, title: meta.title ?? "Untitled", updatedAt: st.mtimeMs, engine: "claude", model: meta.model ?? null, source: "panel", cwd: chatDirReal, path: file, running: running(id) });
+      out.push({ id, title: meta.title ?? "Untitled", updatedAt: st.mtimeMs, engine: "claude", model: meta.model ?? null, source: "panel", ...(phone && { origin: "phone" }), cwd: chatDirReal, path: file, running: running(id) });
     }
     out.sort((a, b) => b.updatedAt - a.updatedAt).length = Math.min(out.length, 100);
     const terminal = await scanTerminalSessions({ projectsDir: dirs.projects, skipDirs: [encodeCwd(chatDirReal)], cacheFile: path.join(dirs.chat, "history-cache.json") });

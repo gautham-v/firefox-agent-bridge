@@ -1589,7 +1589,7 @@ function historyRow(c) {
   let meta;
   if (c.running) meta = "Working";
   else if (c.source === "terminal") meta = [eng, shortCwd(c.cwd)].filter(Boolean).join(" · ");
-  else meta = stopped ? "Stopped by you" : [eng, c.model].filter(Boolean).join(" · ");
+  else meta = stopped ? "Stopped by you" : [c.origin === "phone" ? "From phone" : eng, c.model].filter(Boolean).join(" · ");
   return el(
     "button",
     { class: `hrow${c.id === S.chatId ? " sel" : ""}`, onclick: () => openChat(c), title: c.title },
