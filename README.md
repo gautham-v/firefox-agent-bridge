@@ -27,13 +27,19 @@ Unofficial. Not affiliated with Anthropic, OpenAI or Mozilla.
   without opening a native picker.
 - On the same 16 tasks as [Claude in Chrome](#compared-with-claude-in-chrome), it was faster
   and cheaper on all 16 (14.9s against 25.5s a run) and used less than half the input tokens.
-
-How it was built and measured, including about 1,200 eval runs against Claude in Chrome and four
-Claude models: [My Firefox browser agent is 1.7x faster than Claude in Chrome](https://gauthamv.com/writing/firefox-browser-agent-vs-claude-in-chrome/).
 - Password, card and one-time-code fields are [redacted](#redaction) before a screenshot or page
   read leaves Firefox. The agent can still fill them.
 
+How it was built and measured, including about 1,200 eval runs against Claude in Chrome and four
+Claude models: [My Firefox browser agent is 1.7x faster than Claude in Chrome](https://gauthamv.com/writing/firefox-browser-agent-vs-claude-in-chrome/).
+
 ## Compared with Claude in Chrome
+
+![Claude in Chrome on the left and Firefox Agent Bridge on the right, both finding the cheapest nonstop SFO to JFK round trip on Google Flights with Sonnet 5.5 at high effort. Firefox finishes in 44.0s, Chrome in 72.5s; both find Alaska at $414. Played at 3x.](docs/race-google-flights.gif)
+
+One everyday errand, same prompt and model, one take each (the median of three), played at 3x:
+the cheapest nonstop SFO to JFK round trip on Google Flights. Both found the same $414 Alaska
+flight; Firefox took 44.0s and Claude in Chrome 72.5s. `eval/demo/` records and composes these.
 
 The same 16 tasks were run 3 times each with these tools and with Claude in Chrome. Both used the
 same model (Sonnet 5.5) and the same prompt. The tasks covered reading articles, pulling data
