@@ -61,9 +61,10 @@ date picker, a virtualized table and a dropdown inside an embedded frame.
 - **Background work.** Agent tabs run in their own tab group in the background, and screenshots
   work without the window on screen. Claude in Chrome needs its window visible to take
   screenshots.
-- **What Chrome has that this doesn't:** `gif_creator`, console and network reading, shortcuts,
-  and a `find` that asks a model to match elements. That model call isn't counted in Chrome's
-  tokens or cost above, so its real numbers are a bit higher.
+- **What Chrome has that this doesn't:** `gif_creator`, shortcuts, and a `find` that asks a
+  model to match elements. That model call isn't counted in Chrome's tokens or cost above, so its
+  real numbers are a bit higher. Console and network reading is here as one opt-in tool,
+  [`devtools`](#devtools), off by default; it wasn't part of the comparison.
 
 Tasks, per-task tables and per-tool timings are in the
 [browser comparison](eval/results/report.md#browser-comparison-firefox-tools-vs-claude-in-chrome-baseline-arm);
@@ -136,7 +137,61 @@ Differences from Chrome:
   reach into any frame; a scroll over a frame that can't scroll scrolls the page around it.
   Typing and keys go to the frame the last click landed in, and their result names the element
   that got them and its value.
-- There is no `gif_creator`, console reading, network reading or shortcuts.
+- There is no `gif_creator` or shortcuts. Console and network reading is one opt-in tool,
+  `devtools`, below.
+
+### devtools
+
+`devtools {kind, tabId, pattern, level, onlyFailed, limit, clear}` reads a tab's console
+messages (`kind: "console"`) or network requests (`kind: "network"`), like Chrome's
+`read_console_messages` and `read_network_requests` in one tool. It's off by default, since every
+tool definition is sent on every turn (this one is 591 characters; the other 13 are about 11.5k).
+The MCP server lists it only when it runs with `FIREFOX_BRIDGE_DEVTOOLS=1`:
+
+- **Claude Code:** start it as `FIREFOX_BRIDGE_DEVTOOLS=1 claude`; the server inherits it.
+- **Codex:** add `env = { FIREFOX_BRIDGE_DEVTOOLS = "1" }` under `[mcp_servers.firefox]` in
+  `~/.codex/config.toml`.
+- **The sidebar chat:** the host has to have it, so run `FIREFOX_BRIDGE_DEVTOOLS=1 scripts/install.sh`,
+  which writes it into the host's launcher, then restart Firefox. Otherwise chats don't get the tool.
+
+What it does:
+
+- **From page load on.** Capture starts when a tab joins a session whose server has the tool,
+  before its first page loads, and it keeps going across navigations. That's what it adds over
+  hooking `console` with `javascript_tool`. Only tabs in such a session's group are captured,
+  never your other tabs, and nothing is captured while no such session has tabs.
+- **Kept per tab.** The last 200 console messages and the last 200 requests of each tab, dropped
+  when the tab closes. `clear` empties the buffer after reading it.
+- **Console:** level, text (cut to 300 characters), source file and line, and time, from every
+  frame of the tab, cross-origin ones included. It covers `console.*` calls and the errors and
+  warnings Firefox reports for the page: uncaught exceptions, CSP, failed loads and blocked CORS
+  requests. `level` is a minimum (`"warning"` gives warnings and errors).
+- **Network:** method, URL, status, type, size when known, duration, and the error for requests
+  that failed, from `webRequest`. No headers or bodies. `onlyFailed` keeps errors and 4xx/5xx.
+- **Output.** One line per entry, newest last, after a header saying how many were filtered out,
+  cut by `limit` (default 50) and dropped from the buffer. `pattern` is a case-insensitive
+  regex over the message text or the URL.
+
+It is plain text, e.g.:
+
+```
+Tab 12 network: 2 requests; 38 of 40 kept didn't match failed only. Newest last.
+12:00:01.434 POST 404 xhr 312B 45ms https://a.example/api/items?id=3&auth=[redacted]
+12:00:01.534 GET failed script - 12ms https://cdn.example/lib.js NS_ERROR_CONNECTION_REFUSED
+```
+
+What it redacts is under [Redaction](#redaction).
+
+### Without the devtools tool
+
+`javascript_tool` gets most of the way there:
+
+- Errors from now on: `window.__errors = []; addEventListener("error", (e) => __errors.push(e.message)); for (const k of ["error", "warn"]) { const f = console[k]; console[k] = (...a) => (__errors.push(a.join(" ")), f(...a)); }`,
+  then read `__errors` later. It misses anything logged while the page loaded, before the hook,
+  and it's gone after the next navigation.
+- Requests: `performance.getEntriesByType("resource").map((r) => [r.name, r.initiatorType, Math.round(r.duration), r.transferSize, r.responseStatus])`
+  lists URLs, timing and sizes since the page loaded. It has no methods or failures, and
+  `responseStatus` and sizes read 0 for cross-origin requests without `Timing-Allow-Origin`.
 
 ## Chat panel
 
@@ -379,6 +434,23 @@ Limits:
   `autocomplete="cc-number"`, or shown as plain text, isn't masked unless a site rule covers it.
 - `get_page_text` only reads the top frame. `read_page` and `find` read every frame with the
   rules for that frame's own site; screenshots cover iframes as described above.
+
+[`devtools`](#devtools) output is redacted like this:
+
+- **Console messages** have masked field values cut out, the way `javascript_tool`'s result
+  does, by the frame that logged them, a moment after they're logged (a value typed after that
+  isn't looked for). If a frame can't check, the message's text isn't sent.
+- **URLs,** in requests and in console text, lose `user:password@`, and the values of query and
+  fragment parameters named like secrets (`token`, `access_token`, `password`, `key`, `apiKey`,
+  `signature`, `session`, `code`, `otp`, ...), which read `[redacted]`. A fragment without `=`
+  is an anchor and is kept.
+- **Tokens:** JWTs and `Bearer`/`Basic` values are cut out anywhere.
+- `pattern` is matched against the redacted text, so it can't be used to probe for a secret.
+
+It doesn't redact secrets in URL paths (`/reset/<token>`), parameters with other names, a card
+number or email a page logs that isn't in a masked field, or errors Firefox reports from the
+parent process (blocked CORS requests), which only get the URL and token rules. Headers, cookies
+and bodies aren't captured at all.
 
 ## Security
 
