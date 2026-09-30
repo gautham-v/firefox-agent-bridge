@@ -121,21 +121,30 @@ const TOOLS = [
   {
     name: "form_input",
     description:
-      "Set a form field by ref: text inputs and textareas (fires input/change so React sees it), selects (by option value or text), checkboxes/radios (boolean), contenteditable. For custom widgets, use computer clicks.",
+      "Set a form field by ref: text inputs and textareas (fires input/change so React sees it), selects (by option value or text), checkboxes/radios (boolean), contenteditable. To fill several fields at once, pass fields: [{ref, value}, ...] instead of ref/value; they are set in order and it stops at the first failure. For custom widgets, use computer clicks.",
     inputSchema: {
       type: "object",
       properties: {
         ref: { type: "string", description: 'Element ref from read_page or find (e.g. "ref_3").' },
         value: { type: ["string", "boolean", "number"], description: "Value to set." },
+        fields: {
+          type: "array",
+          description: "Several fields to set in one call, in order. Use instead of ref/value.",
+          items: {
+            type: "object",
+            properties: { ref: { type: "string" }, value: { type: ["string", "boolean", "number"] } },
+            required: ["ref", "value"],
+          },
+        },
         tabId: tabId(),
       },
-      required: ["ref", "value", "tabId"],
+      required: ["tabId"],
     },
   },
   {
     name: "javascript_tool",
     description:
-      "Run JavaScript against the page's window and DOM (page CSP does not block it). REPL semantics: the last expression's value is returned, and top-level await works. Write the expression, not `return`.",
+      "Run JavaScript against the page's window and DOM (page CSP does not block it). REPL semantics: the last expression's value is returned, and top-level await works. Write the expression, not `return`. To read several pages on the same site, fetch() them in one call and parse each with DOMParser instead of navigating to each one.",
     inputSchema: {
       type: "object",
       properties: {
@@ -166,6 +175,36 @@ const TOOLS = [
     inputSchema: { type: "object", properties: { tabId: tabId() }, required: ["tabId"] },
   },
 ];
+
+// Tools a batch may run: everything above except batch itself.
+const BATCHABLE = TOOLS.map((t) => t.name);
+const BATCH_MAX = 20;
+
+TOOLS.push({
+  name: "batch",
+  description:
+    "Run several browser actions in one call, one after another, to save round trips. Use it when you already know every step's arguments, e.g. navigate then get_page_text on the same tab, or several clicks/keys on refs you already have. Each action is {tool, args}, with the same args that tool takes (tabId included). Stops at the first failed action and says which one; results come back in order, one section per action. Only the last screenshot's image is returned. Don't batch a step whose arguments depend on an earlier step's result (such as refs from a page you haven't read yet).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      actions: {
+        type: "array",
+        minItems: 1,
+        maxItems: BATCH_MAX,
+        description: `Actions to run in order (at most ${BATCH_MAX}).`,
+        items: {
+          type: "object",
+          properties: {
+            tool: { type: "string", enum: BATCHABLE, description: "Tool name, e.g. navigate, get_page_text, computer." },
+            args: { type: "object", description: "That tool's arguments." },
+          },
+          required: ["tool", "args"],
+        },
+      },
+    },
+    required: ["actions"],
+  },
+});
 
 // ---- bridge connection --------------------------------------------------------------------
 
@@ -217,7 +256,7 @@ function connectBridge() {
   return bridge;
 }
 
-async function callFirefox(tool, args) {
+async function callFirefox(tool, args, timeoutMs = CALL_TIMEOUT_MS) {
   let socket;
   try {
     socket = await connectBridge();
@@ -230,8 +269,8 @@ async function callFirefox(tool, args) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       inflight.delete(id);
-      reject(new Error(`Firefox did not answer ${tool} within ${CALL_TIMEOUT_MS / 1000}s.`));
-    }, CALL_TIMEOUT_MS);
+      reject(new Error(`Firefox did not answer ${tool} within ${timeoutMs / 1000}s.`));
+    }, timeoutMs);
     inflight.set(id, {
       resolve: (r) => (clearTimeout(timer), resolve(r)),
       reject: (e) => (clearTimeout(timer), reject(e)),
@@ -252,6 +291,73 @@ function saveImages(result) {
   }
   if (saved.length) result.content.push({ type: "text", text: `Saved to ${saved.join(", ")}` });
   return result;
+}
+
+// ---- tool dispatch --------------------------------------------------------------------------
+
+const errorResult = (message) => ({ content: [{ type: "text", text: message }], isError: true });
+
+async function callOne(tool, args) {
+  try {
+    const result = await callFirefox(tool, args);
+    return args.save_to_disk ? saveImages(result) : result;
+  } catch (e) {
+    return errorResult(e.message);
+  }
+}
+
+// form_input with fields: one form_input per field, in order, stopping at the first failure.
+async function formInput(args) {
+  if (!Array.isArray(args.fields)) {
+    if (args.ref === undefined || args.value === undefined) return errorResult("form_input needs ref and value, or fields: [{ref, value}, ...].");
+    return callOne("form_input", args);
+  }
+  if (!args.fields.length) return errorResult("fields is empty.");
+  const lines = [];
+  for (const [i, f] of args.fields.entries()) {
+    const r = await callOne("form_input", { tabId: args.tabId, ref: f?.ref, value: f?.value });
+    const t = textOf(r);
+    if (r.isError) {
+      lines.push(`[${i + 1}/${args.fields.length}] ${f?.ref}: failed: ${t}`);
+      if (i + 1 < args.fields.length) lines.push(`Stopped; the remaining ${args.fields.length - i - 1} field(s) were not set.`);
+      return { content: [{ type: "text", text: lines.join("\n") }], isError: true };
+    }
+    lines.push(`[${i + 1}/${args.fields.length}] ${f.ref}: ${t}`);
+  }
+  return { content: [{ type: "text", text: lines.join("\n") }] };
+}
+
+const textOf = (r) => (r?.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
+
+function runTool(name, args) {
+  if (name === "form_input") return formInput(args);
+  return callOne(name, args);
+}
+
+// batch: runs actions in order, each with its own timeout, stops at the first error. Text from
+// every action is kept; of the images, only the last one is returned.
+async function batch(args) {
+  const actions = args.actions;
+  if (!Array.isArray(actions) || !actions.length) return errorResult("actions must be a non-empty array of {tool, args}.");
+  if (actions.length > BATCH_MAX) return errorResult(`At most ${BATCH_MAX} actions per batch.`);
+  const content = [];
+  let failed = false;
+  for (const [i, a] of actions.entries()) {
+    const head = `[${i + 1}/${actions.length}] ${a?.tool}`;
+    const r = !BATCHABLE.includes(a?.tool)
+      ? errorResult(`Unknown or unbatchable tool ${a?.tool}.`)
+      : await runTool(a.tool, a.args && typeof a.args === "object" ? a.args : {});
+    content.push({ type: "text", text: `${head}${r.isError ? " failed" : ""}:` });
+    for (const c of r.content ?? []) content.push(c);
+    if (r.isError) {
+      failed = true;
+      if (i + 1 < actions.length) content.push({ type: "text", text: `Stopped at action ${i + 1}; the remaining ${actions.length - i - 1} action(s) did not run.` });
+      break;
+    }
+  }
+  const lastImage = content.findLastIndex((c) => c.type === "image");
+  const out = content.map((c, i) => (c.type === "image" && i !== lastImage ? { type: "text", text: "(image omitted: a batch returns only its last image)" } : c));
+  return failed ? { content: out, isError: true } : { content: out };
 }
 
 // ---- MCP stdio ----------------------------------------------------------------------------
@@ -282,12 +388,7 @@ async function handle(msg) {
     case "tools/call": {
       const { name, arguments: args = {} } = params;
       if (!TOOLS.some((t) => t.name === name)) throw Object.assign(new Error(`Unknown tool ${name}`), { code: -32602 });
-      try {
-        const result = await callFirefox(name, args);
-        return args.save_to_disk ? saveImages(result) : result;
-      } catch (e) {
-        return { content: [{ type: "text", text: e.message }], isError: true };
-      }
+      return name === "batch" ? batch(args) : runTool(name, args);
     }
     case "ping":
       return {};

@@ -52,8 +52,11 @@ export function summarizeArgs(input) {
   };
   let s;
   if (Array.isArray(input?.actions)) {
-    // browser_batch: one line per inner action.
-    s = `batch[${input.actions.length}]: ` + input.actions.map((a) => `${shortTool(a.name)}${a.input?.action ? ":" + a.input.action : ""}${a.input?.url ? " " + a.input.url : ""}`).join(", ");
+    // browser_batch ({name, input}) or the Firefox batch ({tool, args}): one line per inner action.
+    s = `batch[${input.actions.length}]: ` + input.actions.map((a) => {
+      const inp = a.input ?? a.args;
+      return `${shortTool(a.name ?? a.tool)}${inp?.action ? ":" + inp.action : ""}${inp?.url ? " " + inp.url : ""}`;
+    }).join(", ");
   } else s = JSON.stringify(cut(input ?? {}));
   return s.length > 400 ? s.slice(0, 400) + "…" : s;
 }
@@ -62,7 +65,8 @@ export function summarizeArgs(input) {
 export function screenshotActions(name, input) {
   const tool = shortTool(name);
   if (tool === "computer") return ["screenshot", "zoom"].includes(input?.action) ? 1 : 0;
-  if (tool === "browser_batch") return (input?.actions ?? []).filter((a) => shortTool(a.name) === "computer" && ["screenshot", "zoom"].includes(a.input?.action)).length;
+  if (tool === "browser_batch" || tool === "batch")
+    return (input?.actions ?? []).filter((a) => shortTool(a.name ?? a.tool) === "computer" && ["screenshot", "zoom"].includes((a.input ?? a.args)?.action)).length;
   return 0;
 }
 

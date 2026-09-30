@@ -180,7 +180,7 @@ function summarize(timed) {
         if (b.name === "mcp__firefox__computer" && ["screenshot", "zoom"].includes(b.input?.action)) m.screenshots++;
         // Claude in Chrome: screenshots can also sit inside a browser_batch.
         if (b.name === "mcp__claude-in-chrome__computer" && ["screenshot", "zoom"].includes(b.input?.action)) m.screenshots++;
-        if (b.name === "mcp__claude-in-chrome__browser_batch")
+        if (b.name === "mcp__claude-in-chrome__browser_batch" || b.name === "mcp__firefox__batch")
           m.screenshots += screenshotActions(b.name, b.input);
       }
     } else if (e.type === "user") {
