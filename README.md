@@ -25,8 +25,49 @@ Unofficial. Not affiliated with Anthropic, OpenAI or Mozilla.
   screenshots are taken.
 - Page scripts run without being blocked by the page's CSP. File inputs are filled directly,
   without opening a native picker.
+- On the same 16 tasks as [Claude in Chrome](#compared-with-claude-in-chrome), it finished
+  faster and used about half the input tokens.
 - Password, card and one-time-code fields are [redacted](#redaction) before a screenshot or page
   read leaves Firefox. The agent can still fill them.
+
+## Compared with Claude in Chrome
+
+The same 16 tasks were run 3 times each with these tools and with Claude in Chrome. Both used the
+same model (Sonnet 5.5) and the same prompt. The tasks covered reading articles, pulling data
+from lists, comparing five package pages, following links, site search, infinite scroll, forms, a
+date picker, a virtualized table and a dropdown inside an embedded frame.
+
+| median per run | Firefox Agent Bridge | Claude in Chrome |
+| --- | --- | --- |
+| tasks passed | 48 / 48 | 47 / 48 |
+| wall time | 19.2s | 25.6s |
+| input tokens | 60k | 119k |
+| cost | $0.063 | $0.081 |
+| mean time per call, `get_page_text` / `find` | 0.3s / 0.3s | 3.7s / 3.1s |
+
+- **Faster on 13 of 16 tasks and cheaper on 14.** Tool calls return sooner, and each turn starts
+  from fewer tokens: on the article tasks both made the same 4 calls and got the same text back,
+  yet Chrome read 72–83k input tokens against 48–58k.
+- **Where Chrome was ahead,** and what changed after:
+  - **Repeated actions** such as five package pages or a form took about twice as many calls,
+    because Chrome has `browser_batch`. The bridge now has a [`batch`](#tools) tool and
+    multi-field `form_input`. Re-run, the PyPI compare went from 13 calls and 39s to 5 calls and
+    18s, against Chrome's 6 calls and 29s.
+  - **A dropdown in a cross-origin frame inside a shadow root** (MDN's live examples) took
+    Firefox 71 calls against Chrome's 41. Both browsers mostly got the answer by workarounds,
+    such as opening the frame's page on its own.
+    `find` and `read_page` now walk child frames, and keys follow the clicked frame. That fix
+    hasn't been re-measured yet.
+- **Background work.** Agent tabs run in their own tab group in the background, and screenshots
+  work without the window on screen. Claude in Chrome needs its window visible to take
+  screenshots.
+- **What Chrome has that this doesn't:** `gif_creator`, console and network reading, shortcuts,
+  and a `find` that asks a model to match elements. That model call isn't counted in Chrome's
+  tokens or cost above, so its real numbers are a bit higher.
+
+Tasks, per-task tables and per-tool timings are in the
+[browser comparison](eval/results/report.md#browser-comparison-firefox-tools-vs-claude-in-chrome-baseline-arm);
+run it yourself with [eval/README.md](eval/README.md).
 
 ## How it works
 
@@ -78,6 +119,11 @@ as `mcp__firefox__<name>`; Codex lists them under `mcp__firefox`.
 [Teach](#teach) step by step without the model, and at the first step that doesn't match it
 stops and returns the step, what was expected, the recorded screenshot of it and the page's
 interactive elements, so the agent finishes from there.
+
+`batch {actions}` runs up to 20 `{tool, args}` actions in one call, stopping at the first that
+fails; only the last screenshot's image comes back. `form_input` also takes
+`fields: [{ref, value}]` to fill several fields at once. Every tool except `tabs_close_mcp` uses
+the session's current tab when `tabId` is left out.
 
 Differences from Chrome:
 
@@ -444,14 +490,8 @@ of them (tasks, arms and how to run it in [eval/README.md](eval/README.md); resu
 
 There were no infrastructure failures or flaky-task confounds in the eval runs.
 
-**Firefox vs Chrome.** The same 16 tasks, 3 runs each, were run with these tools and with Claude
-in Chrome ([Browser comparison](eval/results/report.md#browser-comparison-firefox-tools-vs-claude-in-chrome-baseline-arm)
-in the report). Firefox was ahead on 14 of 16 tasks, with about half the input tokens (60k vs
-119k) and per-call times 10 to 100x lower (`get_page_text` 13ms vs 2.2s, `find` 51ms vs 3.3s).
-It lost on a cross-origin iframe inside a shadow root (MDN's live examples) and on call count for
-repeated actions. The follow-up work added the `batch` tool and multi-field `form_input`, filling
-in a missing `tabId` from the session's tab, `find`/`read_page` walking child frames, and faster
-clicks.
+The same harness also compares these tools with Claude in Chrome; see
+[Compared with Claude in Chrome](#compared-with-claude-in-chrome).
 
 ## Caveats
 
