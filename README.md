@@ -25,8 +25,8 @@ Unofficial. Not affiliated with Anthropic, OpenAI or Mozilla.
   screenshots are taken.
 - Page scripts run without being blocked by the page's CSP. File inputs are filled directly,
   without opening a native picker.
-- On the same 16 tasks as [Claude in Chrome](#compared-with-claude-in-chrome), it finished
-  faster and used about half the input tokens.
+- On the same 16 tasks as [Claude in Chrome](#compared-with-claude-in-chrome), it was faster
+  on all 16 (16.6s against 25.5s a run) and used less than half the input tokens.
 - Password, card and one-time-code fields are [redacted](#redaction) before a screenshot or page
   read leaves Firefox. The agent can still fill them.
 
@@ -73,9 +73,10 @@ Its extension hasn't changed since, so it wasn't run again.
   work without the window on screen. Claude in Chrome needs its window visible to take
   screenshots.
 - **What Chrome has that this doesn't:** a `gif_creator` tool, shortcuts, and a `find` that asks
-  a model to match elements. Here, the [agent cam](#agent-cam) saves GIFs without a tool, and
-  [skills](#skills) and [Teach](#teach) do what shortcuts do. That model call isn't counted in Chrome's tokens or cost above, so its
-  real numbers are a bit higher. Console and network reading is here as one opt-in tool,
+  a model to match elements. That model call isn't counted in Chrome's tokens or cost above, so
+  its real numbers are a bit higher. Here, the [agent cam](#agent-cam) saves GIFs without a tool,
+  and [skills](#skills) and [Teach](#teach) do what shortcuts do. Console and network reading is
+  here as one opt-in tool,
   [`devtools`](#devtools), off by default. In a rerun of the 48 runs with it on, the model never
   called it, and time, calls and tokens stayed within a few percent.
 
