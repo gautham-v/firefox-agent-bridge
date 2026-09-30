@@ -1,0 +1,2134 @@
+{
+  "rows": {
+    "https://stripe-payments-demo.appspot.com/": {
+      "url": "https://stripe-payments-demo.appspot.com/",
+      "tag": "payment",
+      "at": "2026-09-30T02:51:29.318Z",
+      "ms": 12190,
+      "inventory": {
+        "total": 13,
+        "top_document": 13,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 0,
+        "open_shadow_roots": 0,
+        "counts": {
+          "link": 4,
+          "input": 7,
+          "select": 1,
+          "button": 1
+        },
+        "names": {
+          "proper": 13,
+          "heuristic": 0,
+          "empty": 0
+        },
+        "name_samples": {
+          "empty": [],
+          "heuristic": []
+        }
+      },
+      "cross_origin_frames": {
+        "count": 8,
+        "visible": 1,
+        "visible_area_px": 5814,
+        "hosts": [
+          "js.stripe.com"
+        ],
+        "list": [
+          {
+            "src": "https://js.stripe.com/v3/elements-inner-card-727b5d58ca811df3ab379b0f07ae4579.html#__shared_params__[version]=v3&__shared_params__[light_experiment_assignments]=%7B%22token%22%3A%221afb3983-b1b3-42d6-8506-44b80fe043ab%22%2C%22assignments%22%3A%7B%7D%7D&wait=false&mids[guid]=NA&mids[muid]=NA&mids[sid",
+            "host": "js.stripe.com",
+            "w": 323,
+            "h": 18,
+            "visible": true,
+            "title": "Secure card payment input frame"
+          },
+          {
+            "src": "https://js.stripe.com/v3/elements-inner-iban-decf73ede5d7b568cf85834773416b7e.html#__shared_params__[version]=v3&__shared_params__[light_experiment_assignments]=%7B%22token%22%3A%221afb3983-b1b3-42d6-8506-44b80fe043ab%22%2C%22assignments%22%3A%7B%7D%7D&wait=false&mids[guid]=NA&mids[muid]=NA&mids[sid",
+            "host": "js.stripe.com",
+            "w": 0,
+            "h": 0,
+            "visible": false,
+            "title": "Secure IBAN input frame"
+          },
+          {
+            "src": "https://js.stripe.com/v3/elements-inner-ideal-bank-f3403bcc23f62fe31a4022a27ef010f6.html#__shared_params__[version]=v3&__shared_params__[light_experiment_assignments]=%7B%22token%22%3A%221afb3983-b1b3-42d6-8506-44b80fe043ab%22%2C%22assignments%22%3A%7B%7D%7D&wait=false&mids[guid]=NA&mids[muid]=NA&mi",
+            "host": "js.stripe.com",
+            "w": 0,
+            "h": 0,
+            "visible": false,
+            "title": "Secure iDEAL bank selection dropdown button"
+          },
+          {
+            "src": "https://js.stripe.com/v3/elements-inner-ideal-bank-f3403bcc23f62fe31a4022a27ef010f6.html#wait=false&mids[guid]=NA&mids[muid]=NA&mids[sid]=NA&elementId=idealBank-24573630-fb8d-4ee0-aaf1-820c039a82b4&style[base][padding]=10px+15px&style[base][iconColor]=%23666ee8&style[base][color]=%2331325f&style[bas",
+            "host": "js.stripe.com",
+            "w": 0,
+            "h": 0,
+            "visible": false,
+            "title": "Secure iDEAL bank selection dropdown list"
+          },
+          {
+            "src": "https://js.stripe.com/v3/controller-with-preconnect-0de4f6c662dcd7aac4fa2176d0145fd2.html#__shared_params__[version]=v3&__shared_params__[light_experiment_assignments]=%7B%22token%22%3A%221afb3983-b1b3-42d6-8506-44b80fe043ab%22%2C%22assignments%22%3A%7B%7D%7D&apiKey=pk_test_PInFiPUnGR6pzLYZ2IE6oyPf&",
+            "host": "js.stripe.com",
+            "w": 1268,
+            "h": 1,
+            "visible": false,
+            "title": ""
+          },
+          {
+            "src": "https://js.stripe.com/v3/universal-link-modal-inner-fc6b322e6657726e5bc7644e6b03d314.html#apiKey=pk_test_PInFiPUnGR6pzLYZ2IE6oyPf&stripeJsId=1afb3983-b1b3-42d6-8506-44b80fe043ab&mids[guid]=NA&mids[muid]=NA&mids[sid]=NA&locale=en&openerFrameId=__privateStripeFrame3863&surface=web_card_element_popup&r",
+            "host": "js.stripe.com",
+            "w": 0,
+            "h": 0,
+            "visible": false,
+            "title": ""
+          },
+          {
+            "src": "https://js.stripe.com/v3/hcaptcha-invisible-5eb0060e2ae891485ff55511efe9d168.html#debugMode=false&parentOrigin=https%3A%2F%2Fstripe-payments-demo.appspot.com",
+            "host": "js.stripe.com",
+            "w": 1268,
+            "h": 1,
+            "visible": false,
+            "title": ""
+          },
+          {
+            "src": "https://js.stripe.com/v3/m-outer-3437aaddcdf6922d623e172c2d6f9278.html#url=https%3A%2F%2Fstripe-payments-demo.appspot.com%2F&title=Stripe%20Payments%20Demo&referrer=&muid=NA&sid=NA&version=6&preview=false&__shared_params__[version]=v3",
+            "host": "js.stripe.com",
+            "w": 1268,
+            "h": 1,
+            "visible": false,
+            "title": ""
+          }
+        ],
+        "opened": [
+          {
+            "host": "js.stripe.com",
+            "w": 323,
+            "h": 18,
+            "total": 0,
+            "counts": {},
+            "names": {
+              "proper": 0,
+              "heuristic": 0,
+              "empty": 0
+            }
+          }
+        ],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 12,
+        "empty_name": 0,
+        "generic_tag": 0,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 4,
+          "textbox": 6,
+          "combobox": 1,
+          "button": 1
+        },
+        "chars_interactive_uncapped": 859,
+        "chars_interactive_default": 859,
+        "entries_at_default_cap": 12,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 2926,
+        "tokens_interactive_uncapped": 215,
+        "tokens_all_default": 732
+      },
+      "gap": {
+        "top_document_minus_read_page": 1,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 1
+      }
+    },
+    "https://developer.squareup.com/reference/sdks/web/payments/card-payments": {
+      "url": "https://developer.squareup.com/reference/sdks/web/payments/card-payments",
+      "tag": "payment",
+      "at": "2026-09-30T02:51:40.940Z",
+      "ms": 11620,
+      "inventory": {
+        "total": 79,
+        "top_document": 78,
+        "same_origin_frame_elements": 1,
+        "same_origin_frames": 6,
+        "open_shadow_roots": 1,
+        "counts": {
+          "link": 50,
+          "button": 22,
+          "tabindex": 6,
+          "role:textbox": 1
+        },
+        "names": {
+          "proper": 72,
+          "heuristic": 7,
+          "empty": 0
+        },
+        "name_samples": {
+          "empty": [],
+          "heuristic": [
+            "<li class=\"sparkup__usage-guide-step\" tabindex=\"0\" aria-expanded=\"false\">\n  <div class=\"sparkup__usage-guide-step__number\"></div>\n  <div class=\"sparkup__usage-g",
+            "<li class=\"sparkup__usage-guide-step\" tabindex=\"0\" aria-expanded=\"false\">\n  <div class=\"sparkup__usage-guide-step__number\"></div>\n  <div class=\"sparkup__usage-g",
+            "<li class=\"sparkup__usage-guide-step\" tabindex=\"0\" aria-expanded=\"false\">\n  <div class=\"sparkup__usage-guide-step__number\"></div>\n  <div class=\"sparkup__usage-g",
+            "<li class=\"sparkup__usage-guide-step\" tabindex=\"0\" aria-expanded=\"false\">\n  <div class=\"sparkup__usage-guide-step__number\"></div>\n  <div class=\"sparkup__usage-g",
+            "<div style=\"tab-size: 4;\" spellcheck=\"false\" autocorrect=\"off\" autocapitalize=\"off\" translate=\"no\" contenteditable=\"true\" class=\"cm-content cm-lineWrapping\" rol"
+          ]
+        }
+      },
+      "cross_origin_frames": {
+        "count": 2,
+        "visible": 1,
+        "visible_area_px": 40704,
+        "hosts": [
+          "sandbox.web.squarecdn.com"
+        ],
+        "list": [
+          {
+            "src": "https://sandbox.web.squarecdn.com/1.85.0/single-card-element-iframe.html",
+            "host": "sandbox.web.squarecdn.com",
+            "w": 848,
+            "h": 48,
+            "visible": true,
+            "title": "Secure Credit Card Form"
+          },
+          {
+            "src": "https://sandbox.web.squarecdn.com/1.85.0/main-iframe.html?applicationId=sandbox-sq0idb-RT3u-HhCpNdbMiGg5aXuVg&hostname=developer.squareup.com",
+            "host": "sandbox.web.squarecdn.com",
+            "w": 0,
+            "h": 0,
+            "visible": false,
+            "title": ""
+          }
+        ],
+        "opened": [
+          {
+            "host": "sandbox.web.squarecdn.com",
+            "w": 848,
+            "h": 48,
+            "total": 0,
+            "counts": {},
+            "names": {
+              "proper": 0,
+              "heuristic": 0,
+              "empty": 0
+            }
+          }
+        ],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 182,
+        "empty_name": 112,
+        "generic_tag": 106,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 50,
+          "button": 21,
+          "listitem": 4,
+          "textbox": 1,
+          "div": 36,
+          "span": 65,
+          "br": 3,
+          "pre": 2
+        },
+        "chars_interactive_uncapped": 6676,
+        "chars_interactive_default": 6676,
+        "entries_at_default_cap": 182,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 13404,
+        "tokens_interactive_uncapped": 1669,
+        "tokens_all_default": 3351
+      },
+      "gap": {
+        "top_document_minus_read_page": -104,
+        "same_origin_frame_elements": 1,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 1
+      }
+    },
+    "https://www.paypal.com/buttons/": {
+      "url": "https://www.paypal.com/buttons/",
+      "tag": "payment",
+      "at": "2026-09-30T02:51:48.515Z",
+      "ms": 7575,
+      "inventory": {
+        "total": 13,
+        "top_document": 13,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 0,
+        "open_shadow_roots": 1,
+        "counts": {
+          "link": 8,
+          "role:button": 3,
+          "role:link": 2
+        },
+        "names": {
+          "proper": 13,
+          "heuristic": 0,
+          "empty": 0
+        },
+        "name_samples": {
+          "empty": [],
+          "heuristic": []
+        }
+      },
+      "cross_origin_frames": {
+        "count": 0,
+        "visible": 0,
+        "visible_area_px": 0,
+        "hosts": [],
+        "list": [],
+        "opened": [],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 13,
+        "empty_name": 0,
+        "generic_tag": 0,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 10,
+          "button": 3
+        },
+        "chars_interactive_uncapped": 1512,
+        "chars_interactive_default": 1512,
+        "entries_at_default_cap": 13,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 2171,
+        "tokens_interactive_uncapped": 378,
+        "tokens_all_default": 543
+      },
+      "gap": {
+        "top_document_minus_read_page": 0,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 0
+      }
+    },
+    "https://docs.stripe.com/payments/checkout": {
+      "url": "https://docs.stripe.com/payments/checkout",
+      "tag": "payment",
+      "at": "2026-09-30T02:51:57.210Z",
+      "ms": 8694,
+      "inventory": {
+        "total": 96,
+        "top_document": 96,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 0,
+        "open_shadow_roots": 0,
+        "counts": {
+          "link": 64,
+          "role:button": 19,
+          "input": 1,
+          "role:tab": 7,
+          "button": 4,
+          "tabindex": 1
+        },
+        "names": {
+          "proper": 91,
+          "heuristic": 0,
+          "empty": 5
+        },
+        "name_samples": {
+          "empty": [
+            "<span role=\"button\" class=\"⚙  as-3r as-1e as-1u as-1v as-6t ⚙sm5kdb\"><svg data-testid=\"anchorIcon\" aria-hidden=\"true\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"",
+            "<span role=\"button\" class=\"⚙  as-3r as-1e as-1u as-1v as-6t ⚙sm5kdb\"><svg data-testid=\"anchorIcon\" aria-hidden=\"true\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"",
+            "<span role=\"button\" class=\"⚙  as-3r as-1e as-1u as-1v as-6t ⚙sm5kdb\"><svg data-testid=\"anchorIcon\" aria-hidden=\"true\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"",
+            "<span role=\"button\" class=\"⚙  as-3r as-1e as-1u as-1v as-6t ⚙sm5kdb\"><svg data-testid=\"anchorIcon\" aria-hidden=\"true\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"",
+            "<div tabindex=\"1\" class=\"⚙  as-9 as-e2 as-e3 as-e4 as-e5 as-e6 ⚙1ap8orj\"><div class=\"⚙ as-d ⚙1h6ueu1\"><div class=\"⚙  as-e7 as-e8 as-e9 as-d as-ea as-eb as-ec as"
+          ],
+          "heuristic": []
+        }
+      },
+      "cross_origin_frames": {
+        "count": 4,
+        "visible": 0,
+        "visible_area_px": 0,
+        "hosts": [
+          "b.stripecdn.com",
+          "js.stripe.com"
+        ],
+        "list": [
+          {
+            "src": "https://b.stripecdn.com/stripethirdparty-srv/assets/v32.18/HCaptchaInvisible.html?id=32445df6-2fc2-4a17-84c2-b8508b8b8193&origin=https%3A%2F%2Fdocs.stripe.com",
+            "host": "b.stripecdn.com",
+            "w": 0,
+            "h": 0,
+            "visible": false,
+            "title": ""
+          },
+          {
+            "src": "https://b.stripecdn.com/stripethirdparty-srv/assets/v32.18/GoogleTagManager.html?id=1c58c0eb-ba45-4d83-93f2-336be73fdc3d&origin=https%3A%2F%2Fdocs.stripe.com",
+            "host": "b.stripecdn.com",
+            "w": 0,
+            "h": 0,
+            "visible": false,
+            "title": ""
+          },
+          {
+            "src": "https://js.stripe.com/v3/controller-with-preconnect-0de4f6c662dcd7aac4fa2176d0145fd2.html#__shared_params__[version]=dahlia&__shared_params__[light_experiment_assignments]=%7B%22token%22%3A%226c086285-7c61-469d-ad1e-499e28061631%22%2C%22assignments%22%3A%7B%7D%7D&apiKey=pk_test_51K1yvAK258Vuxm4DefLC",
+            "host": "js.stripe.com",
+            "w": 1268,
+            "h": 1,
+            "visible": false,
+            "title": ""
+          },
+          {
+            "src": "https://js.stripe.com/v3/m-outer-3437aaddcdf6922d623e172c2d6f9278.html#url=https%3A%2F%2Fdocs.stripe.com%2Fpayments%2Fcheckout&title=Build%20a%20payments%20page%20%7C%20Stripe%20Documentation&referrer=&muid=1db5fe59-6082-4e2f-9feb-afa43b7a834ea71672&sid=7d909199-0efd-4269-a53d-d63a8a52c7ae313691&ver",
+            "host": "js.stripe.com",
+            "w": 1268,
+            "h": 1,
+            "visible": false,
+            "title": ""
+          }
+        ],
+        "opened": [],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 96,
+        "empty_name": 6,
+        "generic_tag": 1,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 64,
+          "button": 23,
+          "textbox": 1,
+          "tab": 7,
+          "div": 1
+        },
+        "chars_interactive_uncapped": 6908,
+        "chars_interactive_default": 6908,
+        "entries_at_default_cap": 96,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 13877,
+        "tokens_interactive_uncapped": 1727,
+        "tokens_all_default": 3469
+      },
+      "gap": {
+        "top_document_minus_read_page": 0,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 0
+      }
+    },
+    "https://css-tricks.com/snippets/css/a-guide-to-flexbox/": {
+      "url": "https://css-tricks.com/snippets/css/a-guide-to-flexbox/",
+      "tag": "editor",
+      "at": "2026-09-30T02:52:24.320Z",
+      "ms": 27109,
+      "inventory": {
+        "total": 135,
+        "top_document": 135,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 1,
+        "open_shadow_roots": 2,
+        "counts": {
+          "link": 117,
+          "button": 12,
+          "textarea": 1,
+          "input": 4,
+          "checkbox": 1
+        },
+        "names": {
+          "proper": 102,
+          "heuristic": 0,
+          "empty": 33
+        },
+        "name_samples": {
+          "empty": [
+            "<a href=\"#get-the-poster\" aria-hidden=\"true\" class=\"aal_anchor\" id=\"get-the-poster\"><svg aria-hidden=\"true\" class=\"aal_svg\" height=\"16\" version=\"1.1\" viewBox=\"0",
+            "<a href=\"#css-flexbox-background\" aria-hidden=\"true\" class=\"aal_anchor\" id=\"css-flexbox-background\"><svg aria-hidden=\"true\" class=\"aal_svg\" height=\"16\" version=",
+            "<a href=\"#flexbox-terminology\" aria-hidden=\"true\" class=\"aal_anchor\" id=\"flexbox-terminology\"><svg aria-hidden=\"true\" class=\"aal_svg\" height=\"16\" version=\"1.1\" ",
+            "<a href=\"#css-flexbox-properties\" aria-hidden=\"true\" class=\"aal_anchor\" id=\"css-flexbox-properties\"><svg aria-hidden=\"true\" class=\"aal_svg\" height=\"16\" version=",
+            "<a href=\"#properties-for-the-parentflex-container\" aria-hidden=\"true\" class=\"aal_anchor\" id=\"properties-for-the-parentflex-container\"><svg aria-hidden=\"true\" cl"
+          ],
+          "heuristic": []
+        }
+      },
+      "cross_origin_frames": {
+        "count": 23,
+        "visible": 18,
+        "visible_area_px": 8167200,
+        "hosts": [
+          "codepen.io",
+          "css-tricks.com",
+          "www.youtube.com"
+        ],
+        "list": [
+          {
+            "src": "https://codepen.io/anon/embed/QwKVaYm?height=450&theme-id=1&slug-hash=QwKVaYm&default-tab=css,result",
+            "host": "codepen.io",
+            "w": 996,
+            "h": 450,
+            "visible": true,
+            "title": "CodePen Embed QwKVaYm"
+          },
+          {
+            "src": "https://codepen.io/anon/embed/JoRaMVP?height=450&theme-id=1&slug-hash=JoRaMVP&default-tab=css,result",
+            "host": "codepen.io",
+            "w": 996,
+            "h": 450,
+            "visible": true,
+            "title": "CodePen Embed JoRaMVP"
+          },
+          {
+            "src": "https://codepen.io/anon/embed/yyaxpdR?height=450&theme-id=1&slug-hash=yyaxpdR&default-tab=css,result",
+            "host": "codepen.io",
+            "w": 996,
+            "h": 450,
+            "visible": true,
+            "title": "CodePen Embed yyaxpdR"
+          },
+          {
+            "src": "https://codepen.io/anon/embed/raMZJag?height=450&theme-id=1&slug-hash=raMZJag&default-tab=result",
+            "host": "codepen.io",
+            "w": 996,
+            "h": 450,
+            "visible": true,
+            "title": "CodePen Embed raMZJag"
+          },
+          {
+            "src": "https://codepen.io/anon/embed/myrGXem?height=450&theme-id=1&slug-hash=myrGXem&default-tab=result",
+            "host": "codepen.io",
+            "w": 996,
+            "h": 450,
+            "visible": true,
+            "title": "CodePen Embed myrGXem"
+          },
+          {
+            "src": "https://codepen.io/anon/embed/xbEayqw?height=450&theme-id=1&slug-hash=xbEayqw&default-tab=result",
+            "host": "codepen.io",
+            "w": 996,
+            "h": 450,
+            "visible": true,
+            "title": "CodePen Embed xbEayqw"
+          },
+          {
+            "src": "https://codepen.io/anon/embed/vEXvjVP?height=450&theme-id=1&slug-hash=vEXvjVP&default-tab=css,result",
+            "host": "codepen.io",
+            "w": 996,
+            "h": 450,
+            "visible": true,
+            "title": "CodePen Embed vEXvjVP"
+          },
+          {
+            "src": "https://codepen.io/anon/embed/emdLVOX?height=450&theme-id=1&slug-hash=emdLVOX&default-tab=css,result",
+            "host": "codepen.io",
+            "w": 996,
+            "h": 450,
+            "visible": true,
+            "title": "CodePen Embed emdLVOX"
+          },
+          {
+            "src": "https://codepen.io/anon/embed/MYjqQqg?height=450&theme-id=1&slug-hash=MYjqQqg&default-tab=css,result",
+            "host": "codepen.io",
+            "w": 996,
+            "h": 450,
+            "visible": true,
+            "title": "CodePen Embed MYjqQqg"
+          },
+          {
+            "src": "https://codepen.io/anon/embed/VYKGQKm?height=450&theme-id=1&slug-hash=VYKGQKm&default-tab=result",
+            "host": "codepen.io",
+            "w": 996,
+            "h": 450,
+            "visible": true,
+            "title": "CodePen Embed VYKGQKm"
+          },
+          {
+            "src": "https://codepen.io/anon/embed/QwKVQGZ?height=450&theme-id=1&slug-hash=QwKVQGZ&default-tab=result",
+            "host": "codepen.io",
+            "w": 996,
+            "h": 450,
+            "visible": true,
+            "title": "CodePen Embed QwKVQGZ"
+          },
+          {
+            "src": "https://codepen.io/anon/embed/yyaxvgw?height=450&theme-id=1&slug-hash=yyaxvgw&default-tab=result",
+            "host": "codepen.io",
+            "w": 996,
+            "h": 450,
+            "visible": true,
+            "title": "CodePen Embed yyaxvgw"
+          },
+          {
+            "src": "https://codepen.io/anon/embed/xbEaapB?height=350&theme-id=1&slug-hash=xbEaapB&default-tab=result",
+            "host": "codepen.io",
+            "w": 996,
+            "h": 350,
+            "visible": true,
+            "title": "CodePen Embed xbEaapB"
+          },
+          {
+            "src": "https://codepen.io/anon/embed/OPRoBVx?height=550&theme-id=1&slug-hash=OPRoBVx&default-tab=result",
+            "host": "codepen.io",
+            "w": 996,
+            "h": 550,
+            "visible": true,
+            "title": "CodePen Embed OPRoBVx"
+          },
+          {
+            "src": "https://codepen.io/anon/embed/emdLPyO?height=850&theme-id=1&slug-hash=emdLPyO&default-tab=result",
+            "host": "codepen.io",
+            "w": 996,
+            "h": 850,
+            "visible": true,
+            "title": "CodePen Embed emdLPyO"
+          }
+        ],
+        "opened": [
+          {
+            "host": "codepen.io",
+            "w": 996,
+            "h": 850,
+            "total": 11,
+            "counts": {
+              "role:button": 5,
+              "link": 2,
+              "button": 4
+            },
+            "names": {
+              "proper": 11,
+              "heuristic": 0,
+              "empty": 0
+            }
+          },
+          {
+            "host": "codepen.io",
+            "w": 996,
+            "h": 550,
+            "total": 11,
+            "counts": {
+              "role:button": 5,
+              "link": 2,
+              "button": 4
+            },
+            "names": {
+              "proper": 11,
+              "heuristic": 0,
+              "empty": 0
+            }
+          },
+          {
+            "host": "codepen.io",
+            "w": 996,
+            "h": 450,
+            "total": 11,
+            "counts": {
+              "role:button": 4,
+              "link": 2,
+              "tabindex": 1,
+              "button": 4
+            },
+            "names": {
+              "proper": 10,
+              "heuristic": 1,
+              "empty": 0
+            }
+          },
+          {
+            "host": "codepen.io",
+            "w": 996,
+            "h": 450,
+            "total": 11,
+            "counts": {
+              "role:button": 4,
+              "link": 2,
+              "tabindex": 1,
+              "button": 4
+            },
+            "names": {
+              "proper": 10,
+              "heuristic": 1,
+              "empty": 0
+            }
+          }
+        ],
+        "interactive_inside_opened": 44
+      },
+      "read_page": {
+        "entries": 110,
+        "empty_name": 8,
+        "generic_tag": 0,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 92,
+          "button": 12,
+          "textbox": 5,
+          "checkbox": 1
+        },
+        "chars_interactive_uncapped": 8356,
+        "chars_interactive_default": 8356,
+        "entries_at_default_cap": 110,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 47657,
+        "tokens_interactive_uncapped": 2089,
+        "tokens_all_default": 11914
+      },
+      "gap": {
+        "top_document_minus_read_page": 25,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 44,
+        "missed_estimate": 69
+      }
+    },
+    "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/button": {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/button",
+      "tag": "editor",
+      "at": "2026-09-30T02:53:51.645Z",
+      "ms": 87323,
+      "inventory": {
+        "total": 625,
+        "top_document": 625,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 0,
+        "open_shadow_roots": 110,
+        "counts": {
+          "link": 363,
+          "button": 257,
+          "role:tab": 2,
+          "tabindex": 1,
+          "role:textbox": 1,
+          "input": 1
+        },
+        "names": {
+          "proper": 600,
+          "heuristic": 2,
+          "empty": 23
+        },
+        "name_samples": {
+          "empty": [
+            "<a class=\"button\" part=\"button\" href=\"https://developer.mozilla.org/users/fxa/login/authenticate/?next=%2Fen-US%2Fdocs%2FWeb%2FHTML%2FReference%2FElements%2Fbut",
+            "<button class=\"button\" part=\"button\" aria-labelledby=\"label-wxl0j8muo3r\" data-variant=\"secondary\">\n          <!--?lit$051258827$--><!----><!----><!---->\n    <sp",
+            "<button class=\"button\" part=\"button\" aria-labelledby=\"label-0d3lgaps3gcr\" data-variant=\"secondary\">\n          <!--?lit$051258827$--><!----><!----><!---->\n    <s",
+            "<a class=\"button\" part=\"button\" href=\"https://developer.mozilla.org/en-US/play?uuid=d63e094ebe677da0b825b31631113bcf46c02aa5&amp;state=RVHBUuswDPwVj86yakmOHXfSz",
+            "<a class=\"button\" part=\"button\" href=\"https://developer.mozilla.org/en-US/play?uuid=d63e094ebe677da0b825b31631113bcf46c02aa5&amp;state=RVHBUuswDPwVj86yakmOHXfSz"
+          ],
+          "heuristic": [
+            "<button class=\"mdn-search-button\" title=\"Search the site\" data-glean-id=\"quick-search-open: menu\">\n      <!--lit-part ijtgkDNyZhc=--><svg xmlns=\"http://www.w3.o",
+            "<div style=\"tab-size: 4;\" spellcheck=\"false\" autocorrect=\"off\" autocapitalize=\"off\" writingsuggestions=\"false\" translate=\"no\" contenteditable=\"true\" class=\"cm-c"
+          ]
+        }
+      },
+      "cross_origin_frames": {
+        "count": 5,
+        "visible": 5,
+        "visible_area_px": 475771,
+        "hosts": [
+          "219bd006-93b7-4e0f-afda-d81c9587ae7a.mdnplay.dev",
+          "d63e094ebe677da0b825b31631113bcf46c02aa5.mdnplay.dev",
+          "b5fb4eb9de42165c128bc2f8461933e2f7ec5e4a.mdnplay.dev",
+          "df73cab972b96f507dc22c8d22516fecc9228cc4.mdnplay.dev",
+          "71095aa6116c616038471e4a844869704e5bd7ad.mdnplay.dev"
+        ],
+        "list": [
+          {
+            "src": "https://219bd006-93b7-4e0f-afda-d81c9587ae7a.mdnplay.dev/runner.html?uuid=219bd006-93b7-4e0f-afda-d81c9587ae7a&state=hVLtauswDH0VIRhskHRpRvfD%2B4D7HvmjxGri1bGDrXbZHXv3i%2FNxC%2B3GMDLo6Eg6svyJnfQWFT7XRxHvoLEU40uFezr5YIQhyodlXSHIx8AvFc68Cl%2F%2FaA3iYSXG5%2Fs59Fo5zLCJERVu5mz4rBxA7YPmoKB4Sp41jvOOTduJgnK",
+            "host": "219bd006-93b7-4e0f-afda-d81c9587ae7a.mdnplay.dev",
+            "w": 269,
+            "h": 301,
+            "visible": true,
+            "title": "runner"
+          },
+          {
+            "src": "https://d63e094ebe677da0b825b31631113bcf46c02aa5.mdnplay.dev/en-US/docs/Web/HTML/Reference/Elements/button/runner.html?uuid=d63e094ebe677da0b825b31631113bcf46c02aa5&state=RVHBUuswDPwVj86yakmOHXfSzvDu78TVl5CGttCmDMnrY2D4d8ZJgZNleb2rXX3AYTqfYA3Nw79pugxmaM%2F9JsNje728Hqc%2BwzYPxjTjdW8ej6fTJsPDqe2eM5jrs",
+            "host": "d63e094ebe677da0b825b31631113bcf46c02aa5.mdnplay.dev",
+            "w": 643,
+            "h": 150,
+            "visible": true,
+            "title": "runner"
+          },
+          {
+            "src": "https://b5fb4eb9de42165c128bc2f8461933e2f7ec5e4a.mdnplay.dev/en-US/docs/Web/HTML/Reference/Elements/button/runner.html?uuid=b5fb4eb9de42165c128bc2f8461933e2f7ec5e4a&state=q1bKKMnNUbJSskkqLSnJz1MoqSxItY1RgvBilBTyEnOR%2BXae6rkKiQoQro0%2BhLaLyVPSUUouLlayUlLSUcqC0iUZqbmpSlZKKYlF2Uq1AA%3D%3D",
+            "host": "b5fb4eb9de42165c128bc2f8461933e2f7ec5e4a.mdnplay.dev",
+            "w": 643,
+            "h": 64,
+            "visible": true,
+            "title": "runner"
+          },
+          {
+            "src": "https://df73cab972b96f507dc22c8d22516fecc9228cc4.mdnplay.dev/en-US/docs/Web/HTML/Reference/Elements/button/runner.html?uuid=df73cab972b96f507dc22c8d22516fecc9228cc4&state=lVLBbtswDP0VTqcESO17KnsY1t2GDdhOwbSDKjG1VplyJTlBUOTfB0m2mwxoi51s8ZGPj%2BR7Zl3sLdsyfj%2FG6AjiacBGsPISDJTre0l673wjWH%2FSRlr38BJvBAu",
+            "host": "df73cab972b96f507dc22c8d22516fecc9228cc4.mdnplay.dev",
+            "w": 643,
+            "h": 200,
+            "visible": true,
+            "title": "runner"
+          },
+          {
+            "src": "https://71095aa6116c616038471e4a844869704e5bd7ad.mdnplay.dev/en-US/docs/Web/HTML/Reference/Elements/button/runner.html?uuid=71095aa6116c616038471e4a844869704e5bd7ad&state=rVJNb9swDP0rhHZxgDRed3QdF%2FvoYcBOW7GTLorE2FpkypPoJkGR%2Fz4ocpqsy2EDdiNt8j2%2B9%2FQsOu6dqES9Gpk9gfZ9r8isfVhKoT2tbehvjFXOt1Kc%2Fi6",
+            "host": "71095aa6116c616038471e4a844869704e5bd7ad.mdnplay.dev",
+            "w": 643,
+            "h": 200,
+            "visible": true,
+            "title": "runner"
+          }
+        ],
+        "opened": [
+          {
+            "host": "df73cab972b96f507dc22c8d22516fecc9228cc4.mdnplay.dev",
+            "w": 643,
+            "h": 200,
+            "error": "frame navigate timed out after 20s"
+          },
+          {
+            "host": "71095aa6116c616038471e4a844869704e5bd7ad.mdnplay.dev",
+            "w": 643,
+            "h": 200,
+            "error": "frame navigate timed out after 20s"
+          },
+          {
+            "host": "d63e094ebe677da0b825b31631113bcf46c02aa5.mdnplay.dev",
+            "w": 643,
+            "h": 150,
+            "error": "frame navigate timed out after 20s"
+          },
+          {
+            "host": "219bd006-93b7-4e0f-afda-d81c9587ae7a.mdnplay.dev",
+            "w": 269,
+            "h": 301,
+            "error": "frame navigate timed out after 20s"
+          }
+        ],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 638,
+        "empty_name": 37,
+        "generic_tag": 13,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 363,
+          "button": 257,
+          "tab": 2,
+          "tabpanel": 1,
+          "textbox": 2,
+          "div": 2,
+          "span": 10,
+          "br": 1
+        },
+        "chars_interactive_uncapped": 46202,
+        "chars_interactive_default": 46202,
+        "entries_at_default_cap": 638,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 50297,
+        "tokens_interactive_uncapped": 11551,
+        "tokens_all_default": 12574
+      },
+      "gap": {
+        "top_document_minus_read_page": -13,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 0
+      }
+    },
+    "https://jsfiddle.net/": {
+      "url": "https://jsfiddle.net/",
+      "tag": "editor",
+      "at": "2026-09-30T02:53:59.064Z",
+      "ms": 7418,
+      "inventory": {
+        "total": 39,
+        "top_document": 39,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 6,
+        "open_shadow_roots": 0,
+        "counts": {
+          "link": 29,
+          "input": 1,
+          "button": 3,
+          "role:textbox": 3,
+          "tabindex": 3
+        },
+        "names": {
+          "proper": 28,
+          "heuristic": 1,
+          "empty": 10
+        },
+        "name_samples": {
+          "empty": [
+            "<a href=\"#\"><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" width=\"24\" height=\"24\" color=\"currentColor\" fill=\"none\" stroke=\"currentColor\" stroke-wid",
+            "<a id=\"toggle-privacy\" href=\"#\" class=\"mode_public\"><svg class=\"tpPrivate\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" width=\"24\" height=\"24\" color=\"",
+            "<a data-v-2a9d90f0=\"\" id=\"save\" href=\"\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"rou",
+            "<a data-v-2a9d90f0=\"\" id=\"collaborate\" href=\"\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\"><g stroke-linejoin=\"round\" stroke-linecap=\"round\" stroke-width=\"2",
+            "<a data-v-2a9d90f0=\"\" id=\"switch-grid\" href=\"\"><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" width=\"24\" height=\"24\" fill=\"none\" stroke=\"currentCol"
+          ],
+          "heuristic": [
+            "<input type=\"text\" name=\"title\" size=\"30\" placeholder=\"Untitled fiddle\" form=\"fiddle-payload\" data-ddg-inputtype=\"unknown\">"
+          ]
+        }
+      },
+      "cross_origin_frames": {
+        "count": 0,
+        "visible": 0,
+        "visible_area_px": 0,
+        "hosts": [],
+        "list": [],
+        "opened": [],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 39,
+        "empty_name": 10,
+        "generic_tag": 0,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 29,
+          "textbox": 4,
+          "button": 3,
+          "separator": 3
+        },
+        "chars_interactive_uncapped": 1830,
+        "chars_interactive_default": 1830,
+        "entries_at_default_cap": 39,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 3262,
+        "tokens_interactive_uncapped": 458,
+        "tokens_all_default": 816
+      },
+      "gap": {
+        "top_document_minus_read_page": 0,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 0
+      }
+    },
+    "https://codepen.io/pen/": {
+      "url": "https://codepen.io/pen/",
+      "tag": "editor",
+      "at": "2026-09-30T02:54:14.574Z",
+      "ms": 15509,
+      "inventory": {
+        "total": 20,
+        "top_document": 20,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 0,
+        "open_shadow_roots": 0,
+        "counts": {
+          "link": 3,
+          "button": 14,
+          "textarea": 3
+        },
+        "names": {
+          "proper": 16,
+          "heuristic": 4,
+          "empty": 0
+        },
+        "name_samples": {
+          "empty": [],
+          "heuristic": [
+            "<button id=\"view-switcher-button\" data-test-id=\"view-switcher-button\" title=\"Change View\" aria-haspopup=\"menu\" aria-controls=\"_r_0_\" class=\"Button-module_root-c",
+            "<button id=\"settings-pane-html\" class=\"button button-medium mini-button settings-nub\" data-type=\"html\" title=\"Open HTML Settings\">\n                <svg viewBox=",
+            "<button id=\"settings-pane-css\" class=\"button button-medium mini-button settings-nub\" data-type=\"css\" title=\"Open CSS Settings\">\n                <svg viewBox=\"0 ",
+            "<button id=\"settings-pane-js\" class=\"button button-medium mini-button settings-nub\" data-type=\"js\" title=\"Open JS Settings\">\n                <svg viewBox=\"0 0 1"
+          ]
+        }
+      },
+      "cross_origin_frames": {
+        "count": 1,
+        "visible": 1,
+        "visible_area_px": 398152,
+        "hosts": [
+          "cdpn.io"
+        ],
+        "list": [
+          {
+            "src": "https://cdpn.io/cpe/boomboom/index.html?key=index.html-d0b0af1e-e4f7-b24f-55a8-6034f540f430",
+            "host": "cdpn.io",
+            "w": 1268,
+            "h": 314,
+            "visible": true,
+            "title": ""
+          }
+        ],
+        "opened": [
+          {
+            "host": "cdpn.io",
+            "w": 1268,
+            "h": 314,
+            "total": 4,
+            "counts": {
+              "link": 4
+            },
+            "names": {
+              "proper": 4,
+              "heuristic": 0,
+              "empty": 0
+            }
+          }
+        ],
+        "interactive_inside_opened": 4
+      },
+      "read_page": {
+        "entries": 20,
+        "empty_name": 0,
+        "generic_tag": 0,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 3,
+          "button": 14,
+          "textbox": 3
+        },
+        "chars_interactive_uncapped": 770,
+        "chars_interactive_default": 770,
+        "entries_at_default_cap": 20,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 1190,
+        "tokens_interactive_uncapped": 193,
+        "tokens_all_default": 298
+      },
+      "gap": {
+        "top_document_minus_read_page": 0,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 4,
+        "missed_estimate": 4
+      }
+    },
+    "https://www.typescriptlang.org/play": {
+      "url": "https://www.typescriptlang.org/play",
+      "tag": "editor",
+      "at": "2026-09-30T02:54:23.198Z",
+      "ms": 8623,
+      "inventory": {
+        "total": 54,
+        "top_document": 54,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 0,
+        "open_shadow_roots": 0,
+        "counts": {
+          "link": 37,
+          "role:combobox": 1,
+          "role:button": 8,
+          "role:tab": 5,
+          "tabindex": 1,
+          "select": 2
+        },
+        "names": {
+          "proper": 53,
+          "heuristic": 1,
+          "empty": 0
+        },
+        "name_samples": {
+          "empty": [],
+          "heuristic": [
+            "<pre tabindex=\"0\"><code><span><span class=\"mtk5\">\"use&nbsp;strict\"</span><span class=\"mtk11\">;</span></span><br><span><span class=\"mtk8\">//&nbsp;Welcome&nbsp;to"
+          ]
+        }
+      },
+      "cross_origin_frames": {
+        "count": 0,
+        "visible": 0,
+        "visible_area_px": 0,
+        "hosts": [],
+        "list": [],
+        "opened": [],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 55,
+        "empty_name": 2,
+        "generic_tag": 1,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 37,
+          "combobox": 3,
+          "button": 8,
+          "textbox": 1,
+          "tab": 5,
+          "pre": 1
+        },
+        "chars_interactive_uncapped": 3170,
+        "chars_interactive_default": 3170,
+        "entries_at_default_cap": 55,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 7184,
+        "tokens_interactive_uncapped": 793,
+        "tokens_all_default": 1796
+      },
+      "gap": {
+        "top_document_minus_read_page": -1,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 0
+      }
+    },
+    "https://www.w3schools.com/tryit/tryit.asp?filename=tryhtml_default": {
+      "url": "https://www.w3schools.com/tryit/tryit.asp?filename=tryhtml_default",
+      "tag": "editor",
+      "at": "2026-09-30T02:54:30.375Z",
+      "ms": 7176,
+      "inventory": {
+        "total": 9,
+        "top_document": 9,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 2,
+        "open_shadow_roots": 0,
+        "counts": {
+          "link": 7,
+          "button": 1,
+          "textarea": 1
+        },
+        "names": {
+          "proper": 2,
+          "heuristic": 5,
+          "empty": 2
+        },
+        "name_samples": {
+          "empty": [
+            "<a href=\"javascript:void(0)\" id=\"dragbar\" style=\"width: 5px; top: 48px; left: 629px; height: 808px; cursor: col-resize;\"></a>",
+            "<textarea style=\"position: absolute; bottom: -1em; padding: 0px; width: 1px; height: 1em; outline: none; --darkreader-inline-outline: currentcolor;\" wrap=\"off\" "
+          ],
+          "heuristic": [
+            "<a id=\"tryhome\" href=\"https://www.w3schools.com\" target=\"_blank\" title=\"w3schools.com Home\" class=\"w3-button w3-bar-item topnav-icons fa fa-home ga-tryit\" style",
+            "<a href=\"javascript:void(0);\" onclick=\"openMenu()\" id=\"menuButton\" title=\"Open Menu\" class=\"w3-dropdown-click w3-button w3-bar-item topnav-icons fa fa-menu ga-t",
+            "<a href=\"javascript:void(0);\" onclick=\"spaceIt.showDialog()\" title=\"Save code\" class=\"w3-button w3-bar-item topnav-icons fa fa-save ga-tryit\" style=\"margin-top:",
+            "<a href=\"javascript:void(0);\" onclick=\"restack(currentStack)\" title=\"Change Orientation\" class=\"w3-button w3-bar-item w3-hide-small topnav-icons fa fa-rotate ga",
+            "<a href=\"javascript:void(0);\" onclick=\"retheme()\" title=\"Change Theme\" class=\"w3-button w3-bar-item topnav-icons fa fa-adjust ga-tryit\" style=\"margin-top:-2px;\""
+          ]
+        }
+      },
+      "cross_origin_frames": {
+        "count": 0,
+        "visible": 0,
+        "visible_area_px": 0,
+        "hosts": [],
+        "list": [],
+        "opened": [],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 9,
+        "empty_name": 2,
+        "generic_tag": 0,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 7,
+          "button": 1,
+          "textbox": 1
+        },
+        "chars_interactive_uncapped": 475,
+        "chars_interactive_default": 475,
+        "entries_at_default_cap": 9,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 800,
+        "tokens_interactive_uncapped": 119,
+        "tokens_all_default": 200
+      },
+      "gap": {
+        "top_document_minus_read_page": 0,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 0
+      }
+    },
+    "https://developers.google.com/youtube/iframe_api_reference": {
+      "url": "https://developers.google.com/youtube/iframe_api_reference",
+      "tag": "video",
+      "at": "2026-09-30T02:54:54.945Z",
+      "ms": 24569,
+      "inventory": {
+        "total": 158,
+        "top_document": 158,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 0,
+        "open_shadow_roots": 6,
+        "counts": {
+          "link": 135,
+          "role:combobox": 1,
+          "button": 19,
+          "role:button": 1,
+          "role:searchbox": 1,
+          "role:listbox": 1
+        },
+        "names": {
+          "proper": 156,
+          "heuristic": 2,
+          "empty": 0
+        },
+        "name_samples": {
+          "empty": [],
+          "heuristic": [
+            "<button type=\"button\" title=\"Expand/collapse contents\" class=\"devsite-nav-show-all button-transparent material-icons\"></button>",
+            "<button type=\"button\" class=\"button-flat devsite-nav-more-items material-icons\" track-type=\"navigation\" track-name=\"embeddedNavExpand\" title=\"Expand/collapse co"
+          ]
+        }
+      },
+      "cross_origin_frames": {
+        "count": 4,
+        "visible": 3,
+        "visible_area_px": 818350,
+        "hosts": [
+          "www.youtube.com",
+          "developers.google.com",
+          "accounts.google.com"
+        ],
+        "list": [
+          {
+            "src": "https://www.youtube.com/embed/bHQqvYy5KYo?origin=https%3A%2F%2Fdevelopers.google.com&autoplay&controls&embed_domain&enablejsapi=1&end&hl&showinfo=0&start&video-id=bHQqvYy5KYo&widgetid=1&forigin=https%3A%2F%2Fdevelopers.google.com%2Fyoutube%2Fiframe_api_reference&aoriginsup=1&vf=1",
+            "host": "www.youtube.com",
+            "w": 384,
+            "h": 216,
+            "visible": true,
+            "title": "Google I/O 2011: YouTube's iframe Player: The Future of Embedding"
+          },
+          {
+            "src": "https://developers.google.com/frame/youtube/iframe_api_reference_b0e63fd04d3918e7222d13a21d1fb4d992e5f9aff4eaf57272ca2903e193174c.frame",
+            "host": "developers.google.com",
+            "w": 793,
+            "h": 399,
+            "visible": true,
+            "title": ""
+          },
+          {
+            "src": "https://developers.google.com/frame/youtube/iframe_api_reference_e171e1b2c6e6f9206fdd47f6b72fcec577ea5bd671f52b7846e76fd0c0394898.frame",
+            "host": "developers.google.com",
+            "w": 833,
+            "h": 503,
+            "visible": true,
+            "title": ""
+          },
+          {
+            "src": "https://accounts.google.com/RotateCookiesPage?og_pid=331&rot=3&origin=https%3A%2F%2Fdevelopers.google.com&exp_id=0",
+            "host": "accounts.google.com",
+            "w": 0,
+            "h": 0,
+            "visible": false,
+            "title": ""
+          }
+        ],
+        "opened": [
+          {
+            "host": "developers.google.com",
+            "w": 833,
+            "h": 503,
+            "total": 5,
+            "counts": {
+              "input": 4,
+              "button": 1
+            },
+            "names": {
+              "proper": 5,
+              "heuristic": 0,
+              "empty": 0
+            }
+          },
+          {
+            "host": "developers.google.com",
+            "w": 793,
+            "h": 399,
+            "total": 0,
+            "counts": {},
+            "names": {
+              "proper": 0,
+              "heuristic": 0,
+              "empty": 0
+            }
+          },
+          {
+            "host": "www.youtube.com",
+            "w": 384,
+            "h": 216,
+            "total": 4,
+            "counts": {
+              "tabindex": 1,
+              "link": 3
+            },
+            "names": {
+              "proper": 4,
+              "heuristic": 0,
+              "empty": 0
+            }
+          }
+        ],
+        "interactive_inside_opened": 9
+      },
+      "read_page": {
+        "entries": 158,
+        "empty_name": 2,
+        "generic_tag": 0,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 135,
+          "combobox": 1,
+          "button": 20,
+          "searchbox": 1,
+          "listbox": 1
+        },
+        "chars_interactive_uncapped": 10082,
+        "chars_interactive_default": 10082,
+        "entries_at_default_cap": 158,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 50329,
+        "tokens_interactive_uncapped": 2521,
+        "tokens_all_default": 12582
+      },
+      "gap": {
+        "top_document_minus_read_page": 0,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 9,
+        "missed_estimate": 9
+      }
+    },
+    "https://www.w3schools.com/html/tryit.asp?filename=tryhtml_youtubeiframe": {
+      "url": "https://www.w3schools.com/html/tryit.asp?filename=tryhtml_youtubeiframe",
+      "tag": "video",
+      "at": "2026-09-30T02:55:06.714Z",
+      "ms": 11767,
+      "inventory": {
+        "total": 9,
+        "top_document": 9,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 2,
+        "open_shadow_roots": 0,
+        "counts": {
+          "link": 7,
+          "button": 1,
+          "textarea": 1
+        },
+        "names": {
+          "proper": 2,
+          "heuristic": 5,
+          "empty": 2
+        },
+        "name_samples": {
+          "empty": [
+            "<a href=\"javascript:void(0)\" id=\"dragbar\" style=\"width: 5px; top: 48px; left: 629px; height: 808px; cursor: col-resize;\"></a>",
+            "<textarea style=\"position: absolute; bottom: -1em; padding: 0px; width: 1px; height: 1em; outline: none; --darkreader-inline-outline: currentcolor;\" wrap=\"off\" "
+          ],
+          "heuristic": [
+            "<a id=\"tryhome\" href=\"https://www.w3schools.com\" target=\"_blank\" title=\"w3schools.com Home\" class=\"w3-button w3-bar-item topnav-icons fa fa-home ga-tryit\" style",
+            "<a href=\"javascript:void(0);\" onclick=\"openMenu()\" id=\"menuButton\" title=\"Open Menu\" class=\"w3-dropdown-click w3-button w3-bar-item topnav-icons fa fa-menu ga-t",
+            "<a href=\"javascript:void(0);\" onclick=\"spaceIt.showDialog()\" title=\"Save code\" class=\"w3-button w3-bar-item topnav-icons fa fa-save ga-tryit\" style=\"margin-top:",
+            "<a href=\"javascript:void(0);\" onclick=\"restack(currentStack)\" title=\"Change Orientation\" class=\"w3-button w3-bar-item w3-hide-small topnav-icons fa fa-rotate ga",
+            "<a href=\"javascript:void(0);\" onclick=\"retheme()\" title=\"Change Theme\" class=\"w3-button w3-bar-item topnav-icons fa fa-adjust ga-tryit\" style=\"margin-top:-2px;\""
+          ]
+        }
+      },
+      "cross_origin_frames": {
+        "count": 1,
+        "visible": 1,
+        "visible_area_px": 147976,
+        "hosts": [
+          "www.youtube.com"
+        ],
+        "list": [
+          {
+            "src": "https://www.youtube.com/embed/tgbNymZ7vqY",
+            "host": "www.youtube.com",
+            "w": 424,
+            "h": 349,
+            "visible": true,
+            "title": ""
+          }
+        ],
+        "opened": [
+          {
+            "host": "www.youtube.com",
+            "w": 424,
+            "h": 349,
+            "total": 4,
+            "counts": {
+              "tabindex": 1,
+              "link": 3
+            },
+            "names": {
+              "proper": 4,
+              "heuristic": 0,
+              "empty": 0
+            }
+          }
+        ],
+        "interactive_inside_opened": 4
+      },
+      "read_page": {
+        "entries": 9,
+        "empty_name": 2,
+        "generic_tag": 0,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 7,
+          "button": 1,
+          "textbox": 1
+        },
+        "chars_interactive_uncapped": 480,
+        "chars_interactive_default": 480,
+        "entries_at_default_cap": 9,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 783,
+        "tokens_interactive_uncapped": 120,
+        "tokens_all_default": 196
+      },
+      "gap": {
+        "top_document_minus_read_page": 0,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 4,
+        "missed_estimate": 4
+      }
+    },
+    "https://accounts.hcaptcha.com/demo": {
+      "url": "https://accounts.hcaptcha.com/demo",
+      "tag": "login",
+      "at": "2026-09-30T02:55:17.700Z",
+      "ms": 10986,
+      "inventory": {
+        "total": 2,
+        "top_document": 2,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 0,
+        "open_shadow_roots": 0,
+        "counts": {
+          "input": 1,
+          "button": 1
+        },
+        "names": {
+          "proper": 2,
+          "heuristic": 0,
+          "empty": 0
+        },
+        "name_samples": {
+          "empty": [],
+          "heuristic": []
+        }
+      },
+      "cross_origin_frames": {
+        "count": 2,
+        "visible": 1,
+        "visible_area_px": 22952,
+        "hosts": [
+          "newassets.hcaptcha.com"
+        ],
+        "list": [
+          {
+            "src": "https://newassets.hcaptcha.com/captcha/v1/b9ca2a6602c2bf69741b771db488f3001ea35b08/static/hcaptcha.html#frame=checkbox&id=0idk5at1jwyd&host=accounts.hcaptcha.com&sentry=true&reportapi=https%3A%2F%2Faccounts.hcaptcha.com&recaptchacompat=true&custom=False&hl=en&tplinks=on&andint=off&pstissuer=https%3A",
+            "host": "newassets.hcaptcha.com",
+            "w": 302,
+            "h": 76,
+            "visible": true,
+            "title": "Widget containing checkbox for hCaptcha security challenge"
+          },
+          {
+            "src": "https://newassets.hcaptcha.com/captcha/v1/b9ca2a6602c2bf69741b771db488f3001ea35b08/static/hcaptcha.html#frame=challenge&id=0idk5at1jwyd&host=accounts.hcaptcha.com&sentry=true&reportapi=https%3A%2F%2Faccounts.hcaptcha.com&recaptchacompat=true&custom=False&hl=en&tplinks=on&andint=off&pstissuer=https%3",
+            "host": "newassets.hcaptcha.com",
+            "w": 300,
+            "h": 150,
+            "visible": false,
+            "title": "hCaptcha challenge"
+          }
+        ],
+        "opened": [
+          {
+            "host": "newassets.hcaptcha.com",
+            "w": 302,
+            "h": 76,
+            "total": 0,
+            "counts": {},
+            "names": {
+              "proper": 0,
+              "heuristic": 0,
+              "empty": 0
+            }
+          }
+        ],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 1,
+        "empty_name": 0,
+        "generic_tag": 0,
+        "iframe_entries": 0,
+        "by_role": {
+          "button": 1
+        },
+        "chars_interactive_uncapped": 150,
+        "chars_interactive_default": 150,
+        "entries_at_default_cap": 1,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 553,
+        "tokens_interactive_uncapped": 38,
+        "tokens_all_default": 138
+      },
+      "gap": {
+        "top_document_minus_read_page": 1,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 1
+      }
+    },
+    "https://www.google.com/recaptcha/api2/demo": {
+      "url": "https://www.google.com/recaptcha/api2/demo",
+      "tag": "login",
+      "at": "2026-09-30T02:55:24.908Z",
+      "ms": 7207,
+      "inventory": {
+        "total": 7,
+        "top_document": 6,
+        "same_origin_frame_elements": 1,
+        "same_origin_frames": 4,
+        "open_shadow_roots": 0,
+        "counts": {
+          "input": 3,
+          "radio": 2,
+          "role:checkbox": 1,
+          "button": 1
+        },
+        "names": {
+          "proper": 7,
+          "heuristic": 0,
+          "empty": 0
+        },
+        "name_samples": {
+          "empty": [],
+          "heuristic": []
+        }
+      },
+      "cross_origin_frames": {
+        "count": 0,
+        "visible": 0,
+        "visible_area_px": 0,
+        "hosts": [],
+        "list": [],
+        "opened": [],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 6,
+        "empty_name": 0,
+        "generic_tag": 0,
+        "iframe_entries": 0,
+        "by_role": {
+          "textbox": 3,
+          "radio": 2,
+          "button": 1
+        },
+        "chars_interactive_uncapped": 402,
+        "chars_interactive_default": 402,
+        "entries_at_default_cap": 6,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 860,
+        "tokens_interactive_uncapped": 101,
+        "tokens_all_default": 215
+      },
+      "gap": {
+        "top_document_minus_read_page": 0,
+        "same_origin_frame_elements": 1,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 1
+      }
+    },
+    "https://demo.turnstile.workers.dev/": {
+      "url": "https://demo.turnstile.workers.dev/",
+      "tag": "login",
+      "at": "2026-09-30T02:55:32.075Z",
+      "ms": 7165,
+      "inventory": {
+        "total": 5,
+        "top_document": 5,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 0,
+        "open_shadow_roots": 0,
+        "counts": {
+          "input": 2,
+          "button": 1,
+          "link": 2
+        },
+        "names": {
+          "proper": 5,
+          "heuristic": 0,
+          "empty": 0
+        },
+        "name_samples": {
+          "empty": [],
+          "heuristic": []
+        }
+      },
+      "cross_origin_frames": {
+        "count": 0,
+        "visible": 0,
+        "visible_area_px": 0,
+        "hosts": [],
+        "list": [],
+        "opened": [],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 5,
+        "empty_name": 0,
+        "generic_tag": 0,
+        "iframe_entries": 0,
+        "by_role": {
+          "textbox": 2,
+          "button": 1,
+          "link": 2
+        },
+        "chars_interactive_uncapped": 393,
+        "chars_interactive_default": 393,
+        "entries_at_default_cap": 5,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 846,
+        "tokens_interactive_uncapped": 98,
+        "tokens_all_default": 212
+      },
+      "gap": {
+        "top_document_minus_read_page": 0,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 0
+      }
+    },
+    "https://news.ycombinator.com/": {
+      "url": "https://news.ycombinator.com/",
+      "tag": "plain",
+      "at": "2026-09-30T02:55:39.334Z",
+      "ms": 7258,
+      "inventory": {
+        "total": 229,
+        "top_document": 229,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 0,
+        "open_shadow_roots": 0,
+        "counts": {
+          "link": 228,
+          "input": 1
+        },
+        "names": {
+          "proper": 197,
+          "heuristic": 0,
+          "empty": 32
+        },
+        "name_samples": {
+          "empty": [
+            "<a href=\"https://news.ycombinator.com\"><img src=\"y18.svg\" width=\"18\" height=\"18\" style=\"border: 1px solid white; display: block; --darkreader-inline-border-top:",
+            "<a id=\"up_49901736\" href=\"vote?id=49901736&amp;how=up&amp;goto=news\"><div class=\"votearrow\" title=\"upvote\"></div></a>",
+            "<a id=\"up_49899090\" href=\"vote?id=49899090&amp;how=up&amp;goto=news\"><div class=\"votearrow\" title=\"upvote\"></div></a>",
+            "<a id=\"up_49898778\" href=\"vote?id=49898778&amp;how=up&amp;goto=news\"><div class=\"votearrow\" title=\"upvote\"></div></a>",
+            "<a id=\"up_49893509\" href=\"vote?id=49893509&amp;how=up&amp;goto=news\"><div class=\"votearrow\" title=\"upvote\"></div></a>"
+          ],
+          "heuristic": []
+        }
+      },
+      "cross_origin_frames": {
+        "count": 0,
+        "visible": 0,
+        "visible_area_px": 0,
+        "hosts": [],
+        "list": [],
+        "opened": [],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 229,
+        "empty_name": 32,
+        "generic_tag": 0,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 228,
+          "textbox": 1
+        },
+        "chars_interactive_uncapped": 14468,
+        "chars_interactive_default": 14468,
+        "entries_at_default_cap": 229,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 27577,
+        "tokens_interactive_uncapped": 3617,
+        "tokens_all_default": 6894
+      },
+      "gap": {
+        "top_document_minus_read_page": 0,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 0
+      }
+    },
+    "https://en.wikipedia.org/wiki/Firefox": {
+      "url": "https://en.wikipedia.org/wiki/Firefox",
+      "tag": "plain",
+      "at": "2026-09-30T02:55:47.233Z",
+      "ms": 7898,
+      "inventory": {
+        "total": 2483,
+        "top_document": 2483,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 0,
+        "open_shadow_roots": 0,
+        "counts": {
+          "link": 2446,
+          "role:button": 4,
+          "input": 1,
+          "button": 13,
+          "radio": 8,
+          "tabindex": 11
+        },
+        "names": {
+          "proper": 2458,
+          "heuristic": 12,
+          "empty": 13
+        },
+        "name_samples": {
+          "empty": [
+            "<a href=\"https://en.wikipedia.org/wiki/File:Firefox_152.0.3_opening_Wikipedia_article_on_Linux_screenshot.png\" class=\"mw-file-description\"><img resource=\"https:",
+            "<a href=\"https://en.wikipedia.org/wiki/File:Acid3_Mozilla_Firefox_test.png\" class=\"mw-file-description\" id=\"mwAUM\"><img resource=\"https://en.wikipedia.org/wiki/",
+            "<a href=\"https://en.wikipedia.org/wiki/File:Phoenix_0.1.png\" class=\"mw-file-description\" id=\"mwAfA\"><img resource=\"https://en.wikipedia.org/wiki/File:Phoenix_0.",
+            "<a href=\"https://en.wikipedia.org/wiki/File:Firefox_146.0.1_on_Windows_11_screenshot.webp\" class=\"mw-file-description\" id=\"mwBOg\"><img resource=\"https://en.wiki",
+            "<a href=\"https://en.wikipedia.org/wiki/File:Firefox_136_screenshot,_macOS_Sonoma.png\" class=\"mw-file-description\" id=\"mwBT8\"><img resource=\"https://en.wikipedia"
+          ],
+          "heuristic": [
+            "<th id=\"mwBGo\" class=\"headerSort\" tabindex=\"0\" role=\"columnheader button\" title=\"Sort ascending\">Requirement</th>",
+            "<th id=\"mwBGs\" class=\"headerSort\" tabindex=\"0\" role=\"columnheader button\" title=\"Sort ascending\">Microsoft Windows</th>",
+            "<th id=\"mwBGw\" class=\"headerSort\" tabindex=\"0\" role=\"columnheader button\" title=\"Sort ascending\">Linux <small id=\"mwBG0\">desktop</small></th>",
+            "<th id=\"mwBG4\" class=\"headerSort\" tabindex=\"0\" role=\"columnheader button\" title=\"Sort ascending\">macOS</th>",
+            "<th id=\"mwBG8\" class=\"headerSort\" tabindex=\"0\" role=\"columnheader button\" title=\"Sort ascending\">Android<sup about=\"#mwt759\" class=\"mw-ref reference\" id=\"cite_r"
+          ]
+        }
+      },
+      "cross_origin_frames": {
+        "count": 0,
+        "visible": 0,
+        "visible_area_px": 0,
+        "hosts": [],
+        "list": [],
+        "opened": [],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 2524,
+        "empty_name": 26,
+        "generic_tag": 0,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 2487,
+          "button": 17,
+          "searchbox": 1,
+          "radio": 8,
+          "columnheader": 11
+        },
+        "chars_interactive_uncapped": 231623,
+        "chars_interactive_default": 50232,
+        "entries_at_default_cap": 713,
+        "truncated_at_default_cap": true,
+        "chars_all_default": 50244,
+        "tokens_interactive_uncapped": 57906,
+        "tokens_all_default": 12561
+      },
+      "gap": {
+        "top_document_minus_read_page": -41,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 0
+      }
+    },
+    "https://github.com/mozilla/readability": {
+      "url": "https://github.com/mozilla/readability",
+      "tag": "plain",
+      "at": "2026-09-30T02:55:56.387Z",
+      "ms": 9151,
+      "inventory": {
+        "total": 184,
+        "top_document": 184,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 0,
+        "open_shadow_roots": 28,
+        "counts": {
+          "link": 154,
+          "button": 21,
+          "tabindex": 2,
+          "role:combobox": 1,
+          "role:button": 6
+        },
+        "names": {
+          "proper": 182,
+          "heuristic": 1,
+          "empty": 1
+        },
+        "name_samples": {
+          "empty": [
+            "<div data-component=\"AvatarStack.Body\" class=\"pc-AvatarStackBody prc-AvatarStack-AvatarStackBody-JFK4u\" tabindex=\"0\"> <img data-component=\"Avatar\" class=\"pc-Ava"
+          ],
+          "heuristic": [
+            "<div class=\"SharedPageLayout-module__content__IwGAp\" data-selector=\"repos-split-pane-content\" id=\"repos-split-pane-content\" tabindex=\"0\"><div style=\"--spacing:v"
+          ]
+        }
+      },
+      "cross_origin_frames": {
+        "count": 0,
+        "visible": 0,
+        "visible_area_px": 0,
+        "hosts": [],
+        "list": [],
+        "opened": [],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 184,
+        "empty_name": 16,
+        "generic_tag": 2,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 154,
+          "button": 27,
+          "div": 2,
+          "combobox": 1
+        },
+        "chars_interactive_uncapped": 14194,
+        "chars_interactive_default": 14194,
+        "entries_at_default_cap": 184,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 33188,
+        "tokens_interactive_uncapped": 3549,
+        "tokens_all_default": 8297
+      },
+      "gap": {
+        "top_document_minus_read_page": 0,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 0
+      }
+    },
+    "https://jobs.ashbyhq.com/ramp": {
+      "url": "https://jobs.ashbyhq.com/ramp",
+      "tag": "plain",
+      "at": "2026-09-30T02:56:03.641Z",
+      "ms": 7253,
+      "inventory": {
+        "total": 165,
+        "top_document": 165,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 0,
+        "open_shadow_roots": 0,
+        "counts": {
+          "link": 160,
+          "button": 1,
+          "select": 4
+        },
+        "names": {
+          "proper": 165,
+          "heuristic": 0,
+          "empty": 0
+        },
+        "name_samples": {
+          "empty": [],
+          "heuristic": []
+        }
+      },
+      "cross_origin_frames": {
+        "count": 0,
+        "visible": 0,
+        "visible_area_px": 0,
+        "hosts": [],
+        "list": [],
+        "opened": [],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 165,
+        "empty_name": 1,
+        "generic_tag": 0,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 160,
+          "button": 1,
+          "combobox": 4
+        },
+        "chars_interactive_uncapped": 30890,
+        "chars_interactive_default": 30890,
+        "entries_at_default_cap": 165,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 48297,
+        "tokens_interactive_uncapped": 7723,
+        "tokens_all_default": 12074
+      },
+      "gap": {
+        "top_document_minus_read_page": 0,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 0
+      }
+    },
+    "https://www.theguardian.com/international": {
+      "url": "https://www.theguardian.com/international",
+      "tag": "plain",
+      "at": "2026-09-30T02:56:11.336Z",
+      "ms": 7693,
+      "inventory": {
+        "total": 271,
+        "top_document": 271,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 1,
+        "open_shadow_roots": 0,
+        "counts": {
+          "link": 262,
+          "button": 5,
+          "role:button": 2,
+          "tabindex": 2
+        },
+        "names": {
+          "proper": 267,
+          "heuristic": 0,
+          "empty": 4
+        },
+        "name_samples": {
+          "empty": [
+            "<video id=\"video-collection-2-standard-0\" crossorigin=\"anonymous\" tabindex=\"0\" data-testid=\"self-hosted-video-player\" data-chromatic=\"ignore\" preload=\"none\" loo",
+            "<button type=\"button\" class=\"play-pause-icon dcr-19641bk\" data-link-name=\"gu-video-loop-play-ad087f33-4aeb-48ba-9f7a-5f6a266884df\" data-testid=\"play-icon\"><svg ",
+            "<video id=\"video-collection-28-standard-0\" crossorigin=\"anonymous\" tabindex=\"0\" data-testid=\"self-hosted-video-player\" data-chromatic=\"ignore\" preload=\"none\" lo",
+            "<button type=\"button\" class=\"play-pause-icon dcr-19641bk\" data-link-name=\"gu-video-loop-play-0fa54247-c4d8-4c4f-a6e1-7bc3d4a484bf\" data-testid=\"play-icon\"><svg "
+          ],
+          "heuristic": []
+        }
+      },
+      "cross_origin_frames": {
+        "count": 0,
+        "visible": 0,
+        "visible_area_px": 0,
+        "hosts": [],
+        "list": [],
+        "opened": [],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 270,
+        "empty_name": 4,
+        "generic_tag": 2,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 262,
+          "button": 6,
+          "video": 2
+        },
+        "chars_interactive_uncapped": 36919,
+        "chars_interactive_default": 36919,
+        "entries_at_default_cap": 270,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 50225,
+        "tokens_interactive_uncapped": 9230,
+        "tokens_all_default": 12556
+      },
+      "gap": {
+        "top_document_minus_read_page": 1,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 1
+      }
+    },
+    "https://www.bbc.com/news": {
+      "url": "https://www.bbc.com/news",
+      "tag": "plain",
+      "at": "2026-09-30T02:56:22.985Z",
+      "ms": 11647,
+      "inventory": {
+        "total": 115,
+        "top_document": 115,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 2,
+        "open_shadow_roots": 0,
+        "counts": {
+          "role:link": 1,
+          "role:button": 1,
+          "link": 106,
+          "button": 7
+        },
+        "names": {
+          "proper": 115,
+          "heuristic": 0,
+          "empty": 0
+        },
+        "name_samples": {
+          "empty": [],
+          "heuristic": []
+        }
+      },
+      "cross_origin_frames": {
+        "count": 1,
+        "visible": 1,
+        "visible_area_px": 1273096,
+        "hosts": [
+          "edigitalsurvey.com"
+        ],
+        "list": [
+          {
+            "src": "https://edigitalsurvey.com/l.php?id=INS-vt29-666188954&v=7291&x=1512&y=982&d=24&c=null&ck=1&p=%2Fnews&xdm=edr&xdm_o=https%3A%2F%2Fwww.bbc.com&xdm_c=edr0",
+            "host": "edigitalsurvey.com",
+            "w": 1496,
+            "h": 851,
+            "visible": true,
+            "title": ""
+          }
+        ],
+        "opened": [
+          {
+            "host": "edigitalsurvey.com",
+            "w": 1496,
+            "h": 851,
+            "total": 0,
+            "counts": {},
+            "names": {
+              "proper": 0,
+              "heuristic": 0,
+              "empty": 0
+            }
+          }
+        ],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 119,
+        "empty_name": 4,
+        "generic_tag": 0,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 111,
+          "button": 8
+        },
+        "chars_interactive_uncapped": 12208,
+        "chars_interactive_default": 12208,
+        "entries_at_default_cap": 119,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 24280,
+        "tokens_interactive_uncapped": 3052,
+        "tokens_all_default": 6070
+      },
+      "gap": {
+        "top_document_minus_read_page": -4,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 0
+      }
+    },
+    "https://www.npmjs.com/package/express": {
+      "url": "https://www.npmjs.com/package/express",
+      "tag": "plain",
+      "at": "2026-09-30T02:56:30.259Z",
+      "ms": 7272,
+      "inventory": {
+        "total": 146,
+        "top_document": 146,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 0,
+        "open_shadow_roots": 0,
+        "counts": {
+          "link": 122,
+          "button": 6,
+          "role:combobox": 1,
+          "role:tab": 5,
+          "tabindex": 11,
+          "role:button": 1
+        },
+        "names": {
+          "proper": 135,
+          "heuristic": 11,
+          "empty": 0
+        },
+        "name_samples": {
+          "empty": [],
+          "heuristic": [
+            "<pre tabindex=\"0\"><span class=\"pl-k\">import</span> <span class=\"pl-s1\">express</span> <span class=\"pl-k\">from</span> <span class=\"pl-s\">'express'</span>\n\n<span ",
+            "<pre tabindex=\"0\">npm install express</pre>",
+            "<pre tabindex=\"0\">npm install -g express-generator@4</pre>",
+            "<pre tabindex=\"0\">express /tmp/foo <span class=\"pl-k\">&amp;&amp;</span> <span class=\"pl-c1\">cd</span> /tmp/foo</pre>",
+            "<pre tabindex=\"0\">npm install</pre>"
+          ]
+        }
+      },
+      "cross_origin_frames": {
+        "count": 0,
+        "visible": 0,
+        "visible_area_px": 0,
+        "hosts": [],
+        "list": [],
+        "opened": [],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 146,
+        "empty_name": 23,
+        "generic_tag": 11,
+        "iframe_entries": 0,
+        "by_role": {
+          "link": 122,
+          "button": 7,
+          "combobox": 1,
+          "tab": 5,
+          "pre": 11
+        },
+        "chars_interactive_uncapped": 8569,
+        "chars_interactive_default": 8569,
+        "entries_at_default_cap": 146,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 19889,
+        "tokens_interactive_uncapped": 2142,
+        "tokens_all_default": 4972
+      },
+      "gap": {
+        "top_document_minus_read_page": 0,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 0
+      }
+    },
+    "https://excalidraw.com/": {
+      "url": "https://excalidraw.com/",
+      "tag": "app",
+      "at": "2026-09-30T02:56:37.250Z",
+      "ms": 6989,
+      "inventory": {
+        "total": 25,
+        "top_document": 25,
+        "same_origin_frame_elements": 0,
+        "same_origin_frames": 0,
+        "open_shadow_roots": 0,
+        "counts": {
+          "tabindex": 1,
+          "button": 22,
+          "link": 2
+        },
+        "names": {
+          "proper": 22,
+          "heuristic": 2,
+          "empty": 1
+        },
+        "name_samples": {
+          "empty": [
+            "<button type=\"button\" id=\"radix-:r2:\" aria-haspopup=\"menu\" aria-expanded=\"false\" data-state=\"closed\" class=\"dropdown-menu-button main-menu-trigger zen-mode-tran"
+          ],
+          "heuristic": [
+            "<div translate=\"no\" class=\"excalidraw excalidraw-container notranslate theme--dark\" style=\"--ui-pointerEvents: all; --right-sidebar-width: 302px; --zen-mode-tra",
+            "<button type=\"button\" id=\"radix-:r0:\" aria-haspopup=\"menu\" aria-expanded=\"false\" data-state=\"closed\" class=\"dropdown-menu-button App-toolbar__extra-tools-trigge"
+          ]
+        }
+      },
+      "cross_origin_frames": {
+        "count": 0,
+        "visible": 0,
+        "visible_area_px": 0,
+        "hosts": [],
+        "list": [],
+        "opened": [],
+        "interactive_inside_opened": 0
+      },
+      "read_page": {
+        "entries": 25,
+        "empty_name": 2,
+        "generic_tag": 1,
+        "iframe_entries": 0,
+        "by_role": {
+          "div": 1,
+          "button": 22,
+          "link": 2
+        },
+        "chars_interactive_uncapped": 1080,
+        "chars_interactive_default": 1080,
+        "entries_at_default_cap": 25,
+        "truncated_at_default_cap": false,
+        "chars_all_default": 1518,
+        "tokens_interactive_uncapped": 270,
+        "tokens_all_default": 380
+      },
+      "gap": {
+        "top_document_minus_read_page": 0,
+        "same_origin_frame_elements": 0,
+        "cross_origin_frame_elements_estimate": 0,
+        "missed_estimate": 0
+      }
+    }
+  },
+  "updated": "2026-09-30T02:56:37.250Z"
+}
