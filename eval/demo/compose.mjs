@@ -7,7 +7,7 @@
 //
 //   node eval/demo/compose.mjs --dir <race dir> [--firefox <sidecar.json>] [--chrome <sidecar.json>]
 //        [--out race.mp4] [--social-out race-social.mp4] [--hold close|result] [--tail 3]
-//        [--font file] [--mono-font file] [--keep-temp]
+//        [--font file] [--mono-font file] [--speed 2] [--caption text] [--background image] [--keep-temp]
 //
 // Without --firefox/--chrome it takes the median-time passing take of each browser from the
 // sidecars in --dir. Writes a 1920x1080 mp4 (h264, yuv420p, faststart, no audio) and a 1200-wide
@@ -38,7 +38,11 @@ const flag = (name) => argv.includes(`--${name}`);
 const W = 1920;
 const H = 1080;
 const FPS = 30;
-const TAIL = Number(opt("tail", 3));
+const BACKGROUND = opt("background") ? path.resolve(opt("background").replace(/^~(?=\/)/, os.homedir())) : null; // an image behind the panes, cropped to fill
+if (BACKGROUND && !fs.existsSync(BACKGROUND)) throw new Error(`--background ${BACKGROUND} not found`);
+const SPEED = Number(opt("speed", 1)); // playback speed of the final video; the timers keep showing real seconds
+if (!(SPEED >= 1 && SPEED <= 8)) throw new Error("--speed is 1 to 8");
+const TAIL = Number(opt("tail", 3)) * SPEED; // seconds the finished frame stays up, as watched
 const HOLD = opt("hold", "close");
 if (!["close", "result"].includes(HOLD)) throw new Error("--hold is close or result");
 const LABELS = { firefox: "Firefox Agent Bridge", chrome: "Claude in Chrome" };
@@ -76,7 +80,7 @@ const takes = [pick("chrome"), pick("firefox")]; // Claude in Chrome left, Firef
 if (takes[0].task !== takes[1].task) throw new Error(`the takes are of different tasks: ${takes[0].task}, ${takes[1].task}`);
 const outDir = DIR ?? path.dirname(takes[0]._file);
 const modelName = MODEL_NAMES[String(takes[0].model).replace(/\[.*\]$/, "")] ?? takes[0].model;
-const CAPTION = opt("caption") ?? [modelName + (takes[0].effort ? ` ${cap1(takes[0].effort)}` : ""), "same task and prompt", "one take each"].join(" · ");
+const CAPTION = opt("caption") ?? [modelName + (takes[0].effort ? ` ${cap1(takes[0].effort)}` : ""), "same task and prompt", "one take each", ...(SPEED > 1 ? [`played at ${SPEED}x`] : [])].join(" · ");
 const OUT = path.resolve(opt("out", path.join(outDir, `race-${takes[0].task}.mp4`)));
 const SOCIAL = path.resolve(opt("social-out", OUT.replace(/\.mp4$/, "") + "-social.mp4"));
 
@@ -127,7 +131,15 @@ sides.forEach((s, i) => {
   staticArgs.push("(", "-size", `${Math.round(p.w / 2)}x${STYLE.stripH}`, "xc:none", "-font", FONT, "-pointsize", "28", "-fill", COLORS.text, "-gravity", "West", "-annotate", "+20+0", LABELS[s.sc.browser], ")");
   staticArgs.push("-gravity", "NorthWest", "-geometry", `+${p.x}+${stripTop}`, "-composite");
 });
-staticArgs.push("-font", FONT, "-pointsize", "24", "-fill", COLORS.muted, "-gravity", "South", "-annotate", "+0+26", CAPTION);
+if (BACKGROUND) {
+  // On a painting the caption needs its own dark pill to stay readable.
+  const capText = path.join(TMP, "caption.png");
+  await magick(["-background", "none", "-fill", COLORS.text, "-font", FONT, "-pointsize", "24", `label:${CAPTION}`, capText]);
+  const [cw, ch] = sizeOf(capText);
+  const pw = cw + 44, ph = ch + 18;
+  staticArgs.push("-fill", COLORS.strip, "-draw", `roundrectangle ${(W - pw) / 2},${H - 22 - ph} ${(W + pw) / 2 - 1},${H - 23} ${ph / 2},${ph / 2}`);
+  staticArgs.push(capText, "-gravity", "South", "-geometry", "+0+31", "-composite");
+} else staticArgs.push("-font", FONT, "-pointsize", "24", "-fill", COLORS.muted, "-gravity", "South", "-annotate", "+0+26", CAPTION);
 staticArgs.push(path.join(TMP, "static.png"));
 await magick(staticArgs);
 
@@ -160,7 +172,13 @@ for (const [i, s] of sides.entries()) {
 const graph = filterGraph({ sides, lay, total, fps: FPS });
 const graphFile = path.join(TMP, "graph.txt");
 fs.writeFileSync(graphFile, graph);
-const inputs = ["-f", "lavfi", "-i", `color=c=${COLORS.canvas.replace("#", "0x")}:s=${W}x${H}:r=${FPS}:d=${total.toFixed(3)}`, "-loop", "1", "-framerate", String(FPS), "-i", path.join(TMP, "static.png")];
+let canvasInput = ["-f", "lavfi", "-i", `color=c=${COLORS.canvas.replace("#", "0x")}:s=${W}x${H}:r=${FPS}:d=${total.toFixed(3)}`];
+if (BACKGROUND) {
+  const bg = path.join(TMP, "background.png");
+  await magick([BACKGROUND, "-resize", `${W}x${H}^`, "-gravity", "center", "-extent", `${W}x${H}`, bg]);
+  canvasInput = ["-loop", "1", "-framerate", String(FPS), "-t", total.toFixed(3), "-i", bg];
+}
+const inputs = [...canvasInput, "-loop", "1", "-framerate", String(FPS), "-i", path.join(TMP, "static.png")];
 for (const s of sides) inputs.push("-i", s.video, "-framerate", "10", "-i", s.timerPattern, "-loop", "1", "-framerate", String(FPS), "-i", s.badge);
 
 const ffmpeg = (args) => {
@@ -168,7 +186,9 @@ const ffmpeg = (args) => {
   return new Promise((resolve, reject) => r.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}`)))));
 };
 const X264 = (maxrate) => ["-c:v", "libx264", "-preset", "slow", "-crf", "22", "-maxrate", maxrate, "-bufsize", `${parseFloat(maxrate) * 2}M`, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an"];
-await ffmpeg([...inputs, "-/filter_complex", graphFile, "-map", "[out]", "-t", total.toFixed(3), "-r", String(FPS), ...X264("1.8M"), OUT]);
+const REAL = SPEED > 1 ? path.join(TMP, "real-time.mp4") : OUT;
+await ffmpeg([...inputs, "-/filter_complex", graphFile, "-map", "[out]", "-t", total.toFixed(3), "-r", String(FPS), ...(SPEED > 1 ? ["-c:v", "libx264", "-preset", "fast", "-crf", "16", "-pix_fmt", "yuv420p", "-an"] : X264("1.8M")), REAL]);
+if (SPEED > 1) await ffmpeg(["-i", REAL, "-vf", `setpts=PTS/${SPEED}`, "-r", String(FPS), ...X264("2.4M"), OUT]);
 await ffmpeg(["-i", OUT, "-vf", "scale=1200:-2:flags=lanczos", "-r", String(FPS), ...X264("1.1M"), SOCIAL]);
 
 const mb = (f) => (fs.statSync(f).size / 1e6).toFixed(1);
@@ -179,7 +199,8 @@ console.log(
       out_mb: Number(mb(OUT)),
       social: SOCIAL,
       social_mb: Number(mb(SOCIAL)),
-      seconds: Number(total.toFixed(1)),
+      seconds: Number((total / SPEED).toFixed(1)),
+      speed: SPEED,
       hold: HOLD,
       sides: sides.map((s, i) => ({
         browser: s.sc.browser,

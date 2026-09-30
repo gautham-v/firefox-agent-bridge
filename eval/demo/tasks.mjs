@@ -30,6 +30,25 @@ export const DEMO_TASKS = [
         round_trip_price_usd: (v) => toNumber(v) > 50 && toNumber(v) < 5000,
       }),
   },
+  {
+    id: "demo-excalidraw-flow",
+    kind: "demo",
+    arms: [],
+    prompt: prompt(
+      `Open this empty Excalidraw whiteboard: {EXCALIDRAW_ROOM} (a fresh collaboration room; if it asks for a name, dismiss it). Using the toolbar and the mouse, draw a small flowchart:
+- four rectangles in one row, left to right, labeled Plan, Build, Test and Ship (double-click a rectangle to type its label);
+- an arrow from each rectangle to the next (Plan → Build → Test → Ship), with both ends attached to the rectangles;
+- the text "measure twice" under Test.
+Don't use keyboard shortcuts to pick tools, and don't use javascript_tool.`,
+      '{"rectangles": 0, "arrows": 0, "text_under_test": ""}',
+    ),
+    check: (a) =>
+      checkFields(a, {
+        rectangles: (v) => toNumber(v) === 4,
+        arrows: (v) => toNumber(v) === 3,
+        text_under_test: (v) => /measure twice/i.test(String(v ?? "")),
+      }),
+  },
 ];
 
 export const demoTaskById = (id) => DEMO_TASKS.find((t) => t.id === id);

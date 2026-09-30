@@ -109,7 +109,10 @@ async function take(browser, n) {
   const base = path.join(DIR, `${browser}-${n}`);
   const capPath = `${base}.cap`;
   if (fs.existsSync(capPath)) throw new Error(`${capPath} exists; pick another --dir`);
-  const args = argsFor(browser);
+  // A task can ask for a fresh Excalidraw collaboration room per take ({EXCALIDRAW_ROOM} in its
+  // prompt): an empty canvas every time, and a room doesn't touch the browser's own saved drawing.
+  const room = `https://excalidraw.com/#room=${crypto.randomBytes(10).toString("hex")},${crypto.randomBytes(16).toString("base64url")}`;
+  const args = argsFor(browser).map((a) => a.replaceAll("{EXCALIDRAW_ROOM}", room));
   if (DRY) {
     log(`[dry-run] ${browser} take ${n}:`);
     console.log(`  cap record start --screen ${screen.id ?? "<primary>"} --detach --fps 30 --path ${capPath} --json`);
@@ -122,6 +125,7 @@ async function take(browser, n) {
   const before = await windows();
   const beforeChrome = new Set(before.filter((w) => pickWindow([w], "chrome", {})).map((w) => String(w.id)));
   let win = null;
+  if (browser === "chrome" && !flag("no-activate")) await activate("Google Chrome");
   if (browser === "firefox") {
     if (!flag("no-activate")) await activate("Firefox Developer Edition");
     await sleep(500);
@@ -184,10 +188,38 @@ async function take(browser, n) {
     }
   })();
 
+  // Claude in Chrome works in a tab of its own group but never brings it to the front, so on
+  // camera Chrome would show whatever tab was active. While the run lasts, keep the newest real
+  // page in the front window active (AppleScript; Chrome allows it without extra permission).
+  const chromeFocus =
+    browser === "chrome" && !flag("no-activate")
+      ? (async () => {
+          const script = [
+            'tell application "Google Chrome"',
+            "  if (count of windows) is 0 then return",
+            "  set w to front window",
+            "  set n to count of tabs of w",
+            "  repeat with i from n to 1 by -1",
+            "    set u to URL of tab i of w",
+            '    if u does not start with "about:" and u does not start with "chrome://" and u does not start with "chrome-extension://" then',
+            "      if active tab index of w is not i then set active tab index of w to i",
+            "      exit repeat",
+            "    end if",
+            "  end repeat",
+            "end tell",
+          ].join("\n");
+          while (running) {
+            await run("osascript", ["-e", script]).catch(() => {});
+            await sleep(300);
+          }
+        })()
+      : null;
+
   const exit = await exited;
   clearTimeout(timer);
   running = false;
   await sampler;
+  await chromeFocus;
   await sleep(TAIL_MS);
   const stopped = parseNdjson(await cap(["record", "stop", "--id", recordingId]).catch((e) => `{"error": ${JSON.stringify(e.message)}}`));
   log(`${browser} take ${n}: agent exited ${exit.code ?? exit.signal} after ${((exit.at - agentStarted) / 1000).toFixed(1)}s; recording stopped`);
