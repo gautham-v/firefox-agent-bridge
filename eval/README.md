@@ -239,6 +239,27 @@ has more than one (`--by-arm` forces it) and adds an "Experiment arms" table aga
 Models rows now also carry `screenshot_actions` (screenshots and zooms inside batches too); the
 older `screenshots` counts top-level calls only.
 
+### All six flags on the browser-comparison tasks (2026-09-30)
+
+Every flag against no flags on the 16 browser-comparison tasks, 2 runs per task per arm (224
+runs, $12.58 list), into `results/browsers-arms.jsonl` with traces. `arms-analysis.mjs` compares
+each arm task by task (a task's median, ratios, tasks up and down, a sign test, and none's run 1
+against run 2 as the noise floor) and checks the traces for what each flag was meant to change.
+The write-up is `results/browsers-arms-report.md`.
+
+```sh
+node eval/run.mjs --browser firefox --arms baseline --concurrency 2 --runs 2 --out eval/results/browsers-arms.jsonl \
+  --experiments none --experiments batchHint --experiments fewerShots --experiments screenshotAlias \
+  --experiments quietTabs --experiments pageTextCap --experiments fastNavigate
+node eval/arms-analysis.mjs --in eval/results/browsers-arms.jsonl --out analysis.md
+```
+
+Result: 222 of 224 runs passed (two wrong answer shapes on gen-httpbin-form, unrelated to the
+flags). `batchHint` and `screenshotAlias` stay: 11% fewer tool calls with `batchHint`, and no calls to a screenshot tool that isn't offered. `fastNavigate` cut `navigate` from
+1.9s to 0.6s and wall time about 3% (inside noise), with one case of an unrendered single-page app.
+`pageTextCap` at 8000 was the slowest arm (wall x1.10, p 0.01): the model reads the rest anyway.
+`fewerShots` changed nothing. `quietTabs` had nothing to act on, since no task opens a tab.
+
 # Model x effort benchmark
 
 Which model and effort level is worth using for browser tasks, and where effort stops paying.
