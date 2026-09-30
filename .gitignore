@@ -1,2 +1,7 @@
 host/firefox-agent-bridge-host
 .DS_Store
+eval/results/models/streams/
+eval/results/models/logs/
+eval/results/models/inflight/
+eval/results/models/scheduler.lock
+eval/results/models/smoke/

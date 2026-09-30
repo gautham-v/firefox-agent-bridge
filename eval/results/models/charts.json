@@ -1,0 +1,858 @@
+{
+ "meta": {
+  "source": "eval/results/models/runs.jsonl",
+  "runs": 180,
+  "configs": [
+   "haiku-4-5/default",
+   "sonnet-5-5/low",
+   "sonnet-5-5/medium",
+   "sonnet-5-5/high",
+   "opus-5-5/low",
+   "opus-5-5/medium",
+   "opus-5-5/high",
+   "fable-5-1/low",
+   "fable-5-1/medium",
+   "fable-5-1/high"
+  ],
+  "tasks": [
+   "research-synth",
+   "form-demoqa",
+   "todomvc-flow",
+   "books-paginated",
+   "tldraw-diagram",
+   "internet-gauntlet"
+  ],
+  "runs_per_cell": 3,
+  "notes": [
+   "cost is total_cost_usd from the CLI result event (list-price equivalent; subscription)",
+   "time_index / cost_index = geometric mean over the 6 tasks of (cell median / all-config task median); 1.0 = typical",
+   "haiku-4-5 ignores --effort; it runs once at its default",
+   "Sonnet, Opus and Fable scored 1.0 on all 18 runs each; score is at ceiling for 9 of 10 configs",
+   "14 round-1 runs overlapped another eval process (7 of them Fable); those ran 1.65x their cell median on average"
+  ]
+ },
+ "score_vs_cost": {
+  "x": "cost_mean_usd",
+  "y": "mean_score",
+  "points": [
+   {
+    "config": "haiku-4-5/default",
+    "model": "haiku-4-5",
+    "effort": "default",
+    "mean_score": 0.864,
+    "pass_rate": 0.556,
+    "cost_mean_usd": 0.337,
+    "cost_median_usd": 0.3235,
+    "cost_index": 1.67
+   },
+   {
+    "config": "sonnet-5-5/low",
+    "model": "sonnet-5-5",
+    "effort": "low",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "cost_mean_usd": 0.1135,
+    "cost_median_usd": 0.0833,
+    "cost_index": 0.5
+   },
+   {
+    "config": "sonnet-5-5/medium",
+    "model": "sonnet-5-5",
+    "effort": "medium",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "cost_mean_usd": 0.1213,
+    "cost_median_usd": 0.1204,
+    "cost_index": 0.57
+   },
+   {
+    "config": "sonnet-5-5/high",
+    "model": "sonnet-5-5",
+    "effort": "high",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "cost_mean_usd": 0.1341,
+    "cost_median_usd": 0.1373,
+    "cost_index": 0.61
+   },
+   {
+    "config": "opus-5-5/low",
+    "model": "opus-5-5",
+    "effort": "low",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "cost_mean_usd": 0.1651,
+    "cost_median_usd": 0.1439,
+    "cost_index": 0.8
+   },
+   {
+    "config": "opus-5-5/medium",
+    "model": "opus-5-5",
+    "effort": "medium",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "cost_mean_usd": 0.2069,
+    "cost_median_usd": 0.2046,
+    "cost_index": 0.97
+   },
+   {
+    "config": "opus-5-5/high",
+    "model": "opus-5-5",
+    "effort": "high",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "cost_mean_usd": 0.2284,
+    "cost_median_usd": 0.213,
+    "cost_index": 1.1
+   },
+   {
+    "config": "fable-5-1/low",
+    "model": "fable-5-1",
+    "effort": "low",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "cost_mean_usd": 0.4079,
+    "cost_median_usd": 0.4046,
+    "cost_index": 2.05
+   },
+   {
+    "config": "fable-5-1/medium",
+    "model": "fable-5-1",
+    "effort": "medium",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "cost_mean_usd": 0.4912,
+    "cost_median_usd": 0.4486,
+    "cost_index": 2.29
+   },
+   {
+    "config": "fable-5-1/high",
+    "model": "fable-5-1",
+    "effort": "high",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "cost_mean_usd": 0.5202,
+    "cost_median_usd": 0.4189,
+    "cost_index": 2.63
+   }
+  ],
+  "frontier": [
+   "sonnet-5-5/low"
+  ],
+  "frontier_note": "sonnet-5-5/low dominates: same score as every other top config at the lowest cost. Haiku is dominated (lower score, 3x the cost)."
+ },
+ "score_vs_time": {
+  "x": "wall_median_s",
+  "y": "mean_score",
+  "points": [
+   {
+    "config": "haiku-4-5/default",
+    "model": "haiku-4-5",
+    "effort": "default",
+    "mean_score": 0.864,
+    "pass_rate": 0.556,
+    "wall_median_s": 143.6,
+    "wall_mean_s": 149.2,
+    "time_index": 3.56
+   },
+   {
+    "config": "sonnet-5-5/low",
+    "model": "sonnet-5-5",
+    "effort": "low",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "wall_median_s": 34.9,
+    "wall_mean_s": 44.7,
+    "time_index": 0.89
+   },
+   {
+    "config": "sonnet-5-5/medium",
+    "model": "sonnet-5-5",
+    "effort": "medium",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "wall_median_s": 34.1,
+    "wall_mean_s": 43.7,
+    "time_index": 0.88
+   },
+   {
+    "config": "sonnet-5-5/high",
+    "model": "sonnet-5-5",
+    "effort": "high",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "wall_median_s": 51.3,
+    "wall_mean_s": 49.6,
+    "time_index": 1.09
+   },
+   {
+    "config": "opus-5-5/low",
+    "model": "opus-5-5",
+    "effort": "low",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "wall_median_s": 37.8,
+    "wall_mean_s": 43.8,
+    "time_index": 0.9
+   },
+   {
+    "config": "opus-5-5/medium",
+    "model": "opus-5-5",
+    "effort": "medium",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "wall_median_s": 49.0,
+    "wall_mean_s": 50.4,
+    "time_index": 1.12
+   },
+   {
+    "config": "opus-5-5/high",
+    "model": "opus-5-5",
+    "effort": "high",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "wall_median_s": 51.0,
+    "wall_mean_s": 56.4,
+    "time_index": 1.22
+   },
+   {
+    "config": "fable-5-1/low",
+    "model": "fable-5-1",
+    "effort": "low",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "wall_median_s": 34.9,
+    "wall_mean_s": 40.4,
+    "time_index": 0.79
+   },
+   {
+    "config": "fable-5-1/medium",
+    "model": "fable-5-1",
+    "effort": "medium",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "wall_median_s": 38.0,
+    "wall_mean_s": 49.2,
+    "time_index": 0.85
+   },
+   {
+    "config": "fable-5-1/high",
+    "model": "fable-5-1",
+    "effort": "high",
+    "mean_score": 1,
+    "pass_rate": 1.0,
+    "wall_median_s": 37.1,
+    "wall_mean_s": 45.4,
+    "time_index": 0.89
+   }
+  ],
+  "frontier": [
+   "sonnet-5-5/medium"
+  ],
+  "frontier_by_time_index": [
+   "fable-5-1/low"
+  ],
+  "frontier_note": "By pooled median wall the single frontier point is sonnet-5-5/medium (34.1s); by task-normalized time index it is fable-5-1/low (0.79). Sonnet low/medium, Opus low and Fable low/medium/high are all within 34-38s median, inside run-to-run noise (median max/min spread within a cell is 1.48x)."
+ },
+ "effort_curves": {
+  "efforts": [
+   "low",
+   "medium",
+   "high"
+  ],
+  "models": {
+   "sonnet-5-5": {
+    "mean_score": [
+     1,
+     1,
+     1
+    ],
+    "wall_median_s": [
+     34.9,
+     34.1,
+     51.3
+    ],
+    "time_index": [
+     0.89,
+     0.88,
+     1.09
+    ],
+    "output_tokens_median": [
+     2882.5,
+     3823.0,
+     4131.0
+    ],
+    "total_tokens_mean": [
+     161444,
+     162510,
+     196659
+    ],
+    "cost_mean_usd": [
+     0.1135,
+     0.1213,
+     0.1341
+    ],
+    "cost_index": [
+     0.5,
+     0.57,
+     0.61
+    ],
+    "tool_calls_median": [
+     23.0,
+     29.5,
+     37.0
+    ]
+   },
+   "opus-5-5": {
+    "mean_score": [
+     1,
+     1,
+     1
+    ],
+    "wall_median_s": [
+     37.8,
+     49.0,
+     51.0
+    ],
+    "time_index": [
+     0.9,
+     1.12,
+     1.22
+    ],
+    "output_tokens_median": [
+     2735.5,
+     4089.0,
+     3919.5
+    ],
+    "total_tokens_mean": [
+     134335,
+     179563,
+     197248
+    ],
+    "cost_mean_usd": [
+     0.1651,
+     0.2069,
+     0.2284
+    ],
+    "cost_index": [
+     0.8,
+     0.97,
+     1.1
+    ],
+    "tool_calls_median": [
+     24.5,
+     35.0,
+     37.5
+    ]
+   },
+   "fable-5-1": {
+    "mean_score": [
+     1,
+     1,
+     1
+    ],
+    "wall_median_s": [
+     34.9,
+     38.0,
+     37.1
+    ],
+    "time_index": [
+     0.79,
+     0.85,
+     0.89
+    ],
+    "output_tokens_median": [
+     2959.5,
+     3938.5,
+     3706.5
+    ],
+    "total_tokens_mean": [
+     118318,
+     152479,
+     155361
+    ],
+    "cost_mean_usd": [
+     0.4079,
+     0.4912,
+     0.5202
+    ],
+    "cost_index": [
+     2.05,
+     2.29,
+     2.63
+    ],
+    "tool_calls_median": [
+     23.5,
+     30.5,
+     36.0
+    ]
+   }
+  },
+  "haiku_default_reference": {
+   "mean_score": 0.864,
+   "wall_median_s": 143.6,
+   "time_index": 3.56,
+   "output_tokens_median": 11236.5,
+   "total_tokens_mean": 1903415,
+   "cost_mean_usd": 0.337,
+   "cost_index": 1.67,
+   "tool_calls_median": 48.0
+  }
+ },
+ "heatmap_task_config_mean_score": {
+  "rows": [
+   "research-synth",
+   "form-demoqa",
+   "todomvc-flow",
+   "books-paginated",
+   "tldraw-diagram",
+   "internet-gauntlet"
+  ],
+  "cols": [
+   "haiku-4-5/default",
+   "sonnet-5-5/low",
+   "sonnet-5-5/medium",
+   "sonnet-5-5/high",
+   "opus-5-5/low",
+   "opus-5-5/medium",
+   "opus-5-5/high",
+   "fable-5-1/low",
+   "fable-5-1/medium",
+   "fable-5-1/high"
+  ],
+  "values": [
+   [
+    0.933,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   [
+    0.944,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   [
+    0.714,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   [
+    0.593,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ]
+  ],
+  "pass_counts": [
+   [
+    2,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3
+   ],
+   [
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3
+   ],
+   [
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3
+   ],
+   [
+    2,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3
+   ],
+   [
+    0,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3
+   ],
+   [
+    0,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3
+   ]
+  ]
+ },
+ "tool_use_per_config": {
+  "configs": [
+   "haiku-4-5/default",
+   "sonnet-5-5/low",
+   "sonnet-5-5/medium",
+   "sonnet-5-5/high",
+   "opus-5-5/low",
+   "opus-5-5/medium",
+   "opus-5-5/high",
+   "fable-5-1/low",
+   "fable-5-1/medium",
+   "fable-5-1/high"
+  ],
+  "tool_calls_median": [
+   48.0,
+   23.0,
+   29.5,
+   37.0,
+   24.5,
+   35.0,
+   37.5,
+   23.5,
+   30.5,
+   36.0
+  ],
+  "screenshots_median": [
+   11.0,
+   3.0,
+   4.0,
+   6.0,
+   1.5,
+   3.0,
+   2.5,
+   0.0,
+   1.0,
+   3.0
+  ],
+  "tool_calls_mean": [
+   55.3,
+   25.9,
+   28.4,
+   30.1,
+   23.7,
+   29.6,
+   29.7,
+   22,
+   28.4,
+   28.9
+  ],
+  "screenshots_mean": [
+   14.1,
+   3.6,
+   3.9,
+   4.3,
+   1.3,
+   2.6,
+   2.6,
+   1.3,
+   1.6,
+   2.6
+  ],
+  "tool_errors_total": [
+   16,
+   14,
+   13,
+   13,
+   8,
+   3,
+   3,
+   0,
+   0,
+   0
+  ],
+  "unknown_tool_name_errors": [
+   9,
+   10,
+   9,
+   10,
+   7,
+   3,
+   3,
+   0,
+   0,
+   0
+  ],
+  "repeated_calls_total": [
+   11,
+   12,
+   11,
+   11,
+   12,
+   12,
+   12,
+   13,
+   14,
+   14
+  ],
+  "retries_after_error_total": [
+   7,
+   1,
+   1,
+   1,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ]
+ },
+ "token_breakdown_per_config": {
+  "configs": [
+   "haiku-4-5/default",
+   "sonnet-5-5/low",
+   "sonnet-5-5/medium",
+   "sonnet-5-5/high",
+   "opus-5-5/low",
+   "opus-5-5/medium",
+   "opus-5-5/high",
+   "fable-5-1/low",
+   "fable-5-1/medium",
+   "fable-5-1/high"
+  ],
+  "unit": "tokens per run (mean)",
+  "input_uncached": [
+   442,
+   23,
+   24,
+   28,
+   21,
+   27,
+   27,
+   109,
+   147,
+   113
+  ],
+  "cache_write": [
+   49214,
+   12024,
+   13398,
+   14329,
+   9947,
+   12026,
+   13285,
+   11466,
+   13032,
+   14530
+  ],
+  "cache_read": [
+   1842990,
+   145772,
+   145223,
+   178191,
+   121309,
+   163614,
+   179634,
+   103712,
+   135396,
+   136832
+  ],
+  "output_incl_thinking": [
+   10769,
+   3625,
+   3865,
+   4111,
+   3058,
+   3896,
+   4302,
+   3031,
+   3904,
+   3886
+  ],
+  "median": {
+   "input_uncached": [
+    394.0,
+    18.0,
+    20.0,
+    27.0,
+    18.0,
+    24.0,
+    24.0,
+    12.0,
+    15.0,
+    17.0
+   ],
+   "cache_write": [
+    51617.5,
+    9781.0,
+    12856.5,
+    14009.0,
+    8342.5,
+    11307.5,
+    13355.0,
+    10883.0,
+    12150.0,
+    11817.5
+   ],
+   "cache_read": [
+    1518584.0,
+    82327.0,
+    110738.0,
+    173510.5,
+    92879.5,
+    131867.0,
+    149576.0,
+    79040.5,
+    70162.5,
+    92600.0
+   ],
+   "output_incl_thinking": [
+    11236.5,
+    2882.5,
+    3823.0,
+    4131.0,
+    2735.5,
+    4089.0,
+    3919.5,
+    2959.5,
+    3938.5,
+    3706.5
+   ]
+  }
+ },
+ "cost_per_successful_task": {
+  "configs": [
+   "haiku-4-5/default",
+   "sonnet-5-5/low",
+   "sonnet-5-5/medium",
+   "sonnet-5-5/high",
+   "opus-5-5/low",
+   "opus-5-5/medium",
+   "opus-5-5/high",
+   "fable-5-1/low",
+   "fable-5-1/medium",
+   "fable-5-1/high"
+  ],
+  "usd": [
+   0.6066,
+   0.1135,
+   0.1213,
+   0.1341,
+   0.1651,
+   0.2069,
+   0.2284,
+   0.4079,
+   0.4912,
+   0.5202
+  ],
+  "passes": [
+   10,
+   18,
+   18,
+   18,
+   18,
+   18,
+   18,
+   18,
+   18,
+   18
+  ],
+  "runs": [
+   18,
+   18,
+   18,
+   18,
+   18,
+   18,
+   18,
+   18,
+   18,
+   18
+  ],
+  "total_cost_usd": [
+   6.066,
+   2.044,
+   2.184,
+   2.414,
+   2.971,
+   3.725,
+   4.111,
+   7.342,
+   8.841,
+   9.364
+  ],
+  "definition": "sum of cost over all 18 runs / number of passing runs"
+ }
+}
