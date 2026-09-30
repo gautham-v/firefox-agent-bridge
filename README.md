@@ -444,6 +444,15 @@ of them (tasks, arms and how to run it in [eval/README.md](eval/README.md); resu
 
 There were no infrastructure failures or flaky-task confounds in the eval runs.
 
+**Firefox vs Chrome.** The same 16 tasks, 3 runs each, were run with these tools and with Claude
+in Chrome ([Browser comparison](eval/results/report.md#browser-comparison-firefox-tools-vs-claude-in-chrome-baseline-arm)
+in the report). Firefox was ahead on 14 of 16 tasks, with about half the input tokens (60k vs
+119k) and per-call times 10 to 100x lower (`get_page_text` 13ms vs 2.2s, `find` 51ms vs 3.3s).
+It lost on a cross-origin iframe inside a shadow root (MDN's live examples) and on call count for
+repeated actions. The follow-up work added the `batch` tool and multi-field `form_input`, filling
+in a missing `tabId` from the session's tab, `find`/`read_page` walking child frames, and faster
+clicks.
+
 ## Caveats
 
 - This only works in Developer Edition (or Nightly). Release Firefox won't load unsigned
