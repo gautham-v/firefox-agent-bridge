@@ -43,3 +43,15 @@ tokens per model, turns, cost, answer, checker fields, errors), `results/probe-s
 
 Runs drive your real Firefox in background tab groups. The prompts tell the agent to close its
 tabs; a run that fails can leave a group behind (shown as Disconnected).
+
+## To re-measure after restart
+
+Extension changes that only take effect once Firefox restarts and loads them. Re-run these tasks
+against Chrome's numbers (`eval/vs-chrome`) and note what moved.
+
+- **Frames in find/read_page, keys follow the last click** (gen-mdn-iframe): `find` and
+  `read_page` now reach the select inside MDN's live-sample iframe (in a shadow root, cross-origin)
+  with a `ref_N@fM` that `form_input` sets in place; `key`/`type` go to the frame the last click
+  landed in and say which element got them and its value. Was 71 calls / 1315k tokens / 114s
+  median; expect about 5 to 15 calls and no answer worked out from the source. Also run
+  `scripts/test-firefox.mjs`, which has steps for both.

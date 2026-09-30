@@ -83,10 +83,13 @@ Differences from Chrome:
 
 - `find` matches keywords over element names, roles, labels and attributes. It doesn't call a
   model, so use words that appear on the page.
-- `read_page` and `find` only walk the top frame. Clicks, typing and scrolling by coordinate reach
-  into any frame; a scroll over a frame that can't scroll scrolls the page around it. A ref from
-  a child frame (from an element you pointed at in the chat panel) names its frame, as in
-  `ref_7@f12`, and works with every tool that takes a ref.
+- `read_page` and `find` walk child frames too, cross-origin ones and ones inside shadow roots
+  included: a frame's tree goes under its iframe's line, and `find` gives a frame's matches
+  coordinates in the top frame's screenshot. A ref from a child frame names its frame, as in
+  `ref_7@f12`, and works with every tool that takes a ref. Clicks and scrolling by coordinate
+  reach into any frame; a scroll over a frame that can't scroll scrolls the page around it.
+  Typing and keys go to the frame the last click landed in, and their result names the element
+  that got them and its value.
 - There is no `gif_creator`, console reading, network reading or shortcuts.
 
 ## Chat panel
@@ -328,8 +331,8 @@ Limits:
   script's result, but a script can return it transformed (split, reversed, encoded) and get it out.
 - Masking follows the rules, not the meaning: a card number typed into a field without
   `autocomplete="cc-number"`, or shown as plain text, isn't masked unless a site rule covers it.
-- `read_page`, `find` and `get_page_text` only read the top frame, so fields in iframes never show
-  up in them; screenshots cover iframes as described above.
+- `get_page_text` only reads the top frame. `read_page` and `find` read every frame with the
+  rules for that frame's own site; screenshots cover iframes as described above.
 
 ## Security
 

@@ -30,7 +30,7 @@ Firefox support, the row says so.
 | `computer`: clicks, hover, drag | Mouse events built in the actor, dispatched via the pres shell; coordinates or element ref; descends into cross-origin iframes | `input.performActions` (pointer source, `origin` can be an element) | Covered for trusted clicks. BiDi input is per context; the client must pick the child context for an iframe. No visible pointer for the user. |
 | `computer`: type, key | `nsITextInputProcessor` (trusted keydown/keypress/keyup, default actions run) | `input.performActions` (key source) | Covered for keys. Key actions are only keyDown/keyUp/pause, so there is no IME composition action. |
 | `computer`: scroll | Trusted `wheel` event, then `scrollBy` on the nearest scrollable ancestor | `input.performActions` (wheel source) | Covered. |
-| `read_page` | Own DOM walk with heuristic role and name computation, compact text tree, refs; top frame only | `browsingContext.locateNodes`, `script.callFunction` | No accessibility-tree snapshot command. Clients must inject their own walker, as the bridge does. |
+| `read_page` | Own DOM walk with heuristic role and name computation, compact text tree, refs; child frames walked through each frame's own actor | `browsingContext.locateNodes`, `script.callFunction` | No accessibility-tree snapshot command. Clients must inject their own walker, as the bridge does. |
 | `find` | Keyword scoring over names, roles, labels, attributes | `browsingContext.locateNodes` (`accessibility`, `innerText`, `css`, `xpath` locators) | Partly covered. Locators do exact role/name or text matching, not ranked search. |
 | `get_page_text` | `innerText`-style extraction in the actor | `script.evaluate` | Covered. |
 | `form_input` | Sets value through the native setter, fires `input`/`change`; selects, checkboxes, contenteditable | `script.callFunction` with an element `script.SharedReference` | Covered with client-side code. |
@@ -79,8 +79,8 @@ Agents work best from a compact tree of roles, names and states, not raw DOM or 
 an `accessibility` locator on `browsingContext.locateNodes` (match by computed role and
 accessible name), which Firefox implements. It has no command to return the tree. Issue w3c/webdriver-bidi#443 asked for both a full accessibility-tree snapshot
 (like CDP's `Accessibility.getFullAXTree`) and role/name queries. The queries landed; the
-snapshot has not, as far as I could tell. The bridge ships its own role/name heuristic because of this, and it only
-covers the top frame. Gecko already has a real accessibility tree, so Firefox is well placed to
+snapshot has not, as far as I could tell. The bridge ships its own role/name heuristic because of this, run in each
+frame's own process and stitched together by the extension. Gecko already has a real accessibility tree, so Firefox is well placed to
 expose it.
 
 ### Trusted input and user activation

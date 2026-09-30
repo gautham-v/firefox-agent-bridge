@@ -415,6 +415,8 @@ function redactor(doc, rules) {
       return out.text;
     },
     site: () => siteOf(doc),
+    // What the op's output masked, or null.
+    masked: () => (used.size ? { count: used.size, site: siteOf(doc) } : null),
     // The op's answer: plain text, or with what was masked when anything was.
     result(text) {
       return used.size ? { text, masked: { count: used.size, site: siteOf(doc) } } : text;
@@ -507,12 +509,15 @@ function capture(doc, { on, redact }) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// read_page
+// read_page. A child frame (an iframe, also one inside a shadow root, cross-origin or not) gets a
+// line of its own ending in frame=f<id>, and its id goes in `frames`: background.js then reads
+// that frame too (with `inner`, which leaves out the header) and puts its tree under the line.
 
-function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, frameScale = 1, redact } = {}) {
+function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, frameScale = 1, redact, inner = false } = {}) {
   const interactiveOnly = filter === "interactive";
   const red = redactor(doc, redact);
   const lines = [];
+  const frames = [];
   let chars = 0;
   let truncated = false;
 
@@ -542,6 +547,13 @@ function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, fr
       if (!isRendered(el)) {
         // display:contents and similar still have rendered children
         if (el.ownerDocument.defaultView.getComputedStyle(el)?.display !== "contents") return;
+      }
+      if (FRAME_TAGS.has(el.tagName) && el.browsingContext && !red.mask(el)) {
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height || depthLeft <= 0) return; // tracking pixels and the like
+        const id = el.browsingContext.id;
+        if (push(`${"  ".repeat(level)}${describe(el, "iframe", nameOf(el, "iframe"), red)} frame=f${id}`)) frames.push(id);
+        return;
       }
     }
     let nextLevel = level;
@@ -581,15 +593,21 @@ function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, fr
     "",
   ];
   walk(root, 0, depth, false);
-  let out = header.join("\n") + lines.join("\n");
-  if (truncated) {
+  let out = (inner ? "" : header.join("\n")) + lines.join("\n");
+  if (truncated && !inner) {
     out += `\n\n[Truncated at ${maxChars} characters. Use filter "interactive", a smaller depth, or ref_id to focus on part of the page.]`;
   }
-  return red.result(red.scrub(out));
+  const text = red.scrub(out);
+  if (inner || frames.length) return { text, masked: red.masked(), frames, truncated };
+  return red.result(text);
 }
 
 // ---------------------------------------------------------------------------------------------
-// find: heuristic scoring over names, roles and attributes
+// find: heuristic scoring over names, roles and attributes. background.js runs it in every
+// frame of the tab at once and merges the answers by score, so each frame answers its best
+// matches as { score, line } rather than text. `origin` is the top frame's viewport (its place
+// on screen and size), so a child frame's coordinates are given in the top frame's, which is what
+// screenshots and clicks use.
 
 const STOPWORDS = new Set(["the", "a", "an", "for", "on", "in", "of", "to", "with", "and", "or", "that", "this", "at", "by", "is", "it", "element", "page"]);
 
@@ -621,14 +639,17 @@ const ROLE_WORDS = {
   modal: ["dialog", "alertdialog"],
 };
 
-function findElements(doc, { query, frameScale = 1, redact }) {
+function findElements(doc, { query, frameScale = 1, origin, redact }) {
+  const win = doc.defaultView;
+  const view = viewSize(win);
+  const child = !!win.browsingContext.parent;
+  // A frame with no size shows nothing (a hidden or tracking frame).
+  if (child && !(view.width > 1 && view.height > 1)) return { matches: [], total: 0, masked: null };
   const red = redactor(doc, redact);
   // What is scored is masked too, so a query can't probe for a masked value.
   const hide = (s) => red.scrub(s, false);
   const tokens = query.toLowerCase().split(/[^\p{L}\p{N}$]+/u).filter((t) => t && !STOPWORDS.has(t));
   const phrase = query.toLowerCase().trim();
-  const win = doc.defaultView;
-  const view = viewSize(win);
   const scored = [];
 
   const visit = (node) => {
@@ -687,18 +708,23 @@ function findElements(doc, { query, frameScale = 1, redact }) {
 
   scored.sort((a, b) => b.score - a.score);
   const best = scored.length ? scored[0].score : 0;
-  const matches = scored.filter((m) => m.score >= Math.max(1, best * 0.4)).slice(0, 20);
-  if (!matches.length) return `No elements matched "${query}". Try read_page with filter "interactive".`;
-  const lines = matches.map(({ el, role, rect, text }) => {
-    const cx = Math.round((rect.left + rect.width / 2) * frameScale);
-    const cy = Math.round((rect.top + rect.height / 2) * frameScale);
-    const onScreen = rect.bottom > 0 && rect.right > 0 && rect.top < view.height && rect.left < view.width;
-    const where = !(rect.width || rect.height) ? " (not rendered)" : onScreen ? ` at (${cx}, ${cy})` : " (off-screen; click by ref, or scroll_to first)";
+  const top = scored.filter((m) => m.score >= Math.max(1, best * 0.4)).slice(0, 20);
+  // Where this frame's viewport sits in the top frame's, in CSS pixels.
+  const dx = child && origin ? win.mozInnerScreenX - origin.x : 0;
+  const dy = child && origin ? win.mozInnerScreenY - origin.y : 0;
+  const inTop = (x, y) => !child || !origin || (x >= 0 && y >= 0 && x < origin.width && y < origin.height);
+  const where = child ? ` (in frame ${doc.location?.host || "about:blank"})` : "";
+  const matches = top.map(({ el, role, rect, text, score }) => {
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const cx = Math.round((x + dx) * frameScale);
+    const cy = Math.round((y + dy) * frameScale);
+    const onScreen = rect.bottom > 0 && rect.right > 0 && rect.top < view.height && rect.left < view.width && inTop(x + dx, y + dy);
+    const at = !(rect.width || rect.height) ? " (not rendered)" : onScreen ? ` at (${cx}, ${cy})` : " (off-screen; click by ref, or scroll_to first)";
     const name = red.mask(el) && !isField(el) ? "" : text ?? nameOf(el, role);
-    return `${describe(el, role, name, red)}${where}`;
+    return { score, line: red.scrub(`${describe(el, role, name, red)}${at}${where}`) };
   });
-  const more = matches.length === 20 && scored.length > 20 ? `\n[More than 20 matches; showing the best 20. Use a more specific query.]` : "";
-  return red.result(red.scrub(`Found ${matches.length} element(s) for "${query}" (coordinates match the screenshot frame; clicking by ref is more reliable):\n${lines.join("\n")}${more}`));
+  return { matches, total: scored.length, masked: red.masked() };
 }
 
 // Text directly inside an element (not in child elements), for elements like spans and divs
@@ -1097,6 +1123,42 @@ function focusDescent(doc) {
   return null;
 }
 
+// The element keys go to: the focused one, inside shadow roots too. Null when it's the page.
+function keyTarget(doc) {
+  let el = doc.activeElement;
+  for (let shadow = el?.openOrClosedShadowRoot; shadow && !shadow.isUAWidget() && shadow.activeElement; shadow = el.openOrClosedShadowRoot) {
+    el = shadow.activeElement;
+  }
+  return el && el !== doc.body && el !== doc.documentElement ? el : null;
+}
+
+// Where keys went, and the value they left, so the result shows whether they did anything:
+// 'combobox "Flavor" = "Sardine"', or 'no element focused; keys went to the page'. In a child
+// frame (api.js sends keys to the frame the last click landed in), the frame is named.
+function keyReport(doc, redact) {
+  const el = keyTarget(doc);
+  const frame = doc.defaultView.browsingContext.parent ? ` in frame ${doc.location?.host || "about:blank"}` : "";
+  if (!el) return `no element focused${frame}; keys went to the page`;
+  const red = redactor(doc, redact);
+  const role = roleOf(el);
+  const name = clean(nameOf(el, role), 70);
+  let value = "";
+  if (red.mask(el)) value = ` ${red.marker(el)}`;
+  else if (el.tagName === "SELECT") value = ` = ${JSON.stringify(Array.from(el.selectedOptions).map((o) => clean(o.textContent, 60)).join(", "))}`;
+  else if (el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio")) value = el.checked ? " (checked)" : " (unchecked)";
+  else if (el.tagName === "INPUT" && el.type === "password") value = el.value ? " = (set)" : " = (empty)";
+  else if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") value = ` = ${JSON.stringify(clean(el.value, 100))}`;
+  else if (el.isContentEditable) value = ` = ${JSON.stringify(clean(el.innerText, 100))}`;
+  const out = `${role || el.tagName.toLowerCase()}${name ? ` ${JSON.stringify(name)}` : ""}${value}${frame}`;
+  // As with clicks, the page is only searched for masked text when a site rule could mask a name.
+  return red.result(red.siteRules ? red.scrub(out) : out);
+}
+
+// "<what> → <report>", keeping the redaction mark when the report has one.
+function reported(what, report) {
+  return typeof report === "string" ? `${what} → ${report}` : { ...report, text: `${what} → ${report.text}` };
+}
+
 function textInputProcessor(win) {
   const tip = Cc["@mozilla.org/text-input-processor;1"].createInstance(Ci.nsITextInputProcessor);
   if (!tip.beginInputTransactionForTests(win)) throw new Error("Could not start keyboard input in this page.");
@@ -1128,7 +1190,7 @@ function press(win, tip, key) {
   tip.keyup(ev);
 }
 
-function type(doc, { text }) {
+function type(doc, { text, redact }) {
   const descent = focusDescent(doc);
   if (descent) return descent;
   const win = doc.defaultView;
@@ -1138,8 +1200,7 @@ function type(doc, { text }) {
     else if (ch === "\t") press(win, tip, "Tab");
     else if (ch !== "\r") press(win, tip, ch);
   }
-  const active = doc.activeElement;
-  return `Typed ${[...text].length} character(s) into ${active ? active.tagName.toLowerCase() : "the page"}`;
+  return reported(`Typed ${[...text].length} character(s)`, keyReport(doc, redact));
 }
 
 function parseCombo(combo) {
@@ -1157,7 +1218,7 @@ function parseCombo(combo) {
   return { modifiers, key };
 }
 
-function key(doc, { keys, repeat = 1 }) {
+function key(doc, { keys, repeat = 1, redact }) {
   const descent = focusDescent(doc);
   if (descent) return descent;
   const win = doc.defaultView;
@@ -1176,7 +1237,7 @@ function key(doc, { keys, repeat = 1 }) {
       for (const m of mods.reverse()) tip.keyup(m);
     }
   }
-  return `Pressed ${keys}${repeat > 1 ? ` x${repeat}` : ""}`;
+  return reported(`Pressed ${keys}${repeat > 1 ? ` x${repeat}` : ""}`, keyReport(doc, redact));
 }
 
 // ---------------------------------------------------------------------------------------------
