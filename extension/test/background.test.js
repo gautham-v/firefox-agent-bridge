@@ -114,6 +114,7 @@ function mockBrowser({ store = {}, groups: initialGroups = [], noIcons = false, 
       onPick: event(),
       setActive: async () => {},
       call: async (tabId, op) => (op === "textSize" ? 10 : "done"),
+      broadcast: async () => [],
       setGroupState: async (groupId, state) => {
         if (iconsThrow) throw new Error("not a function");
         if (noIcons || !groups.has(groupId)) return false;
@@ -1134,6 +1135,11 @@ test("an Alt+click becomes an attachment: a crop of the element, and its ref in 
     captures.push([tabId, plain(opts)]);
     return "data:image/png;base64,AAAA";
   };
+  const broadcasts = [];
+  env.browser.claudePage.broadcast = async (tabId, op, args) => {
+    broadcasts.push([tabId, op, args.on]);
+    return [{ masked: 0, site: "user.example", top: true }];
+  };
   const a = await env.panel();
   // An element in a child frame whose viewport is 20px right of and 40px below the tab's.
   const pick = { ref: "ref_3@f12", role: "figure", name: "Weekly signups", text: "Nov Jan Mar", rect: { x: 10, y: 20, width: 200, height: 100 }, frame: { x: 120, y: 90 }, url: "https://user.example/", title: "user" };
@@ -1143,8 +1149,8 @@ test("an Alt+click becomes an attachment: a crop of the element, and its ref in 
   const element = { tabId: 1, ref: "ref_3@f12", role: "figure", name: "Weekly signups", text: "Nov Jan Mar" };
   assert.deepEqual(a.of("pick"), [{ type: "pick", chatId: a.chatId, element: { ...element, image: "data:image/png;base64,AAAA" } }]);
   assert.equal(env.browser.tabsMap.get(1).groupId, 100, "the tab starts the chat's group");
-  const ops = calls.map(([, op, args]) => (op === "cursorVisible" ? `${op} ${args.visible}` : op));
-  assert.deepEqual(ops, ["viewport", "cursorVisible false", "cursorVisible true", "pointAdded"]);
+  assert.deepEqual(calls.map(([, op]) => op), ["viewport", "pointAdded"]);
+  assert.deepEqual(broadcasts, [[1, "capture", true], [1, "capture", false]], "the crop is taken with the cursor hidden and masked fields covered");
   assert.equal(calls.at(-1)[2].ref, "ref_3@f12", "the outline comes back in the element's frame");
 
   await a.send("chat.send", { engine: "claude", text: "why did this drop?", elements: [a.of("pick")[0].element, { tabId: 1, ref: "javascript:x" }] });
@@ -1164,7 +1170,8 @@ test("an element link outlines the element in its tab, only in the chat's group;
   const calls = [];
   env.browser.claudePage.call = async (tabId, op, args) => {
     if (op !== "mark") return op === "textSize" ? 10 : "done";
-    calls.push(plain([tabId, args]));
+    const { redact, ...rest } = args;
+    calls.push(plain([tabId, rest]));
     if (args.ref === "ref_9") throw new Error("ref_9 is gone");
     return true;
   };
