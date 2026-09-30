@@ -62,7 +62,7 @@ const TOOLS = [
   {
     name: "computer",
     description:
-      "All mouse, keyboard, screenshot, zoom, scroll and scroll_to actions are computer(action=...); there is no separate screenshot tool.\nMouse, keyboard and screenshots for a Firefox tab. Input is trusted (isTrusted, user activation) and works while the tab is in the background, without moving the real cursor.\n* Take a screenshot to find coordinates before clicking by coordinate; clicking by ref from find/read_page is more reliable.\n* Click the center of elements, not their edges.\n* Do not click file inputs or upload buttons (native pickers can't be driven); use file_upload.",
+      "Mouse, keyboard and screenshots for a Firefox tab. Input is trusted (isTrusted, user activation) and works while the tab is in the background, without moving the real cursor.\n* Take a screenshot to find coordinates before clicking by coordinate; clicking by ref from find/read_page is more reliable.\n* Click the center of elements, not their edges.\n* Do not click file inputs or upload buttons (native pickers can't be driven); use file_upload.",
     inputSchema: {
       type: "object",
       properties: {
@@ -444,7 +444,7 @@ async function handle(msg) {
         capabilities: { tools: {} },
         serverInfo: { name: "firefox-agent-bridge", version: VERSION },
         instructions:
-          "Browser tools for Firefox Developer Edition. Tabs live in the agent's own per-session tab group and run in the background; input is trusted and never moves the user's cursor. Each tool call is a round trip: use batch to run several known steps (e.g. navigate + get_page_text for each of several pages) in one call, and form_input's fields to fill a form at once. Screenshots, clicks, typing, keys, zoom, scroll and scroll_to are all actions of the computer tool (computer(action=\"screenshot\")); there is no separate screenshot or scroll_to tool.",
+          "Browser tools for Firefox Developer Edition. Tabs live in the agent's own per-session tab group and run in the background; input is trusted and never moves the user's cursor. Each tool call is a round trip: use batch to run several known steps (e.g. navigate + get_page_text for each of several pages) in one call, and form_input's fields to fill a form at once.",
       };
     }
     case "tools/list":
