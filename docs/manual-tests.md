@@ -57,6 +57,14 @@ eval tasks is separate: see "Re-measured after restart" in [eval/README.md](../e
 15. **Frames.** On an MDN page with a live example, `find` and `read_page` list the example's
     elements with `ref_N@fM` refs, `form_input` sets its select, and after a click in the frame
     `key` presses go there and name the element and its value.
+    **Frame coordinates.** In a background tab on
+    https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/select, `find "pet
+    combobox"`, take a screenshot, then `scroll_to` the select's `@f` ref and screenshot again:
+    `find`'s point and `scroll_to`'s center are on the select in the screenshots (within a few
+    pixels, not "off-screen" or negative), and `read_page` with that ref places the frame viewport
+    at the example's output pane's top left corner. Alt+click the select with the chat panel open:
+    the crop shows the select. With `document.querySelector("iframe").style.zoom = 2` on a page
+    with a cross-origin iframe (in `javascript_tool`), `find` still lands on its elements.
 16. **Scroll over a frame.** Scrolling with the pointer over MDN's live example, or over a code
     block, doesn't fail with `NS_ERROR_UNEXPECTED`.
 17. **`find` results.** At most 8 matches, names and links clipped, and a `(+K more, refine the

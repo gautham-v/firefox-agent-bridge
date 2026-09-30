@@ -8,7 +8,7 @@ const { ExtensionError } = ExtensionUtils;
 
 const ACTOR = "ClaudePage";
 const RES_HOST = "firefox-agent-bridge";
-const MODULES = ["actor-child.sys.mjs", "actor-parent.sys.mjs", "find-rank.sys.mjs", "focus.sys.mjs", "redact.sys.mjs"];
+const MODULES = ["actor-child.sys.mjs", "actor-parent.sys.mjs", "find-rank.sys.mjs", "focus.sys.mjs", "frame-offset.sys.mjs", "redact.sys.mjs"];
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const MAX_FRAME_HOPS = 8;
 // Tab group state icons: a stylesheet added to every browser window draws the icon from this
@@ -144,6 +144,23 @@ function setRecording(browserId, on) {
   Services.ppmm.sharedData.set(RECORDING_KEY, [...ids]);
   Services.ppmm.sharedData.flush();
 }
+
+// Where frames sit in their tab's top frame's viewport (frame-offset.sys.mjs): each <iframe>'s
+// content box is measured by the actor in the document holding it, which is in the frame's
+// parent's process, and the boxes are chained up to the top. Loaded once registerActor has put
+// the module where resource:// finds it.
+const frameMath = () => ChromeUtils.importESModule(`resource://${RES_HOST}/frame-offset.sys.mjs`);
+
+async function measureFrame(parent, id) {
+  try {
+    return (await parent.currentWindowGlobal?.getActor(ACTOR).sendQuery("frameBox", { id })) ?? null;
+  } catch {
+    return null; // going away, or an actor from before the restart
+  }
+}
+
+const frameOffsetOf = (bc) => frameMath().frameOffset(bc, measureFrame);
+const frameOffsetsUnder = (top) => frameMath().frameOffsets(top, measureFrame);
 
 // The frame a recorded step happened in: at each level, the child at the recorded index if it
 // still shows the same page, else the first that does, else the one at that index.
@@ -376,10 +393,15 @@ this.claudePage = class extends ExtensionAPI {
 
         // Runs op in every frame of the tab at once, cross-origin ones included, top frame first.
         // A frame the actor doesn't run in answers null; one whose op failed answers { error }.
+        // With args.frameOffsets, each frame is also sent `offset`: where its viewport sits in
+        // the top frame's (null where that couldn't be measured).
         broadcast: surfaced(async (tabId, op, args) => {
           await self.ready;
+          const top = topContext(tabId);
+          const offsets = args?.frameOffsets ? await frameOffsetsUnder(top) : null;
           return Promise.all(
-            topContext(tabId).getAllBrowsingContextsInSubtree().map(async (bc) => {
+            top.getAllBrowsingContextsInSubtree().map(async (bc) => {
+              const sent = offsets ? { ...args, frameOffsets: undefined, offset: offsets.get(bc.id) ?? null } : args;
               let actor;
               try {
                 actor = bc.currentWindowGlobal?.getActor(ACTOR);
@@ -388,12 +410,20 @@ this.claudePage = class extends ExtensionAPI {
               }
               if (!actor) return null;
               try {
-                return await actor.sendQuery(op, args ?? {});
+                return await actor.sendQuery(op, sent ?? {});
               } catch (e) {
                 return { error: e?.message ?? String(e) };
               }
             }),
           );
+        }),
+
+        // Where the frame with this browsing context id sits in its tab's top frame's viewport:
+        // { x, y, scale } (frame-offset.sys.mjs), or null when it's gone or couldn't be measured.
+        frameOffset: surfaced(async (tabId, frameId) => {
+          await self.ready;
+          const bc = topContext(tabId).getAllBrowsingContextsInSubtree().find((c) => c.id === frameId);
+          return bc ? frameOffsetOf(bc) : null;
         }),
 
         setActive: surfaced(async (tabId, active) => {

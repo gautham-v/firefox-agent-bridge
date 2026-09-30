@@ -1271,6 +1271,29 @@ test("an Alt+click becomes an attachment: a crop of the element, and its ref in 
   assert.equal(captures.length, 3);
 });
 
+test("a pick in a child frame is cropped where the frame measures to sit, not where the frame says it is on screen", async () => {
+  const env = await load();
+  env.browser.claudePage.call = async (tabId, op) => {
+    if (op === "pickInfo") return { name: "Choose a pet:", text: "" };
+    return op === "viewport" ? { width: 1000, height: 800, dpr: 2, scrollX: 0, scrollY: 300, screenX: 100, screenY: 50 } : "done";
+  };
+  const asked = [];
+  env.browser.claudePage.frameOffset = async (tabId, frameId) => (asked.push([tabId, frameId]), { x: 826, y: 357, scale: 0.5 });
+  const captures = [];
+  env.browser.tabs.captureTab = async (tabId, opts) => {
+    captures.push([tabId, plain(opts)]);
+    return "data:image/png;base64,AAAA";
+  };
+  env.browser.claudePage.broadcast = async () => [{ masked: 0, site: "user.example", top: true }];
+  await env.panel();
+  // The frame's own place on screen (8, 46) is what an out-of-process frame reported on MDN.
+  const pick = { ref: "ref_1@f12", role: "combobox", name: "Choose a pet:", text: "", rect: { x: 10, y: 20, width: 200, height: 100 }, frame: { x: 8, y: 46 }, url: "https://live.mdnplay.dev/", title: "" };
+  await env.browser.claudePage.onPick.fire(1, pick);
+  await wait(50);
+  assert.deepEqual(asked, [[1, 12]]);
+  assert.deepEqual(captures, [[1, { format: "png", scale: 2, rect: { x: 831, y: 667, width: 100, height: 50 } }]]);
+});
+
 test("an element link outlines the element in its tab, only in the chat's group; a click brings the tab forward", async () => {
   const env = await load();
   const calls = [];
@@ -1344,21 +1367,35 @@ test("the agent cam's frame comes with where masked fields are, in every frame, 
     { x: 0.4, y: 0.5, width: 0.1, height: 0.05, label: "card number · empty" },
   ], "a field that moved is covered over both places; a child frame's boxes land where it is");
 
+  assert.ok(looks.every(([, , args]) => args.frameOffsets === true), "each frame is sent where it sits");
+
+  // Frames that placed their boxes in the top viewport themselves (`placed`): no screen math,
+  // whatever the frames' own places on screen say.
+  env.browser.claudePage.broadcast = async () => [
+    { rects: [{ x: 100, y: 90, width: 200, height: 20, label: "password · filled" }], placed: true, width: 1000, height: 500, top: true },
+    { rects: [{ x: 826, y: 357, width: 100, height: 25, label: "card number · empty" }], placed: true, screenX: 8, screenY: 46, width: 300, height: 100, top: false },
+  ];
+  await a.send("cam.frame", { tabId: 1, requestId: "cam1b" });
+  assert.deepEqual(a.of("cam.frame").at(-1).masks.map(round), [
+    { x: 0.1, y: 0.18, width: 0.2, height: 0.04, label: "password · filled" },
+    { x: 0.826, y: 0.714, width: 0.1, height: 0.05, label: "card number · empty" },
+  ]);
+
   // A frame that couldn't look: the frame still comes, marked as not safe to keep.
   env.browser.claudePage.broadcast = async () => [{ rects: [], screenX: 0, screenY: 0, width: 1000, height: 500, top: true }, { error: "Actor destroyed" }];
   await a.send("cam.frame", { tabId: 1, requestId: "cam2" });
-  assert.equal(a.of("cam.frame")[1].shot, "data:image/jpeg;base64,AAAA");
-  assert.equal(a.of("cam.frame")[1].masks, null);
+  assert.equal(a.of("cam.frame")[2].shot, "data:image/jpeg;base64,AAAA");
+  assert.equal(a.of("cam.frame")[2].masks, null);
   // Nothing masked is an empty list, not null.
   env.browser.claudePage.broadcast = async () => [{ rects: [], screenX: 0, screenY: 0, width: 1000, height: 500, top: true }];
   await a.send("cam.frame", { tabId: 1, requestId: "cam3" });
-  assert.deepEqual(a.of("cam.frame")[2].masks, []);
+  assert.deepEqual(a.of("cam.frame")[3].masks, []);
 
   // Only tabs in the chat's group.
   env.browser.tabsMap.set(6, { id: 6, windowId: 10, groupId: -1, active: false, url: "https://six.example/", status: "complete", title: "six" });
   await a.send("cam.frame", { tabId: 6, requestId: "cam4" });
-  assert.deepEqual(plain(a.of("cam.frame")[3]), { type: "cam.frame", requestId: "cam4", error: "That tab isn't in this chat's group." });
-  assert.equal(captures.length, 3);
+  assert.deepEqual(plain(a.of("cam.frame")[4]), { type: "cam.frame", requestId: "cam4", error: "That tab isn't in this chat's group." });
+  assert.equal(captures.length, 4);
 });
 
 // ---- Teach
@@ -1855,21 +1892,24 @@ test("find with no match anywhere says so, and a top frame that failed is an err
   assert.match(e.result.content[0].text, /No document in this frame/);
 });
 
-// scroll_to: `frameAt` lists where the frame's viewport is on each read after the scroll (the
-// page around a cross-process frame scrolls after the frame answers); the top viewport is at
-// (100, 50) on screen, 1000x800.
+// scroll_to: `frameAt` lists where the frame's viewport sits in the top frame's viewport on each
+// measure after the scroll (the page around a cross-process frame scrolls after the frame
+// answers); the top viewport is 1000x800. The frames' own places on screen (screenX/Y) are
+// wrong on purpose: out of process they were (MDN's live example read about (8, 46)).
 async function scrollEnv(answer, frameAt = []) {
   const env = await framesEnv();
   const calls = [];
   env.browser.claudePage.call = async (tabId, op, args) => {
     calls.push({ op, args: plain(args) });
     if (op === "scrollTo") return answer;
-    if (op === "viewport" && args.frameId != null) {
-      const at = frameAt.length > 1 ? frameAt.shift() : frameAt[0];
-      return { width: 698, height: 71, screenX: at.x, screenY: at.y };
-    }
+    if (op === "viewport" && args.frameId != null) return { width: 698, height: 71, screenX: 8, screenY: 46 };
     if (op === "viewport") return { width: 1000, height: 800, dpr: 1, scrollX: 0, scrollY: 0, screenX: 100, screenY: 50 };
     return "done";
+  };
+  env.browser.claudePage.frameOffset = async (tabId, frameId) => {
+    calls.push({ op: "frameOffset", args: { frameId } });
+    const at = frameAt.length > 1 ? frameAt.shift() : frameAt[0];
+    return at ? { scale: 1, ...at } : null;
   };
   return { ...env, calls };
 }
@@ -1879,36 +1919,61 @@ test("scroll_to on a top-frame ref answers the center as the page gave it", asyn
   const r = await env.callTool("computer", { action: "scroll_to", tabId: 2, ref: "ref_3" });
   assert.equal(r.result.content[0].text, "Scrolled ref_3 into view; its center is now at (50, 21)");
   assert.equal(env.calls.find((c) => c.op === "scrollTo").args.ref, "ref_3");
-  assert.ok(!env.calls.some((c) => c.args.frameId != null), "no frame is asked where it is");
+  assert.ok(!env.calls.some((c) => c.args.frameId != null), "no frame is measured");
 });
 
 test("scroll_to on a frame ref answers the center in screenshot coordinates, once the frame holds still", async () => {
-  // MDN: the frame answered (227, 10) in its own viewport while it still sat at (400, 700); the
-  // page then scrolled it to (463, 443).
-  const env = await scrollEnv({ x: 227, y: 10, frame: { host: "live.mdnplay.dev", screenX: 400, screenY: 700 } }, [
-    { x: 463, y: 600 },
-    { x: 463, y: 443 },
-    { x: 463, y: 443 },
+  // MDN: the frame answered (227, 10) in its own viewport while it still sat at (363, 650); the
+  // page then scrolled it to (363, 393).
+  const env = await scrollEnv({ x: 227, y: 10, frame: { host: "live.mdnplay.dev", screenX: 8, screenY: 46 } }, [
+    { x: 363, y: 650 },
+    { x: 363, y: 550 },
+    { x: 363, y: 393 },
+    { x: 363, y: 393 },
   ]);
   const r = await env.callTool("computer", { action: "scroll_to", tabId: 2, ref: "ref_1@f12" });
   assert.equal(r.result.content[0].text, "Scrolled ref_1@f12 into view; its center is now at (590, 403) (in frame live.mdnplay.dev)");
-  const reads = env.calls.filter((c) => c.op === "viewport" && c.args.frameId != null);
-  assert.deepEqual(reads.map((c) => c.args.frameId), [12, 12, 12], "read again until two reads agree");
+  const reads = env.calls.filter((c) => c.op === "frameOffset");
+  assert.deepEqual(reads.map((c) => c.args.frameId), [12, 12, 12, 12], "measured again until two measures agree");
+});
+
+test("scroll_to on a frame ref places the center by the frame's scale too (a zoomed iframe)", async () => {
+  const env = await scrollEnv({ x: 100, y: 20, frame: { host: "live.mdnplay.dev" } }, [{ x: 300, y: 200, scale: 2 }]);
+  const r = await env.callTool("computer", { action: "scroll_to", tabId: 2, ref: "ref_1@f12" });
+  assert.equal(r.result.content[0].text, "Scrolled ref_1@f12 into view; its center is now at (500, 240) (in frame live.mdnplay.dev)");
 });
 
 test("scroll_to on a frame ref that ends up outside the page's viewport says so", async () => {
-  const env = await scrollEnv({ x: 227, y: 10, frame: { host: "live.mdnplay.dev", screenX: 463, screenY: 2000 } }, [{ x: 463, y: 2000 }]);
+  const env = await scrollEnv({ x: 227, y: 10, frame: { host: "live.mdnplay.dev" } }, [{ x: 363, y: 1950 }]);
   const r = await env.callTool("computer", { action: "scroll_to", tabId: 2, ref: "ref_1@f12" });
   assert.equal(r.result.content[0].text, "Scrolled ref_1@f12 into view; its center is now at (590, 1960) (in frame live.mdnplay.dev), outside the page's viewport; take a screenshot to see where it is");
 });
 
-test("read_page on a frame ref tells the frame where the top viewport is; on a top ref it doesn't", async () => {
+test("scroll_to on a frame ref whose frame can't be measured gives no coordinates", async () => {
+  const env = await scrollEnv({ x: 227, y: 10, frame: { host: "live.mdnplay.dev" } }, []);
+  const r = await env.callTool("computer", { action: "scroll_to", tabId: 2, ref: "ref_1@f12" });
+  assert.equal(r.result.content[0].text, "Scrolled ref_1@f12 into view (in frame live.mdnplay.dev); couldn't tell where its frame is on the page, take a screenshot to see where it is");
+});
+
+test("read_page on a frame ref tells the frame where it sits in the top viewport; on a top ref it doesn't", async () => {
   const env = await framesEnv({ pages: { 0: "Frame: x\n\nbutton [ref_1@f12]" } });
+  const asked = [];
+  env.browser.claudePage.frameOffset = async (tabId, frameId) => (asked.push([tabId, frameId]), { x: 826, y: 357, scale: 1 });
   await env.callTool("read_page", { tabId: 2, ref_id: "ref_1@f12" });
-  assert.deepEqual(env.calls.find((c) => c.op === "readPage").args.origin, { x: 100, y: 50 });
+  assert.deepEqual(asked, [[2, 12]]);
+  assert.deepEqual(env.calls.find((c) => c.op === "readPage").args.offset, { x: 826, y: 357, scale: 1 });
   env.calls.length = 0;
   await env.callTool("read_page", { tabId: 2, ref_id: "ref_4" });
-  assert.equal(env.calls.find((c) => c.op === "readPage").args.origin, undefined);
+  assert.equal(env.calls.find((c) => c.op === "readPage").args.offset, undefined);
+  assert.equal(asked.length, 1, "a top ref measures no frame");
+});
+
+test("find asks api.js to send each frame where it sits in the top viewport", async () => {
+  const env = await framesEnv({ finds: [{ matches: [{ score: 5, line: 'combobox "Choose a pet:" [ref_1@f12] at (905, 404) (in frame live.mdnplay.dev)' }], rest: [] }] });
+  const r = await env.callTool("find", { tabId: 2, query: "pet" });
+  assert.match(r.result.content[0].text, /at \(905, 404\)/);
+  const sent = env.calls.find((c) => c.op === "find" && c.broadcast).args;
+  assert.equal(sent.frameOffsets, true);
 });
 
 // A model that never called tabs_create_mcp believes it opened no tab, and leaves it open.

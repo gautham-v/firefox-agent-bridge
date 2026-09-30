@@ -469,16 +469,19 @@ async function camFrame(tabId, scale) {
   return { shot, masks: before && after && spanBoxes(before, after) };
 }
 
+// Each frame answers its boxes in the top frame's viewport (`placed`), placed by where api.js
+// measured the frame to sit (frameOffsets). An actor from before the restart answers them in its
+// own viewport with where that sits on screen instead.
 async function camMasks(tabId) {
-  const frames = await browser.claudePage.broadcast(tabId, "maskRects", { redact: redactRules });
+  const frames = await browser.claudePage.broadcast(tabId, "maskRects", { redact: redactRules, frameOffsets: true });
   if (frames.some((f) => f?.error)) return null;
   const withRects = frames.filter((f) => f?.rects?.length);
   if (!withRects.length) return [];
   const top = frames[0];
   if (!top?.top || !(top.width > 0 && top.height > 0)) return null;
   return withRects.flatMap((f) => {
-    const dx = f === top ? 0 : f.screenX - top.screenX;
-    const dy = f === top ? 0 : f.screenY - top.screenY;
+    const dx = f === top || f.placed ? 0 : f.screenX - top.screenX;
+    const dy = f === top || f.placed ? 0 : f.screenY - top.screenY;
     return f.rects.map((r) => ({ x: (r.x + dx) / top.width, y: (r.y + dy) / top.height, width: r.width / top.width, height: r.height / top.height, label: r.label }));
   });
 }
@@ -686,10 +689,8 @@ const FRAME_OF_REF = /@f(\d+)$/; // a ref made in a child frame (ref_3@f12)
 async function readPageAll(tabId, args) {
   const maxChars = args.maxChars ?? 50000;
   // Read by a ref in a child frame, the header says where that frame sits in the screenshot.
-  if (FRAME_OF_REF.test(args.refId ?? "")) {
-    const vp = await page(tabId, "viewport", {});
-    args = { ...args, origin: { x: vp.screenX, y: vp.screenY } };
-  }
+  const framed = FRAME_OF_REF.exec(args.refId ?? "");
+  if (framed) args = { ...args, offset: await frameOffset(tabId, Number(framed[1])) };
   const top = await page(tabId, "readPage", args);
   if (typeof top !== "object" || top === null || !top.frames?.length) return top;
   let budget = maxChars - top.text.length;
@@ -771,7 +772,7 @@ async function findAll(tabId, query) {
   const scale = await frameScale(tabId);
   const vp = await page(tabId, "viewport", {});
   const origin = { x: vp.screenX, y: vp.screenY, width: vp.width, height: vp.height };
-  const frames = await browser.claudePage.broadcast(tabId, "find", { query, frameScale: scale, origin, redact: redactRules });
+  const frames = await browser.claudePage.broadcast(tabId, "find", { query, frameScale: scale, origin, redact: redactRules, frameOffsets: true });
   if (frames[0]?.error) throw new Error(frames[0].error);
   const answered = frames.filter((f) => Array.isArray(f?.matches));
   // The same line twice is the same element (an actor from before the restart can answer it so).
@@ -796,10 +797,22 @@ async function findAll(tabId, query) {
   return masked ? { text: out, masked } : out;
 }
 
+// Where a child frame (by browsing context id) sits in the top frame's viewport, { x, y, scale }
+// (experiment/frame-offset.sys.mjs), or null when it can't be measured. A frame's own place on
+// screen (mozInnerScreenX/Y) can't stand in: out of process, it doesn't know where its <iframe> is.
+async function frameOffset(tabId, frameId) {
+  try {
+    return (await browser.claudePage.frameOffset(tabId, frameId)) ?? null;
+  } catch {
+    return null; // the frame went away, or an experiment from before the restart
+  }
+}
+const sameOffset = (a, b) => !!a && !!b && a.x === b.x && a.y === b.y && a.scale === b.scale;
+
 // scroll_to. The actor answers the element's center in its frame's viewport; a child frame's is
-// moved into the top frame's viewport, which screenshots and clicks use, by where each viewport
-// sits on screen (as find does). Scrolling the page around a frame in another process lands after
-// the frame has answered, so the frame's place is read again until it holds still.
+// moved into the top frame's viewport, which screenshots and clicks use, by where the frame sits
+// in it (as find does). Scrolling the page around a frame in another process lands after the
+// frame has answered, so the frame's place is measured again until it holds still.
 const SCROLL_SETTLE_MS = 50;
 const SCROLL_SETTLE_TRIES = 6;
 
@@ -810,17 +823,18 @@ async function scrollToRef(tabId, ref) {
   let after = "";
   if (got.frame) {
     const frameId = Number(FRAME_OF_REF.exec(ref)?.[1]);
-    let at = got.frame;
-    for (let i = 0; i < SCROLL_SETTLE_TRIES; i++) {
+    let at = await frameOffset(tabId, frameId);
+    for (let i = 0; at && i < SCROLL_SETTLE_TRIES; i++) {
       await sleep(SCROLL_SETTLE_MS);
-      const again = await page(tabId, "viewport", { frameId }).catch(() => null);
-      if (!again || (again.screenX === at.screenX && again.screenY === at.screenY)) break;
+      const again = await frameOffset(tabId, frameId);
+      if (!again || sameOffset(again, at)) break;
       at = again;
     }
-    const top = await page(tabId, "viewport", {});
-    x += at.screenX - top.screenX;
-    y += at.screenY - top.screenY;
     after = ` (in frame ${got.frame.host})`;
+    if (!at) return `Scrolled ${ref} into view${after}; couldn't tell where its frame is on the page, take a screenshot to see where it is`;
+    const top = await page(tabId, "viewport", {});
+    x = at.x + at.scale * x;
+    y = at.y + at.scale * y;
     if (x < 0 || y < 0 || x >= top.width || y >= top.height) after += ", outside the page's viewport; take a screenshot to see where it is";
   }
   const scale = await frameScale(tabId);
@@ -2172,17 +2186,20 @@ function pickedElements(list) {
     .map((e) => ({ tabId: e.tabId, ref: e.ref, role: clipStr(e.role, 40), name: clipStr(e.name, 150), text: clipStr(e.text, 1000) }));
 }
 
-// A crop of the tab around the picked element. Its rect is in its own frame's viewport, so it is
-// moved by where that frame sits on screen relative to the top frame; only the part in view is
-// captured.
-async function pickImage(tabId, { rect, frame }) {
+// A crop of the tab around the picked element. Its rect is in its own frame's viewport, so a child
+// frame's is moved by where that frame sits in the top frame's (frameOffset; the frame's place on
+// screen when that can't be measured); only the part in view is captured.
+async function pickImage(tabId, { ref, rect, frame }) {
   const vp = await page(tabId, "viewport", {});
-  const dx = frame.x - vp.screenX || 0;
-  const dy = frame.y - vp.screenY || 0;
-  const x0 = Math.max(0, rect.x + dx);
-  const y0 = Math.max(0, rect.y + dy);
-  const width = Math.min(vp.width, rect.x + dx + rect.width) - x0;
-  const height = Math.min(vp.height, rect.y + dy + rect.height) - y0;
+  const frameId = FRAME_OF_REF.exec(ref ?? "")?.[1];
+  const at = frameId ? await frameOffset(tabId, Number(frameId)) : null;
+  const r = at
+    ? { x: at.x + at.scale * rect.x, y: at.y + at.scale * rect.y, width: at.scale * rect.width, height: at.scale * rect.height }
+    : { x: rect.x + (frame.x - vp.screenX || 0), y: rect.y + (frame.y - vp.screenY || 0), width: rect.width, height: rect.height };
+  const x0 = Math.max(0, r.x);
+  const y0 = Math.max(0, r.y);
+  const width = Math.min(vp.width, r.x + r.width) - x0;
+  const height = Math.min(vp.height, r.y + r.height) - y0;
   if (!(width >= 1 && height >= 1)) return null;
   const scale = Math.min(vp.dpr || 1, SCREENSHOT_MAX_EDGE / Math.max(width, height), Math.sqrt(SCREENSHOT_MAX_PIXELS / (width * height)));
   const { shot } = await forCapture(tabId, () => browser.tabs.captureTab(tabId, { format: "png", scale, rect: { x: x0 + vp.scrollX, y: y0 + vp.scrollY, width, height } }));
