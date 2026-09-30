@@ -37,27 +37,38 @@ same model (Sonnet 5.5) and the same prompt. The tasks covered reading articles,
 from lists, comparing five package pages, following links, site search, infinite scroll, forms, a
 date picker, a virtualized table and a dropdown inside an embedded frame.
 
-| median per run | Firefox Agent Bridge | Claude in Chrome |
+The Firefox numbers below are from a rerun after the fixes listed under "Where Chrome was ahead"
+had loaded in Firefox. Chrome's are from the first run, with the same tasks, model and prompt.
+Its extension hasn't changed since, so it wasn't run again.
+
+| median per run | Firefox Agent Bridge (rerun) | Claude in Chrome (first run) |
 | --- | --- | --- |
 | tasks passed | 48 / 48 | 47 / 48 |
-| wall time | 19.2s | 25.6s |
-| input tokens | 60k | 119k |
-| cost | $0.063 | $0.081 |
-| mean time per call, `get_page_text` / `find` | 0.3s / 0.3s | 3.7s / 3.1s |
+| wall time | 16.6s | 25.5s |
+| tool calls | 6 | 7 |
+| input tokens | 55k | 119k |
+| cost | $0.060 | $0.080 |
+| time per click (`left_click`) | 0.12s | 0.16s |
 
-- **Faster on 13 of 16 tasks and cheaper on 14.** Tool calls return sooner, and each turn starts
+- **Faster on all 16 tasks and cheaper on 15.** Tool calls return sooner, and each turn starts
   from fewer tokens: on the article tasks both made the same 4 calls and got the same text back,
-  yet Chrome read 72–83k input tokens against 48–58k.
-- **Where Chrome was ahead,** and what changed after:
+  yet Chrome read 72–83k input tokens against 45–55k. The one task where Chrome was cheaper was
+  the Wikipedia link chain ($0.093 against $0.102).
+- **Where Chrome was ahead in the first run,** and what the rerun measured:
   - **Repeated actions** such as five package pages or a form took about twice as many calls,
     because Chrome has `browser_batch`. The bridge now has a [`batch`](#tools) tool and
-    multi-field `form_input`. Re-run, the PyPI compare went from 13 calls and 39s to 5 calls and
-    18s, against Chrome's 6 calls and 29s.
+    multi-field `form_input`. The PyPI compare went from 13 calls and 39s to 5 calls and 27s,
+    against Chrome's 6 calls and 29s. The npm compare went from 12 calls to 6, against Chrome's 8.
   - **A dropdown in a cross-origin frame inside a shadow root** (MDN's live examples) took
-    Firefox 71 calls against Chrome's 41. Both browsers mostly got the answer by workarounds,
-    such as opening the frame's page on its own.
-    `find` and `read_page` now walk child frames, and keys follow the clicked frame. That fix
-    hasn't been re-measured yet.
+    Firefox 71 calls, 115s and 1.3M input tokens, against Chrome's 41 calls, 99s and 675k. Both
+    browsers mostly got the answer by workarounds, such as opening the frame's page on its own.
+    `find` and `read_page` now walk child frames, and keys follow the clicked frame. In the rerun
+    it took 9 calls, 18s and 72k tokens. In all 3 runs, `find` returned the select with a frame
+    ref and `form_input` set it through that ref. No run used JavaScript or opened the frame on
+    its own.
+  - **Clicks** took 0.70s each, because a click waited 500ms for a tab it might open. Now it
+    waits 100ms (longer only for a link that opens a new tab) and skips the cursor animation in
+    background tabs, so a click takes 0.12s.
 - **Background work.** Agent tabs run in their own tab group in the background, and screenshots
   work without the window on screen. Claude in Chrome needs its window visible to take
   screenshots.
@@ -65,10 +76,12 @@ date picker, a virtualized table and a dropdown inside an embedded frame.
   a model to match elements. Here, the [agent cam](#agent-cam) saves GIFs without a tool, and
   [skills](#skills) and [Teach](#teach) do what shortcuts do. That model call isn't counted in Chrome's tokens or cost above, so its
   real numbers are a bit higher. Console and network reading is here as one opt-in tool,
-  [`devtools`](#devtools), off by default; it wasn't part of the comparison.
+  [`devtools`](#devtools), off by default. In a rerun of the 48 runs with it on, the model never
+  called it, and time, calls and tokens stayed within a few percent.
 
 Tasks, per-task tables and per-tool timings are in the
-[browser comparison](eval/results/report.md#browser-comparison-firefox-tools-vs-claude-in-chrome-baseline-arm);
+[browser comparison](eval/results/report.md#browser-comparison-firefox-tools-vs-claude-in-chrome-baseline-arm)
+and the [rerun](eval/results/report.md#re-measure-after-restart-firefox-before-firefox-after-chrome-baseline-arm);
 run it yourself with [eval/README.md](eval/README.md).
 
 ## How it works

@@ -3,7 +3,7 @@
 What unit tests and `scripts/test-bridge.mjs` can't cover: the privileged actor code and the
 sidebar running in a real Firefox. Restart Firefox first with `scripts/restart-firefox.sh` (it
 passes `-purgecaches`, which the actor modules need), then work down the list. Re-measuring the
-eval tasks is separate: see "To re-measure after restart" in [eval/README.md](../eval/README.md).
+eval tasks is separate: see "Re-measured after restart" in [eval/README.md](../eval/README.md).
 
 ## Features
 

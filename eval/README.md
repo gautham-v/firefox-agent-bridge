@@ -77,11 +77,12 @@ node eval/report.mjs       # writes eval/results/report.md
 ```
 
 `run.mjs` options: `--max-minutes 8 --concurrency 3 --runs 3 --model claude-sonnet-5-5
---tasks id,id --arms a,b --browser firefox|chrome|firefox,chrome --out file --run-timeout-min 7`. Each run is `claude -p` with
-`--strict-mcp-config` and an MCP config pointing at this checkout's `mcp/server.mjs`, only the
-Firefox tools (plus Task for fanout), no session persistence, in its own tab group. A run cut
-off by the chunk's deadline isn't recorded and runs again next time; one that hits the per-run
-cap is recorded as a timeout.
+--tasks id,id --arms a,b --browser firefox|chrome|firefox,chrome --out file --run-timeout-min 7
+--devtools --streams dir`. `--devtools` starts the MCP server with FIREFOX_BRIDGE_DEVTOOLS=1.
+Each run is `claude -p` with `--strict-mcp-config` and an MCP config pointing at this checkout's
+`mcp/server.mjs`, only the Firefox tools (plus Task for fanout), no session persistence, in its
+own tab group. A run cut off by the chunk's deadline isn't recorded and runs again next time; one
+that hits the per-run cap is recorded as a timeout.
 
 Output: `results/runs.jsonl` (one line per run: wall time, tool calls by tool, screenshots,
 tokens per model, turns, cost, answer, checker fields, errors), `results/probe-strip.json`,
@@ -90,27 +91,64 @@ tokens per model, turns, cost, answer, checker fields, errors), `results/probe-s
 Runs drive your real Firefox in background tab groups. The prompts tell the agent to close its
 tabs; a run that fails can leave a group behind (shown as Disconnected).
 
-## To re-measure after restart
+## Re-measured after restart (2026-09-29)
 
-Extension changes that only take effect once Firefox restarts and loads them. Re-run these tasks
-against Chrome's numbers (`eval/vs-chrome`) and note what moved.
+Some extension changes only take effect once Firefox restarts and loads them. After a restart
+with `-purgecaches`, the Firefox side of the browser comparison ran again (16 tasks x 3, baseline
+arm) into `results/browsers-after.jsonl`, and once more with the devtools tool on into
+`results/browsers-devtools.jsonl`. Chrome's rows in `results/browsers.jsonl` weren't re-run (its
+extension didn't change). `report.mjs` compares them in "Re-measure after restart" and "devtools
+on vs off".
 
-- **Frames in find/read_page, keys follow the last click** (gen-mdn-iframe): `find` and
-  `read_page` now reach the select inside MDN's live-sample iframe (in a shadow root, cross-origin)
-  with a `ref_N@fM` that `form_input` sets in place; `key`/`type` go to the frame the last click
-  landed in and say which element got them and its value. Was 71 calls / 1315k tokens / 114s
-  median; expect about 5 to 15 calls and no answer worked out from the source. Also run
-  `scripts/test-firefox.mjs`, which has steps for both.
-- **Input the pres shell can't take** (gen-mdn-iframe): a scroll or click whose pres-shell
-  dispatch threw `NS_ERROR_UNEXPECTED [nsIDOMWindowUtils.dispatchDOMEventViaPresShellForTesting]`
-  now dispatches the event on the element instead (and sends the click itself), and a scroll still
-  scrolls or passes up to the parent frame. Was 5 of 7 scrolls and 2 clicks failing over the
-  live-sample frame; expect none, and no `window.scrollBy` fallbacks.
-- **Click floor** (gen-apg-datepicker, gen-wiki-chain, gen-mdn-iframe): a click no longer sleeps
-  500ms for a tab it might open (it waits 100ms, 500ms only on a link or form that targets a new
-  tab, and goes on once the tab arrives), and the cursor jumps instead of easing for 150 to 350ms
-  in a tab the user isn't looking at. `computer:left_click` median was 696ms (Chrome 161ms);
-  expect under about 200ms in background tabs.
+```sh
+node eval/run.mjs --browser firefox --arms baseline --concurrency 2 --out eval/results/browsers-after.jsonl
+node eval/run.mjs --browser firefox --arms baseline --concurrency 2 --devtools --out eval/results/browsers-devtools.jsonl
+node eval/report.mjs
+```
+
+The after runs also include everything else that landed on the MCP server since the first run
+(batch, multi-field form_input, the tabId fill-in, the fetch hint in javascript_tool), so the
+overall change isn't all from the restart. What each item measured:
+
+- **Frames in find/read_page, keys follow the last click** (gen-mdn-iframe): was 71 calls /
+  1315k tokens / 114s median; now 9 calls / 72k / 18s (all 3 pass). Every run found the select
+  with `find` (`combobox "Choose an ice cream flavor:" [ref_1@f…] (in frame …mdnplay.dev)`), set
+  it with `form_input` on that ref, and read "You like sardine" from a screenshot or zoom. No run
+  used `javascript_tool` or navigated to the frame's page. Keys weren't exercised: no run typed
+  into the frame.
+- **Input the pres shell can't take**: `NS_ERROR_UNEXPECTED` results went from at least 6 (in the
+  rows' error samples, all on gen-mdn-iframe) to 0. The fallback wasn't really tested, though: no
+  run did a `computer` scroll, and both clicks into the live-sample frame (one in each set)
+  worked. `computer` had 0 errors in 72 actions (148 with devtools on as well).
+- **Click floor**: `computer:left_click` median went from 697ms to 123ms (38 clicks; Chrome
+  161ms).
+- **Trimmed find**: result size median 802 bytes [209–4226] before, 438 [195–778] after (Chrome
+  438 [192–627]).
+- **Tools not offered**: before, screenshot 4 and scroll_to 1. After, left_click 5 (3 in
+  gen-pydocs-search, 2 in gen-wiki-chain) and screenshot 2; with devtools on, left_click 3 (all
+  gen-pydocs-search). Every `left_click` call came right after a `find`, whose result now starts
+  "(screenshot coordinates; click by ref if off-screen)". The old wording ("clicking by ref is
+  more reliable") drew none in 34 find calls.
+- **devtools on vs off**: the model never called devtools. Medians on/off: wall 0.97, calls 1.00,
+  input tokens 1.02 (about the tool's definition), cost 0.94. Tool mix was the same.
+
+Seen in the traces, not yet fixed:
+
+- `computer:scroll_to` on a frame ref (`ref_1@f…`) reports the element's center in the frame's
+  own coordinates: "its center is now at (227, 10)" in all 6 MDN runs, where the select was at
+  about (590, 403) in the screenshot (one run clicked there and hit it). `read_page` on a frame
+  ref also labels the frame's 698x71 viewport as "Viewport (screenshot frame)".
+- 5 of 48 after runs and 4 of 48 devtools runs didn't close their tab (1 of 48 before). Their
+  answers say "I didn't open any tabs": the tab came from `tabs_context_mcp` with createIfEmpty.
+
+`scripts/test-firefox.mjs` has steps for frames and keys but runs on Linux under Xvfb, so it
+wasn't run here.
+
+Per-tool ms: a call issued in the same message as a `navigate` waits for it. The after runs did
+that more often (navigate then get_page_text or find in one turn), so their mean ms per call for
+those two tools includes the page load. Traces now record `msg_calls` (calls in the same message)
+and `text_head` (the first 300 characters of the result), and `run.mjs --streams dir` keeps each
+run's raw stream-json.
 
 # Model x effort benchmark
 
