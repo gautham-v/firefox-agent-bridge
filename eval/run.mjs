@@ -18,6 +18,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ARM_PROMPTS, ARM_TOOLS } from "./arms.mjs";
 import { lastJson } from "./lib/check.mjs";
+import { STRIP_ENV, summarize } from "./lib/stream.mjs";
 import { TASKS } from "./tasks.mjs";
 
 const EVAL = path.dirname(fileURLToPath(import.meta.url));
@@ -102,14 +103,6 @@ fs.writeFileSync(
   JSON.stringify({ mcpServers: { firefox: { type: "stdio", command: process.execPath, args: [path.join(ROOT, "mcp/server.mjs")] } } }, null, 2),
 );
 
-// Nested `claude` refuses to start, or attaches to this session, with these set.
-const STRIP_ENV = [
-  "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
-  "CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
-  "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_EXECPATH", "CLAUDE_PID", "CLAUDE_EFFORT", "AI_AGENT",
-  "FIREFOX_AGENT_BRIDGE_SESSION",
-];
-
 export function claudeArgs(task, arm) {
   const args = [
     "-p", task.prompt,
@@ -124,77 +117,6 @@ export function claudeArgs(task, arm) {
   ];
   if (ARM_PROMPTS[arm]) args.push("--append-system-prompt", ARM_PROMPTS[arm]);
   return args;
-}
-
-// Folds stream-json events into the per-run metrics.
-function summarize(events) {
-  const m = {
-    session_id: null, model: null, tools_available: null,
-    tool_calls: 0, tool_calls_by_tool: {}, subagent_tool_calls: 0, screenshots: 0,
-    tool_errors: 0, error_samples: [], tool_result_chars: 0, tool_result_images: 0, turns: null, assistant_messages: 0,
-    usage: null, model_usage: null, cost_usd: null, duration_ms: null, duration_api_ms: null,
-    result_subtype: null, is_error: null, final_text: null,
-  };
-  for (const e of events) {
-    if (e.type === "system" && e.subtype === "init") {
-      m.session_id = e.session_id;
-      m.model = e.model;
-      m.tools_available = e.tools;
-    } else if (e.type === "assistant") {
-      m.assistant_messages++;
-      for (const b of e.message?.content ?? []) {
-        if (b.type !== "tool_use") continue;
-        m.tool_calls++;
-        m.tool_calls_by_tool[b.name] = (m.tool_calls_by_tool[b.name] ?? 0) + 1;
-        if (e.parent_tool_use_id) m.subagent_tool_calls++;
-        if (b.name === "mcp__firefox__computer" && ["screenshot", "zoom"].includes(b.input?.action)) m.screenshots++;
-      }
-    } else if (e.type === "user") {
-      const content = e.message?.content;
-      for (const b of Array.isArray(content) ? content : []) {
-        if (b.type !== "tool_result") continue;
-        // Size of what the tools fed back into the context (text chars, image count).
-        for (const c of Array.isArray(b.content) ? b.content : [{ type: "text", text: String(b.content ?? "") }]) {
-          if (c.type === "image") m.tool_result_images++;
-          else m.tool_result_chars += (c.text ?? "").length;
-        }
-        if (b.is_error) {
-          m.tool_errors++;
-          const text = Array.isArray(b.content) ? b.content.map((c) => c.text ?? "").join(" ") : String(b.content ?? "");
-          if (m.error_samples.length < 5) m.error_samples.push(text.slice(0, 300));
-        }
-      }
-    } else if (e.type === "result") {
-      m.turns = e.num_turns;
-      m.usage = e.usage
-        ? {
-            input_tokens: e.usage.input_tokens ?? 0,
-            output_tokens: e.usage.output_tokens ?? 0,
-            cache_creation_input_tokens: e.usage.cache_creation_input_tokens ?? 0,
-            cache_read_input_tokens: e.usage.cache_read_input_tokens ?? 0,
-          }
-        : null;
-      m.model_usage = e.modelUsage ?? null;
-      m.cost_usd = e.total_cost_usd ?? null;
-      m.duration_ms = e.duration_ms ?? null;
-      m.duration_api_ms = e.duration_api_ms ?? null;
-      m.result_subtype = e.subtype;
-      m.is_error = e.is_error;
-      m.final_text = typeof e.result === "string" ? e.result : null;
-    }
-  }
-  // Totals across all models (sub-agents included) from modelUsage.
-  if (m.model_usage) {
-    const t = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
-    for (const u of Object.values(m.model_usage)) {
-      t.input_tokens += u.inputTokens ?? 0;
-      t.output_tokens += u.outputTokens ?? 0;
-      t.cache_creation_input_tokens += u.cacheCreationInputTokens ?? 0;
-      t.cache_read_input_tokens += u.cacheReadInputTokens ?? 0;
-    }
-    m.tokens_all_models = t;
-  }
-  return m;
 }
 
 function runCell(cell, capMs) {

@@ -1,5 +1,6 @@
 // A small stdio MCP client for this worktree's mcp/server.mjs, used by the probes. Each client is
-// its own session, so its tabs land in their own tab group in the user's Firefox.
+// its own session, so its tabs land in their own tab group in the user's Firefox; pass `session`
+// to join an existing session's group (e.g. to inspect the tabs a finished agent run left open).
 
 import { spawn } from "node:child_process";
 import path from "node:path";
@@ -8,9 +9,10 @@ import { fileURLToPath } from "node:url";
 export const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 export const SERVER = path.join(ROOT, "mcp/server.mjs");
 
-export async function startMcp({ name = "eval-probe", timeoutMs = 100_000 } = {}) {
+export async function startMcp({ name = "eval-probe", timeoutMs = 100_000, session = null } = {}) {
   const env = { ...process.env };
   delete env.FIREFOX_AGENT_BRIDGE_SESSION;
+  if (session) env.FIREFOX_AGENT_BRIDGE_SESSION = session;
   const proc = spawn(process.execPath, [SERVER], { env, stdio: ["pipe", "pipe", "inherit"] });
   const waiting = new Map();
   let buf = "";

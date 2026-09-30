@@ -43,3 +43,50 @@ tokens per model, turns, cost, answer, checker fields, errors), `results/probe-s
 
 Runs drive your real Firefox in background tab groups. The prompts tell the agent to close its
 tabs; a run that fails can leave a group behind (shown as Disconnected).
+
+# Model x effort benchmark
+
+Which model and effort level is worth using for browser tasks, and where effort stops paying.
+`models.mjs` runs 6 complex tasks (`models-tasks.mjs`, each 10+ steps) on 10 configs: Haiku 4.5
+at its default, and Sonnet 5.5, Opus 5.5 and Fable 5.1 at `--effort low|medium|high`. Haiku
+takes `--effort` without error but ignores it (the CLI's init event says
+`per_turn_effort_active: false`, and its output tokens don't follow the level), so it runs once,
+labeled `default`.
+
+| task | what it exercises | checked from |
+|---|---|---|
+| `research-synth` | 4 facts on 3 practice sites, combined into one computed number | answer |
+| `form-demoqa` | long practice form: validation on empty submit, date picker, autocomplete, checkboxes, dependent dropdowns, fixing a rejected phone number | confirmation dialog in the tab |
+| `todomvc-flow` | TodoMVC (React): add, rename, complete, delete, filter | app DOM in the tab |
+| `books-paginated` | two paginated categories; star ratings only as icons/classes; counts, sums, extremes | answer |
+| `tldraw-diagram` | canvas: 3 colored rectangles, an ellipse, 3 bound arrows | tldraw editor shapes and bindings |
+| `internet-gauntlet` | dynamic controls, delayed render, infinite scroll, number drawn on a canvas, form in an iframe, shadow-root slot | 5 tabs' DOM + answer |
+
+Every task scores partial credit (share of sub-goals met) and pass (all of them). State tasks
+tell the agent to leave its tab open; each run has its own tab-group session
+(`FIREFOX_AGENT_BRIDGE_SESSION` in its MCP config), so afterwards the worker joins that session,
+runs the task's `inspect` snippets on the matching tabs, and closes them.
+
+```sh
+node eval/models.mjs --dry-run
+node eval/models.mjs                 # one chunk (8.5 min); run again until it says complete
+node eval/models-report.mjs          # writes results/models/report.md and summary.json
+```
+
+Options: `--configs haiku:default,sonnet:low,...` (or `--models sonnet,opus --efforts low,high`),
+`--tasks`, `--rounds 3`, `--seed 7`, `--concurrency 3`, `--max-minutes 8.5`,
+`--run-timeout-min 12`, `--out`, `--tag`, `--wait`.
+
+The schedule is round-robin: each round runs every (task, config) once in a seeded shuffle, and
+a round starts only after the previous one has started all its cells, so stopping early leaves
+balanced data. Each run is a detached worker (`models.mjs --one`), so runs can outlive the
+chunk that started them (up to the 12-minute cap, which records `timeout: true` and score 0);
+the next chunk counts them toward the concurrency. A run with no result from the CLI (auth,
+rate limit, crash) is recorded with `infra_error: true` and runs again (up to 3 tries).
+
+Per run (`results/models/runs.jsonl`): model, effort, round, wall time, time to first tool call,
+tool calls by tool, screenshots, turns, input/output/cache tokens (output includes thinking),
+thinking blocks, `cost_usd` from the result event, tool errors, repeated identical consecutive
+calls, retries after an error, score, pass, sub-goal fields, the inspected page state, and
+load: how many other runs of this benchmark, other eval processes and other harnesses' `claude
+-p` agents were running (sampled every 15 s). Raw stream-json goes to `results/models/streams/`.
