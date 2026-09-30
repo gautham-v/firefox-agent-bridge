@@ -18,7 +18,7 @@ const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.ur
 // The fake Firefox: answers each call from `reply(tool, args)`, and records the calls.
 let reply = () => ({ content: [{ type: "text", text: "ok" }] });
 const calls = [];
-let home, bridge, server, rl;
+let home, bridge, server, rl, init;
 const pending = new Map();
 let nextId = 1;
 
@@ -48,7 +48,7 @@ before(async () => {
     pending.get(m.id)?.(m);
     pending.delete(m.id);
   });
-  await rpc("initialize", { protocolVersion: "2025-06-18", clientInfo: { name: "test", version: "1" } });
+  init = (await rpc("initialize", { protocolVersion: "2025-06-18", clientInfo: { name: "test", version: "1" } })).result;
 });
 
 after(() => {
@@ -80,6 +80,13 @@ test("tools/list offers batch, and form_input takes fields without ref/value", a
   assert.equal(fi.inputSchema.required, undefined);
   assert.ok(fi.inputSchema.properties.fields);
   assert.match(tools.find((t) => t.name === "javascript_tool").description, /DOMParser/);
+});
+
+test("computer's description and the server instructions say screenshot and scroll_to are computer actions", async () => {
+  const { tools } = (await rpc("tools/list", {})).result;
+  assert.ok(!tools.some((t) => t.name === "screenshot" || t.name === "scroll_to"));
+  assert.match(tools.find((t) => t.name === "computer").description, /^All mouse, keyboard, screenshot, zoom, scroll and scroll_to actions are computer\(action=\.\.\.\); there is no separate screenshot tool\./);
+  assert.match(init.instructions, /there is no separate screenshot or scroll_to tool/);
 });
 
 test("batch runs actions in order and returns each one's text", async () => {
