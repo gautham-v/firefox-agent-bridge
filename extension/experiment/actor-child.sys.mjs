@@ -6,6 +6,7 @@ import { setTimeout, clearTimeout } from "resource://gre/modules/Timer.sys.mjs";
 import { barLabel, fieldKind, marker, markLabels, scrub, selectorKind, siteSelectors } from "resource://firefox-agent-bridge/redact.sys.mjs";
 import { focusEvents } from "resource://firefox-agent-bridge/focus.sys.mjs";
 import { rankFind } from "resource://firefox-agent-bridge/find-rank.sys.mjs";
+import { contentBox, rectToTop, toParent } from "resource://firefox-agent-bridge/frame-offset.sys.mjs";
 
 const INTERACTIVE_ROLES = new Set([
   "button", "link", "textbox", "searchbox", "combobox", "checkbox", "radio", "switch", "slider",
@@ -517,16 +518,23 @@ function capture(doc, { on, redact }) {
 }
 
 // Where the masked fields are, for the agent cam's frames that Save as GIF keeps (panel.js). The
-// sidebar draws their bars itself, so nothing shows on the page: each box is in this frame's
-// viewport, with where the viewport sits on screen to place a child frame's boxes in the tab.
-function maskRects(doc, { redact }) {
+// sidebar draws their bars itself, so nothing shows on the page: each box is in the top frame's
+// viewport, placed there by `offset`, where api.js measured this frame to sit in it
+// (frame-offset.sys.mjs). A child frame with boxes that couldn't be placed fails, so the cam
+// knows it can't cover them.
+function maskRects(doc, { redact, offset }) {
   const win = doc.defaultView;
   const red = redactor(doc, redact);
-  const rects = maskedBoxes(doc, red).map(({ el, r }) => {
+  const top = !win.browsingContext.parent;
+  let rects = maskedBoxes(doc, red).map(({ el, r }) => {
     const m = red.mask(el);
     return { x: r.left, y: r.top, width: r.width, height: r.height, label: barLabel(m.kind, m.filled) };
   });
-  return { rects, screenX: win.mozInnerScreenX, screenY: win.mozInnerScreenY, ...viewSize(win), top: !win.browsingContext.parent };
+  if (!top && rects.length) {
+    if (!offset) throw new Error("Couldn't place this frame in the page.");
+    rects = rects.map((r) => rectToTop(offset, r));
+  }
+  return { rects, placed: true, ...viewSize(win), top };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -534,7 +542,7 @@ function maskRects(doc, { redact }) {
 // line of its own ending in frame=f<id>, and its id goes in `frames`: background.js then reads
 // that frame too (with `inner`, which leaves out the header) and puts its tree under the line.
 
-function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, frameScale = 1, redact, inner = false, origin } = {}) {
+function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, frameScale = 1, redact, inner = false, offset } = {}) {
   const interactiveOnly = filter === "interactive";
   const red = redactor(doc, redact);
   const lines = [];
@@ -609,14 +617,15 @@ function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, fr
   const view = viewSize(win);
   const px = (n) => Math.round(n * frameScale);
   // Read by a ref in a child frame, the viewport is that frame's, a part of the screenshot:
-  // `origin` (the top frame's viewport on screen) says where.
+  // `offset` (where the frame sits in the top frame's viewport, frame-offset.sys.mjs) says where.
   const child = !!win.browsingContext.parent;
-  const place = child && origin ? ` at (${px(win.mozInnerScreenX - origin.x)}, ${px(win.mozInnerScreenY - origin.y)}) in the screenshot` : "";
+  const place = child && offset ? ` at (${px(offset.x)}, ${px(offset.y)}) in the screenshot` : "";
+  const fpx = (n) => Math.round(n * frameScale * (child && offset ? offset.scale : 1));
   const header = [
     `${child ? "Frame" : "Page"}: ${doc.title}`,
     `URL: ${doc.location?.href}`,
     child
-      ? `Frame viewport (a part of the page, not the whole screenshot): ${px(view.width)}x${px(view.height)}${place}; frame scrolled ${px(win.scrollY)} of ${px(doc.documentElement.scrollHeight)} tall`
+      ? `Frame viewport (a part of the page, not the whole screenshot): ${fpx(view.width)}x${fpx(view.height)}${place}; frame scrolled ${fpx(win.scrollY)} of ${fpx(doc.documentElement.scrollHeight)} tall`
       : `Viewport (screenshot frame): ${px(view.width)}x${px(view.height)}; page scrolled ${px(win.scrollY)} of ${px(doc.documentElement.scrollHeight)} tall`,
     "",
   ];
@@ -633,9 +642,9 @@ function readPage(doc, { filter = "all", depth = 15, maxChars = 50000, refId, fr
 // ---------------------------------------------------------------------------------------------
 // find: heuristic scoring over names, roles and attributes. background.js runs it in every
 // frame of the tab at once and merges the answers by score, so each frame answers its best
-// matches as { score, line } rather than text. `origin` is the top frame's viewport (its place
-// on screen and size), so a child frame's coordinates are given in the top frame's, which is what
-// screenshots and clicks use. Only the best FIND_MAX are described; the scores of the rest that
+// matches as { score, line } rather than text. A child frame's coordinates are given in the top
+// frame's viewport, which is what screenshots and clicks use: `offset` is where api.js measured
+// this frame to sit in it (frame-offset.sys.mjs), `origin` the top frame's viewport size. Only the best FIND_MAX are described; the scores of the rest that
 // were close behind go along so the merged answer can say how many more there were. Ranking,
 // one entry per element and the extra matches for a role the query names, is in find-rank.sys.mjs.
 
@@ -669,7 +678,7 @@ const ROLE_WORDS = {
   modal: ["dialog", "alertdialog"],
 };
 
-function findElements(doc, { query, frameScale = 1, origin, redact }) {
+function findElements(doc, { query, frameScale = 1, origin, offset, redact }) {
   const win = doc.defaultView;
   const view = viewSize(win);
   const child = !!win.browsingContext.parent;
@@ -742,17 +751,17 @@ function findElements(doc, { query, frameScale = 1, origin, redact }) {
   const targets = scored.filter((m) => m.interactive).map((m) => m.el);
   const kept = scored.filter((m) => m.role !== "text" || !targets.some((t) => t !== m.el && t.contains(m.el)));
   const { sent, rest } = rankFind(kept);
-  // Where this frame's viewport sits in the top frame's, in CSS pixels.
-  const dx = child && origin ? win.mozInnerScreenX - origin.x : 0;
-  const dy = child && origin ? win.mozInnerScreenY - origin.y : 0;
-  const inTop = (x, y) => !child || !origin || (x >= 0 && y >= 0 && x < origin.width && y < origin.height);
+  // A child frame that couldn't be placed in the top frame's viewport has no coordinates to give.
+  const placed = !child || !!offset;
+  const inTop = (p) => !child || !origin || (p.x >= 0 && p.y >= 0 && p.x < origin.width && p.y < origin.height);
   const where = child ? ` (in frame ${doc.location?.host || "about:blank"})` : "";
   const matches = sent.map(({ el, role, rect, text, score, roleHit: hit }) => {
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
-    const cx = Math.round((x + dx) * frameScale);
-    const cy = Math.round((y + dy) * frameScale);
-    const onScreen = rect.bottom > 0 && rect.right > 0 && rect.top < view.height && rect.left < view.width && inTop(x + dx, y + dy);
+    const p = child && offset ? toParent(offset, x, y) : { x, y };
+    const cx = Math.round(p.x * frameScale);
+    const cy = Math.round(p.y * frameScale);
+    const onScreen = placed && rect.bottom > 0 && rect.right > 0 && rect.top < view.height && rect.left < view.width && inTop(p);
     const at = !(rect.width || rect.height) ? " (not rendered)" : onScreen ? ` at (${cx}, ${cy})` : " (off-screen)";
     const name = red.mask(el) && !isField(el) ? "" : text ?? nameOf(el, role);
     const line = red.scrub(`${describe(el, role, name, red)}${at}${where}`);
@@ -805,14 +814,35 @@ function deepElementFromPoint(doc, x, y) {
 
 // When a point lands on a frame element, the caller re-sends the op to that frame's
 // actor with coordinates translated into the frame's viewport.
+// The frame's content box (frame-offset.sys.mjs) maps the point, zoom or a transform included.
 function frameDescent(el, x, y) {
-  if (!el || !["IFRAME", "FRAME", "EMBED", "OBJECT"].includes(el.tagName) || !el.browsingContext) return null;
-  const win = el.ownerDocument.defaultView;
-  const r = el.getBoundingClientRect();
-  const cs = win.getComputedStyle(el);
-  const dx = r.left + el.clientLeft + parseFloat(cs.paddingLeft || 0);
-  const dy = r.top + el.clientTop + parseFloat(cs.paddingTop || 0);
-  return { descend: { id: el.browsingContext.id, args: { x: x - dx, y: y - dy, ref: undefined } } };
+  if (!el || !FRAME_TAGS.has(el.tagName) || !el.browsingContext) return null;
+  const box = contentBox(el);
+  return { descend: { id: el.browsingContext.id, args: { x: (x - box.x) / box.scale, y: (y - box.y) / box.scale, ref: undefined } } };
+}
+
+// Where the element holding child frame `id` has its content box in this frame's viewport
+// ({ x, y, scale }, see frame-offset.sys.mjs), for api.js to chain up to the top frame; null
+// when it isn't here or isn't rendered. The element can be in a shadow root.
+function frameBox(doc, { id }) {
+  const bc = doc.defaultView.browsingContext.children.find((c) => c.id === id);
+  let el = bc?.embedderElement;
+  if (!el || el.ownerDocument !== doc) el = frameElement(doc, id);
+  if (!el || !el.getClientRects().length) return null;
+  return contentBox(el);
+}
+
+function frameElement(doc, id) {
+  const visit = (root) => {
+    for (const el of root.querySelectorAll("*")) {
+      if (FRAME_TAGS.has(el.tagName) && el.browsingContext?.id === id) return el;
+      const shadow = el.openOrClosedShadowRoot;
+      const inner = shadow && visit(shadow);
+      if (inner) return inner;
+    }
+    return null;
+  };
+  return visit(doc);
 }
 
 function modifierInit(modifiers) {
@@ -2442,6 +2472,7 @@ const OPS = {
   cursorVisible,
   capture,
   maskRects,
+  frameBox,
   readPage,
   find: findElements,
   text: pageText,

@@ -44,6 +44,22 @@
         ]
       },
       {
+        "name": "frameOffset",
+        "type": "function",
+        "async": true,
+        "description": "Where a child frame's viewport sits in the tab's top frame's viewport, as { x, y, scale } in the top frame's CSS pixels, or null when the frame is gone or can't be measured.",
+        "parameters": [
+          {
+            "name": "tabId",
+            "type": "integer"
+          },
+          {
+            "name": "frameId",
+            "type": "integer"
+          }
+        ]
+      },
+      {
         "name": "upload",
         "type": "function",
         "async": true,
