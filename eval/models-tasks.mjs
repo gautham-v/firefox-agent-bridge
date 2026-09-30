@@ -9,7 +9,7 @@
 
 import { norm, num, toNumber } from "./lib/check.mjs";
 
-const answerRules = (shape) =>
+export const answerRules = (shape) =>
   [
     "Use only the Firefox browser tools. Don't sign in, and don't submit, buy or post anything unless the task says to.",
     "Close every tab you opened (tabs_close_mcp) before you finish.",
@@ -17,7 +17,7 @@ const answerRules = (shape) =>
     shape,
   ].join("\n");
 
-const stateRules = (keep, shape) =>
+export const stateRules = (keep, shape) =>
   [
     "Use only the Firefox browser tools. Don't sign in, and don't submit, buy or post anything unless the task says to.",
     `${keep} The result is checked in the page after you finish, so don't close ${/tabs/.test(keep) ? "those tabs" : "that tab"} or reload ${/tabs/.test(keep) ? "them" : "it"}; close any other tabs you opened.`,
@@ -25,22 +25,22 @@ const stateRules = (keep, shape) =>
     shape,
   ].join("\n");
 
-const get = (obj, key) => {
+export const get = (obj, key) => {
   if (!obj || typeof obj !== "object") return undefined;
   if (key in obj) return obj[key];
   const k = Object.keys(obj).find((x) => norm(x) === norm(key));
   return k === undefined ? undefined : obj[k];
 };
-const safe = (fn) => {
+export const safe = (fn) => {
   try {
     return !!fn();
   } catch {
     return false;
   }
 };
-const words = (s, n) => norm(s).replace(/\./g, "").split(" ").filter(Boolean).slice(0, n).join(" ");
-const sameList = (a, b) => Array.isArray(a) && a.length === b.length && a.every((x, i) => norm(x) === norm(b[i]));
-const sameBag = (a, b) => Array.isArray(a) && sameList([...a].map(norm).sort(), [...b].map(norm).sort());
+export const words = (s, n) => norm(s).replace(/\./g, "").split(" ").filter(Boolean).slice(0, n).join(" ");
+export const sameList = (a, b) => Array.isArray(a) && a.length === b.length && a.every((x, i) => norm(x) === norm(b[i]));
+export const sameBag = (a, b) => Array.isArray(a) && sameList([...a].map(norm).sort(), [...b].map(norm).sort());
 
 // Finds the tldraw Editor instance through React's fiber tree (the example doesn't expose it).
 const TLDRAW_JS = String.raw`(() => {

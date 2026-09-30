@@ -5,3 +5,8 @@ eval/results/models/logs/
 eval/results/models/inflight/
 eval/results/models/scheduler.lock
 eval/results/models/smoke/
+eval/results/models-hard/streams/
+eval/results/models-hard/logs/
+eval/results/models-hard/inflight/
+eval/results/models-hard/scheduler.lock
+eval/results/models-hard/smoke/
