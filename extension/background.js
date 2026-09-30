@@ -1226,7 +1226,10 @@ function cleanStep(raw) {
 async function stepShot(tabId) {
   try {
     const tab = await browser.tabs.get(tabId);
-    return await browser.tabs.captureTab(tabId, { format: "jpeg", quality: 60, scale: Math.min(1, SHOT_WIDTH / (tab.width || SHOT_WIDTH)) });
+    // Step shots are saved with the skill and shown to the agent when a replay stops, so masked
+    // fields are covered as in any screenshot; a tab that can't cover them gets no shot.
+    const { shot } = await forCapture(tabId, () => browser.tabs.captureTab(tabId, { format: "jpeg", quality: 60, scale: Math.min(1, SHOT_WIDTH / (tab.width || SHOT_WIDTH)) }));
+    return shot;
   } catch {
     return null;
   }
