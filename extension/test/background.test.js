@@ -115,7 +115,10 @@ function mockBrowser({ store = {}, groups: initialGroups = [], noIcons = false, 
     recorded: new Map(),
     claudePage: {
       onPick: event(),
-      record: async (tabId, on) => b.recorded.set(tabId, on),
+      record: async (tabId, on, redact) => {
+        b.recorded.set(tabId, on);
+        if (on) b.recordRules = redact;
+      },
       onRecord: event(),
       setActive: async () => {},
       call: async (tabId, op) => (op === "textSize" ? 10 : "done"),
@@ -1262,6 +1265,7 @@ test("Teach records the viewed tab: numbered steps with a shot, one step per fie
   assert.equal(state.teach.site, "user.example");
   assert.equal(state.teach.start, "https://user.example/");
   assert.equal(env.browser.recorded.get(1), true);
+  assert.deepEqual(plain(env.browser.recordRules.always), ["password", "cc-*", "one-time-code", "new-password", "current-password"], "fields the redaction rules mask are recorded like secret ones");
   assert.equal(env.browser.tabsMap.get(1).groupId, -1, "the user's tab isn't grouped");
 
   const record = (step) => env.browser.claudePage.onRecord.fire(1, step);
@@ -1269,15 +1273,17 @@ test("Teach records the viewed tab: numbered steps with a shot, one step per fie
   await record({ action: "type", target: { role: "textbox", name: "Library card" }, field: "f1", value: "12" });
   await record({ action: "type", target: { role: "textbox", name: "Library card" }, field: "f1", value: "1234" });
   await record({ action: "type", target: { role: "textbox", name: "PIN" }, field: "f2", secret: "keychain", value: "leaked" });
+  await record({ action: "select", target: { role: "combobox", name: "Expiry month" }, secret: "ask", value: "08" });
   await record({ action: "bogus" });
   await env.browser.claudePage.onRecord.fire(99, { action: "click", target: { role: "button", name: "elsewhere" } });
   await wait(30);
   const steps = a.of("teach.step");
   const last = new Map(steps.map((m) => [m.step.n, m.step]));
-  assert.deepEqual([...last.keys()], [1, 2, 3]);
+  assert.deepEqual([...last.keys()], [1, 2, 3, 4]);
   assert.equal(last.get(2).value, "1234");
   assert.equal(last.get(3).secret, "keychain");
   assert.equal(last.get(3).value, undefined, "a secret field's value is never kept");
+  assert.deepEqual([last.get(4).secret, last.get(4).value], ["ask", undefined], "nor a masked select's");
   const shot = steps.find((m) => m.shot && m.step.n === 1).shot;
   assert.match(Buffer.from(shot.split(",")[1], "base64").toString(), /shot of 1 at 0.5/, "400px wide from an 800px tab");
 
@@ -1298,12 +1304,12 @@ test("Teach records the viewed tab: numbered steps with a shot, one step per fie
   assert.equal(done.requestId, "r1");
   assert.equal(done.recording.stopped, true);
   assert.equal(done.recording.drafted, true);
-  assert.equal(done.recording.steps.length, 4);
+  assert.equal(done.recording.steps.length, 5);
   assert.equal(b.of("teach").at(-1).requestId, undefined, "only the asking panel drafts");
   assert.equal(env.browser.recorded.get(1), false);
   await record({ action: "click", target: { role: "button", name: "late" } });
   await wait(30);
-  assert.equal(a.of("teach.step").filter((m) => m.step.n === 5).length, 0);
+  assert.equal(a.of("teach.step").filter((m) => m.step.n === 6).length, 0);
 });
 
 test("Teach starts a fresh chat when this one is in use, and refuses agent and non-web tabs", async () => {

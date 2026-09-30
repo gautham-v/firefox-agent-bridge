@@ -27,6 +27,8 @@ const FRAME_REF = /@f(\d+)$/;
 // Teach (docs/teach.md): the browser ids of tabs being recorded, shared with every content
 // process, and the topic the parent actor reports recorded steps on.
 const RECORDING_KEY = "firefox-agent-bridge:recording";
+// The redaction rules while recording, so fields they mask are recorded like secret ones.
+const RECORD_REDACT_KEY = "firefox-agent-bridge:record-redact";
 const RECORD_TOPIC = "firefox-agent-bridge:record";
 // The user input the child actor records. Capturing at the top of the chain, the actor sees
 // each event before the page does, whatever the page does with it. A page going away only
@@ -186,6 +188,7 @@ this.claudePage = class extends ExtensionAPI {
     for (const browser of this.pointing.values()) armFrames(browser, false);
     this.removeSheets();
     Services.ppmm.sharedData.delete(RECORDING_KEY);
+    Services.ppmm.sharedData.delete(RECORD_REDACT_KEY);
     unregisterActor();
     resHandler().setSubstitution(RES_HOST, null);
   }
@@ -341,8 +344,10 @@ this.claudePage = class extends ExtensionAPI {
         }).api(),
 
         // Starts or stops recording the user's input in a tab (Teach). Steps arrive on onRecord.
-        record: surfaced(async (tabId, on) => {
+        // Fields the redaction rules mask are recorded without their values.
+        record: surfaced(async (tabId, on, redact) => {
           await self.ready;
+          if (on && redact && typeof redact === "object") Services.ppmm.sharedData.set(RECORD_REDACT_KEY, JSON.parse(JSON.stringify(redact)));
           setRecording(tabManager.get(tabId).nativeTab.linkedBrowser.browserId, !!on);
           return true;
         }),

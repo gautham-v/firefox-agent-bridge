@@ -40,7 +40,9 @@ events in a listed tab:
 
 Password fields and other secret fields never send a value. A field is `"keychain"` when it is
 `type=password`, has a password autocomplete, or is named like a password, passcode or PIN; it is
-`"ask"` for one-time codes, card numbers and security codes, and social security numbers.
+`"ask"` for one-time codes, card numbers and security codes, and social security numbers. A
+field the [redaction rules](../README.md#redaction) mask (a site's selectors included) is `"ask"`
+too, a masked select included, and masked text is kept out of recorded target names.
 
 Background adds a **navigate** step for a page load that starts more than 3 s after the last
 click, Enter or typing (one the user started from the address bar or history), and ignores

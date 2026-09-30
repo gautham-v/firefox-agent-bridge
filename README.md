@@ -149,8 +149,8 @@ ends. The thumbnail stays in the sidebar and never reaches the agent, so it isn'
 **Teach Claude a task** in the + menu records you doing a task in the tab you're on (it isn't
 grouped): each click, field you type in, select and Enter is a step, found again later by its role
 and accessible name, with a CSS selector and nearby text as fallbacks, and a small screenshot
-(with [masked fields](#redaction) covered). Values typed into password and other secret fields
-are never recorded; the step says "from Keychain" or "ask". Stop and draft sends the steps to the
+(with [masked fields](#redaction) covered). Values typed into password and other secret fields,
+and fields the redaction rules mask, are never recorded; the step says "from Keychain" or "ask". Stop and draft sends the steps to the
 chat's engine, which drafts a skill: name, trigger, inputs (the typed values that change between
 runs), checks. Save writes `~/.claude/skills/<name>/SKILL.md` and `replay.json` (Codex:
 `~/.codex/skills/`); with "Replay without Claude when steps match" on, the skill runs

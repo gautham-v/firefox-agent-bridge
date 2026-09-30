@@ -1782,6 +1782,7 @@ function mark(doc, { ref, label, reveal, clear }) {
 // secret field leaves this process: the step only says where the value should come from.
 
 const RECORDING_KEY = "firefox-agent-bridge:recording";
+const RECORD_REDACT_KEY = "firefox-agent-bridge:record-redact";
 const TYPE_SETTLE_MS = 600;
 const TEXT_TYPES = new Set(["text", "search", "email", "url", "tel", "number", "password", "date", "time", "datetime-local", "month", "week"]);
 
@@ -1862,6 +1863,26 @@ const composedTarget = (event) => {
   return t?.nodeType === 1 ? t : t?.parentElement ?? null;
 };
 
+// The redaction rules background gave when recording started: a field they mask is recorded
+// like a secret one (no value), and masked text is kept out of target names.
+function recordRedactor(doc) {
+  let rules = null;
+  try {
+    rules = Services.cpmm.sharedData.get(RECORD_REDACT_KEY) ?? null;
+  } catch {
+    // no rules: only the built-in secret fields are left out
+  }
+  return rules ? redactor(doc, rules) : null;
+}
+
+function recordedTarget(el, red) {
+  const target = targetOf(el);
+  if (!red) return target;
+  target.name = red.scrub(target.name, false);
+  if (target.near) target.near = red.scrub(target.near, false);
+  return target;
+}
+
 function isRecording(actor) {
   try {
     const ids = Services.cpmm.sharedData.get(RECORDING_KEY);
@@ -1892,8 +1913,9 @@ function flushTyping(actor) {
   r.typing = null;
   if (!el.isConnected) return;
   if (!fieldIds.has(el)) fieldIds.set(el, `f${nextField++}`);
-  const step = { action: "type", target: targetOf(el), field: fieldIds.get(el) };
-  const secret = secretKind(el);
+  const red = recordRedactor(el.ownerDocument);
+  const step = { action: "type", target: recordedTarget(el, red), field: fieldIds.get(el) };
+  const secret = secretKind(el) ?? (red?.mask(el) ? "ask" : null);
   if (secret) step.secret = secret;
   else step.value = String(el.isContentEditable ? el.innerText : el.value).slice(0, 2000);
   recordStep(actor, step);
@@ -1915,7 +1937,7 @@ function onRecordEvent(actor, event) {
       if (isTextField(target) || (target.tagName === "LABEL" && target.control && isTextField(target.control))) return;
       flushTyping(actor);
       r.label = target.tagName === "LABEL" ? { control: target.control, at: Date.now() } : null;
-      recordStep(actor, { action: "click", target: targetOf(target) });
+      recordStep(actor, { action: "click", target: recordedTarget(target, recordRedactor(target.ownerDocument)) });
       return;
     }
     case "input":
@@ -1928,14 +1950,18 @@ function onRecordEvent(actor, event) {
     case "change":
       if (el?.tagName === "SELECT") {
         flushTyping(actor);
-        recordStep(actor, { action: "select", target: targetOf(el), value: clean(Array.from(el.selectedOptions).map((o) => o.textContent).join(", "), 200) });
+        const red = recordRedactor(el.ownerDocument);
+        const step = { action: "select", target: recordedTarget(el, red) };
+        if (red?.mask(el)) step.secret = "ask";
+        else step.value = clean(Array.from(el.selectedOptions).map((o) => o.textContent).join(", "), 200);
+        recordStep(actor, step);
       } else if (el && el === r.typing) flushTyping(actor);
       return;
     case "keydown":
       if (event.key !== "Enter" || event.isComposing || !el || el.tagName !== "INPUT" || !isTextField(el)) return;
       flushTyping(actor);
       r.enterAt = Date.now();
-      recordStep(actor, { action: "key", key: "Enter", target: targetOf(el) });
+      recordStep(actor, { action: "key", key: "Enter", target: recordedTarget(el, recordRedactor(el.ownerDocument)) });
       return;
     case "pagehide":
       flushTyping(actor);

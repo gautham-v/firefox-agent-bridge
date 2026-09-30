@@ -127,6 +127,12 @@
           {
             "name": "recording",
             "type": "boolean"
+          },
+          {
+            "name": "redact",
+            "type": "any",
+            "optional": true,
+            "description": "The redaction rules; fields they mask are recorded without their values."
           }
         ]
       }

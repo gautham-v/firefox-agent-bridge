@@ -1228,7 +1228,7 @@ function cleanStep(raw) {
   if (!["click", "type", "select", "key", "navigate"].includes(action)) return null;
   const step = { action };
   if (raw.target) step.target = cleanTarget(raw.target);
-  if (action === "type" && (raw.secret === "keychain" || raw.secret === "ask")) step.secret = raw.secret;
+  if ((action === "type" || action === "select") && (raw.secret === "keychain" || raw.secret === "ask")) step.secret = raw.secret;
   else if (typeof raw.value === "string") step.value = raw.value.slice(0, 2000);
   if (action === "key") step.key = clipText(raw.key, 20);
   if (typeof raw.field === "string") step.field = raw.field.slice(0, 20);
@@ -1447,7 +1447,7 @@ const panelCommands = {
     if (chat.events.length || sessions.has(chat.id) || recordings.has(chat.id)) chat = newChat(panel.windowId, chat);
     for (const r of recordings.values()) if (r.tabId === tab.id) await stopRecording(r);
     try {
-      await browser.claudePage.record(tab.id, true);
+      await browser.claudePage.record(tab.id, true, redactRules);
     } catch {
       return post(panel, { type: "teach", error: "Firefox couldn't record this tab. Restart Firefox so the bridge's experiment is up to date." });
     }

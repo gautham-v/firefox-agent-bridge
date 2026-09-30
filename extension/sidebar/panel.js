@@ -1992,7 +1992,7 @@ function recRow(s, shot) {
   const words = {
     click: ["Click", [recTarget(s.target)]],
     type: ["Type", [`${recTarget(s.target)} → `, s.secret ? (s.secret === "keychain" ? "from Keychain" : "ask each time") : el("b", { text: inputGuess(s) })]],
-    select: ["Select", [`“${shortText(s.value ?? "", 40)}” in ${recTarget(s.target)}`]],
+    select: ["Select", s.secret ? [`in ${recTarget(s.target)} → ask each time`] : [`“${shortText(s.value ?? "", 40)}” in ${recTarget(s.target)}`]],
     key: ["Press", [s.key ?? "Enter"]],
     navigate: ["Go to", [shortText(String(s.url ?? "").replace(/^https?:\/\/(www\.)?/, ""), 80)]],
   }[s.action] ?? ["Step", []];

@@ -63,6 +63,12 @@ test("buildReplay without a step plan replays every recorded step; unnamed value
   assert.deepEqual(odd.steps, [{ type: { role: "textbox", name: "PIN", frame: [{ index: 0, url: "https://login.example/" }] }, text: "{code}" }]);
 });
 
+test("buildReplay: a select recorded without its value (a masked field) reads it from an ask input", () => {
+  const replay = buildReplay({ site: "shop.example", steps: [{ n: 1, action: "select", target: { role: "combobox", name: "Expiry month" }, secret: "ask" }] }, { name: "pay", steps: [{ from: 1 }] });
+  assert.deepEqual(replay.inputs, ["expiry_month:ask"]);
+  assert.deepEqual(replay.steps, [{ select: { role: "combobox", name: "Expiry month" }, value: "{expiry_month}" }]);
+});
+
 test("skillMarkdown: frontmatter, replay first (or not), inputs, steps and notes", () => {
   const replay = buildReplay(RECORDING, DRAFT);
   const md = skillMarkdown(DRAFT, replay, { dir: "/h/.claude/skills/renew-library-books" });
