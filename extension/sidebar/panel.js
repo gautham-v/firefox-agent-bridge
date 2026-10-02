@@ -1644,7 +1644,7 @@ function commandFor(e) {
   const mods = [e.ctrlKey && (MAC ? "MacCtrl" : "Ctrl"), e.altKey && "Alt", e.metaKey && "Command", e.shiftKey && "Shift"].filter(Boolean);
   const pressed = [...mods, key].join("+");
   const name = Object.keys(S.keys).find((n) => S.keys[n].replace(/\s+/g, "") === pressed);
-  return name && name !== "stop-agents" && !name.startsWith("_") ? name : null;
+  return name && name !== "stop-agents" ? name : null;
 }
 
 // A shortcut pressed anywhere in the window (background.js, PANEL_KEYS), or here (commandFor).
@@ -2671,6 +2671,13 @@ function wire() {
       return;
     }
     const command = commandFor(e);
+    if (command === "_execute_sidebar_action") {
+      // The sidebar's own key, pressed in it: close. A keydown here is a user action, which close() needs.
+      // Only from a text box, which keeps the key from Firefox; anywhere else Firefox toggles it itself.
+      if (S.popout || !browser.sidebarAction || !e.target.matches?.("textarea, input")) return;
+      e.preventDefault();
+      return void browser.sidebarAction.close().catch(() => {});
+    }
     if (command) {
       e.preventDefault();
       return onKey(command);
