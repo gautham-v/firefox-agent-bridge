@@ -1133,6 +1133,8 @@ test("a panel key opens the sidebar and reaches its panel; focus goes through th
   assert.deepEqual(a.of("key"), [{ type: "key", name: "session-2" }]);
   await a.send("focus", { panel: false });
   assert.deepEqual(focused, [[10, false]]);
+  await a.send("focus", { panel: true, opened: true });
+  assert.equal(focused.length, 1, "a sidebar restored at startup doesn't take focus");
   await env.browser.commands.onCommand.fire("unknown");
   assert.equal(env.browser.action.toggles, 1);
 });

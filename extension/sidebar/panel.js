@@ -704,8 +704,9 @@ function onState(s) {
     closeSwitcher(false);
   }
   render();
-  // The sidebar just opened: typing goes to the message box, not the page.
-  if (!openedFocus && !S.popout && !params.has("window")) focusInput();
+  // The sidebar just opened: typing goes to the message box, not the page (unless Firefox
+  // restored the sidebar at startup, which the background can tell).
+  if (!openedFocus && !S.popout && !params.has("window")) post("focus", { panel: true, opened: true });
   openedFocus = true;
 }
 

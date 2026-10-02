@@ -1512,6 +1512,8 @@ const HOST_DOWN = "The native host is not connected.";
 
 // chat id -> { id, windowId, events, engine, model, effort, status, awaiting, finished, resume, queue, tabIds, groupTimer, title, firstText }
 const chats = new Map();
+const STARTED_AT = Date.now();
+const RESTORE_MS = 10_000; // a panel that loads this soon after the extension was open when Firefox quit
 const closedChats = new Set(); // chats the user closed: what their engine still says is dropped
 const validChatId = (id) => typeof id === "string" && /^[\w-]{1,64}$/.test(id) && !["__proto__", "constructor", "prototype"].includes(id);
 const windowChat = new Map(); // window id -> the chat its panel last showed
@@ -2065,7 +2067,12 @@ const panelCommands = {
   },
 
   // Keyboard focus, to the panel or back to the page. A panel can't take it from the page itself.
-  focus: (panel, m) => Promise.resolve(browser.claudePage.focusPanel?.(panel.windowId, m.panel !== false)).catch(() => {}),
+  // `opened` is a panel asking as it loads: not for a sidebar Firefox restored at startup, which
+  // the user didn't just open.
+  focus(panel, m) {
+    if (m.opened && Date.now() - STARTED_AT < RESTORE_MS) return;
+    return Promise.resolve(browser.claudePage.focusPanel?.(panel.windowId, m.panel !== false)).catch(() => {});
+  },
 
   "chat.interrupt": (panel, m) => port?.postMessage({ type: "chat.interrupt", chatId: m.chatId ?? panel.chatId }),
   "chat.permission"(panel, m) {
