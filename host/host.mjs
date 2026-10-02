@@ -139,6 +139,14 @@ const server = net.createServer((socket) => {
         announce(clientId, client, req);
         continue;
       }
+      // /sidebar in a terminal (scripts/to-sidebar.mjs): not an MCP client, so it isn't announced.
+      if (req.type === "sidebar") {
+        chat.returned(req.session).then(
+          (ok) => socket.destroyed || socket.write(JSON.stringify({ id: req.id, ok }) + "\n"),
+          (e) => log(`sidebar handoff failed: ${e.message}`),
+        );
+        continue;
+      }
       if (!client.info) announce(clientId, client, {});
       const rules = redact.changed();
       if (rules) send({ type: "redact", rules });

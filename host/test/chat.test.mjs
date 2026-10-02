@@ -1205,3 +1205,54 @@ test("claude: a memory write's card shows what would be saved, and one too long 
     t.done();
   }
 });
+
+// ---- Terminal handoff ----------------------------------------------------------------------------
+
+test("handoff: the session moves to the chosen folder, a terminal opens on it, and a later message takes it back there", async () => {
+  const opened = [];
+  const ended = [];
+  const t = setup({ terminal: { open: async (o) => opened.push(o), end: async (token) => ended.push(token) } });
+  try {
+    const id = newId();
+    const projects = path.join(t.home, ".claude/projects");
+    const repo = fs.realpathSync(fs.mkdtempSync(path.join(t.home, "repo-")));
+    const enc = (p) => p.replace(/[^a-zA-Z0-9]/g, "-");
+
+    const none = await t.ask("chat.handoff", { chatId: id });
+    assert.deepEqual([none.ok, none.pick], [false, true], "no folder to fall back on: the panel asks for one");
+    const empty = await t.ask("chat.handoff", { chatId: id, cwd: repo });
+    assert.equal(empty.ok, false, "nothing to continue before the first message");
+
+    await t.turn(id, "hello");
+    const r = await t.ask("chat.handoff", { chatId: id, cwd: repo });
+    assert.deepEqual([r.ok, r.cwd, r.opened], [true, repo, true]);
+    assert.ok(fs.existsSync(path.join(projects, enc(repo), `${id}.jsonl`)), "the session file is in the folder's project");
+    const config = path.join(t.home, ".firefox-agent-bridge/chat/handoff", `${id}.json`);
+    assert.equal(opened.length, 1);
+    assert.equal(opened[0].cwd, repo);
+    assert.equal(opened[0].command, `claude --resume ${id} --mcp-config ${config} --permission-mode default`, "asks like the sidebar did");
+    const env = JSON.parse(fs.readFileSync(config, "utf8")).mcpServers.firefox.env;
+    assert.deepEqual([env.FIREFOX_AGENT_BRIDGE_SESSION, env.FIREFOX_AGENT_BRIDGE_HANDOFF], [id, "1"], "the terminal keeps the chat's tab group");
+    const s = await t.ask("chat.settings", {});
+    assert.equal(s.terminalFolder, repo);
+    assert.ok(s.folders.some((f) => f.cwd === repo));
+
+    // Back in the sidebar: the terminal's Claude Code is ended first, and the chat runs in the folder.
+    await t.turn(id, "and again");
+    assert.deepEqual(ended, [config]);
+    const run = t.runs().at(-1);
+    assert.equal(run.cwd, repo);
+    assert.equal(flagValue(run.argv, "--resume"), id);
+
+    // The shortcut gives no folder: the chat's own.
+    const again = await t.ask("chat.handoff", { chatId: id });
+    assert.deepEqual([again.ok, again.cwd], [true, repo]);
+    await t.ask("chat.reclaim", { chatId: id });
+    assert.equal(ended.length, 2);
+    assert.equal(await t.chat.returned(id), true);
+    assert.deepEqual(t.sent.at(-1), { type: "chat.returned", chatId: id, source: "panel", path: path.join(projects, enc(repo), `${id}.jsonl`), title: "hello" });
+    assert.equal(await t.chat.returned("00000000-0000-4000-8000-00000000dead"), false);
+  } finally {
+    t.done();
+  }
+});

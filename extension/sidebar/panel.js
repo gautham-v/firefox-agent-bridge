@@ -78,6 +78,7 @@ const ICON_PATHS = {
   lock: '<rect x="4" y="7" width="8" height="6.5" rx="1.2"/><path d="M5.8 7V5.3a2.2 2.2 0 0 1 4.4 0V7"/>',
   file: '<path d="M4 2.5h5l3 3v8H4z"/><path d="M9 2.5v3h3"/>',
   record: '<circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2" fill="currentColor" stroke="none"/>',
+  term: '<rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M4.8 6.4l2 1.6-2 1.6M8.6 9.9h2.6"/>',
   save: '<path d="M8 2.5v7.5M4.8 7L8 10.2 11.2 7"/><path d="M2.5 11v1.5a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V11"/>',
 };
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -413,6 +414,7 @@ const S = {
   ui: { menu: null, sheet: null, tray: false, switcher: null },
   windowTabs: [],
   pendingAdd: null, // a tab to add once the chat's group exists
+  terminal: null, // while the chat is continued in a terminal: {cwd, label, command, opened}
   rec: null, // the chat's Teach recording: {id, site, start, startedAt, stopped, drafted, steps, shots}
   teachUi: new Map(), // draft key -> {replay, busy, exists, error} for its review card
   teachSaved: {}, // draft key -> the folder it was saved to
@@ -631,6 +633,16 @@ function onMessage(m) {
       S.settings = m;
       if (S.ui.menu) renderMenu();
       return;
+    case "terminal":
+      if (m.chatId !== S.chatId) return;
+      S.terminal = m.terminal ?? null;
+      return render("head", "notices", "dock");
+    case "chat.handoff":
+      if (m.ok) return;
+      // No folder to fall back on yet (the shortcut's first use): pick one.
+      if (m.pick) openMenu("more", $("more-btn"), { view: "terminal", keep: true });
+      if (m.error) toast(m.error, "warn");
+      return;
     case "chat.capabilities":
       if (!m.engine) return;
       S.caps[m.engine] = m;
@@ -691,6 +703,7 @@ function onState(s) {
   S.activeTab = s.activeTab ?? null;
   rememberTabs([...(S.group?.tabs ?? []), S.activeTab]);
   S.paused = !!s.paused;
+  S.terminal = s.terminal ?? null;
   S.rec = s.teach ?? null;
   if (s.engine) S.engine = s.engine;
   applyPrefs(S.engine);
@@ -1334,6 +1347,19 @@ function renderNotices() {
       ),
     );
   }
+  if (S.terminal) {
+    const t = S.terminal;
+    const key = S.keys["to-terminal"] ? ` (${formatShortcut(S.keys["to-terminal"])})` : "";
+    out.push(
+      banner(
+        "term",
+        t.opened ? "Continued in your terminal" : "Paste this in a terminal to continue",
+        t.opened ? `In ${t.label}. Type /sidebar there to bring it back.` : el("code", { text: t.command }),
+        el("button", { class: "b solid", text: "Continue here", title: `Continue here${key}`, onclick: () => post("chat.reclaim") }),
+        t.opened ? null : el("button", { class: "b", text: "Copy", onclick: () => navigator.clipboard.writeText(t.command).then(() => toast("Copied"), () => {}) }),
+      ),
+    );
+  }
   const e = S.error;
   const other = S.engine === "claude" ? "codex" : "claude";
   if (e?.code === "limit") {
@@ -1418,6 +1444,7 @@ function effortsFor() {
 const effortLabel = (id) => EFFORT_LABELS[id] ?? (id ? id[0].toUpperCase() + id.slice(1) : "");
 
 function placeholder() {
+  if (S.terminal) return "Continued in your terminal";
   if (S.paused) return `Tell ${engine().short} what to do instead…`;
   if (S.skill) return "Add details, or send to run it…";
   if (isRunning()) return "Add to the task…";
@@ -1434,7 +1461,7 @@ function renderDock() {
   const recording = recordingShown();
   $("composer").hidden = recording;
   $("foot").hidden = recording;
-  const down = engineDown() && !S.turns.length;
+  const down = (engineDown() && !S.turns.length) || !!S.terminal;
   $("composer").classList.toggle("dis", down);
   $("input").disabled = down;
   $("input").placeholder = placeholder();
@@ -1677,7 +1704,17 @@ function onKey(name) {
   else if (name === "prev-session") stepChat(-1);
   else if (name === "next-session") stepChat(1);
   else if (name.startsWith("session-")) switchTo(S.chats[Number(name.slice(8)) - 1]?.id);
+  else if (name === "to-terminal") return S.terminal ? post("chat.reclaim") : toTerminal();
   focusInput();
+}
+
+// Continue in terminal: Claude Code opens in a terminal window on this chat, in `cwd` (none:
+// the folder this chat, or the last handoff, ran in), and the panel steps aside.
+const terminalBlock = () => (S.engine !== "claude" ? "Only Claude chats can continue in a terminal." : !S.turns.length ? "Send a message first. There's nothing to continue yet." : isRunning() ? "Wait for the turn to finish, or stop it first." : null);
+function toTerminal(cwd) {
+  const why = terminalBlock();
+  if (why) return toast(why, "warn");
+  post("chat.handoff", { requestId: `handoff${++requestCount}`, ...(cwd && { cwd }) });
 }
 
 function answerPending(decision) {
@@ -1852,10 +1889,10 @@ function addPicked(e) {
 // ---------------------------------------------------------------------------------------------
 // Menus. One menu at a time, drawn over a scrim so a click anywhere else closes it.
 
-function mi(iconName, label, { right, onclick, sel, disabled, sub, check } = {}) {
+function mi(iconName, label, { right, onclick, sel, disabled, sub, check, title } = {}) {
   return el(
     "button",
-    { class: `mi${sel ? " sel" : ""}${sub ? " two" : ""}`, role: "menuitem", disabled, onclick },
+    { class: `mi${sel ? " sel" : ""}${sub ? " two" : ""}`, role: "menuitem", disabled, onclick, ...(title && { title }) },
     check ? icon("check", "ck") : iconName ? icon(iconName) : null,
     el("span", { class: "l" }, label, sub ? el("span", { class: "sub", text: sub }) : null),
     right ? el("span", { class: "r" }, right) : null,
@@ -2060,8 +2097,27 @@ function moreMenu() {
       mi(null, "Off", { check: true, sel: st?.memory === "off", onclick: () => setSetting({ memory: "off" }) }),
     ];
   }
+  if (S.ui.menu.view === "terminal") {
+    const folders = ready ? (st.folders ?? []) : [];
+    const split = (label) => [label.slice(label.lastIndexOf("/") + 1) || label, label.slice(0, Math.max(label.lastIndexOf("/"), 0))];
+    return [
+      backRow("Continue in terminal"),
+      sep(),
+      caption("Run Claude Code in"),
+      ...folders.map((f) => {
+        const [name, parent] = split(f.label);
+        return mi(null, name, { check: true, sel: st.terminalFolder === f.cwd, right: parent, title: f.label, onclick: () => { closeMenu(false); toTerminal(f.cwd); } });
+      }),
+      folders.length ? null : note(ready ? "No Claude Code projects yet. Run claude in a folder once." : "The bridge host isn't running."),
+    ];
+  }
   const memoryLabel = !ready ? "" : st.memory === "off" ? "Off" : (memories.find((m) => m.dir === st.memory)?.label ?? "");
+  const termKey = S.keys["to-terminal"] ? formatShortcut(S.keys["to-terminal"]) : "";
   return [
+    S.terminal
+      ? mi("term", "Continue here", { right: termKey, onclick: () => { closeMenu(false); post("chat.reclaim"); } })
+      : mi("term", "Continue in terminal", { disabled: !ready || !!terminalBlock(), right: [termKey, icon("chevr")], onclick: () => { S.ui.menu.view = "terminal"; renderMenu(); } }),
+    sep(),
     mi("list", "Agents and activity", { onclick: () => { closeMenu(false); openSheet("agents"); } }),
     mi("stop", "Stop all agents", { right: formatShortcut(S.keys["stop-agents"] || "Alt+Shift+X"), onclick: () => { closeMenu(false); post("stopAll"); } }),
     sep(),
@@ -2278,6 +2334,7 @@ function keysList() {
     row("Previous / next session", k("prev-session"), k("next-session")),
     row("Switch session", k("switcher")),
     row("Stop all agents", k("stop-agents")),
+    row("Continue in terminal, or back here", k("to-terminal")),
     row("Keyboard shortcuts", k("shortcuts")),
     el("div", { class: "hcap", text: "While the panel has focus" }),
     row("Send", "↩"),

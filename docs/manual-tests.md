@@ -55,6 +55,12 @@ eval tasks is separate: see "Re-measured after restart" in [eval/README.md](../e
 12. **Stop.** Alt+Shift+X during a skill replay (`replay_steps`) stops the run.
 13. **Fan-out.** Ask the sidebar to compare 5 package pages. The steps card shows one row per
     sub-agent, each opening to its own steps, and every sub-agent's tab joins the one group.
+14. **Terminal handoff.** After a turn in a Claude chat, ⋯ → Continue in terminal → a folder. A
+    terminal window opens there on the chat (macOS asks once to let Firefox control the terminal
+    app), the panel shows "Continued in your terminal", and a Firefox step in the terminal lands in
+    the chat's tab group. Send a turn there, type `/sidebar`: Claude Code exits and the panel shows
+    that turn. Press `⌃T`: it goes back to the same folder without asking; `⌃T` again brings it
+    back. Reply in the panel: the turn runs in that folder.
 
 ## Bridge tools
 

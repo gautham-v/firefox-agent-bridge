@@ -1488,7 +1488,7 @@ browser.runtime.onConnect.addListener((p) => {
 
 // The panel's keys (focus the message box, new chat, switch chats) work from any page: the
 // command opens the sidebar, which it may as a user action, and the panel there acts on the key.
-const PANEL_KEYS = /^(focus-input|new-chat|switcher|shortcuts|prev-session|next-session|session-[1-9])$/;
+const PANEL_KEYS = /^(focus-input|new-chat|switcher|shortcuts|to-terminal|prev-session|next-session|session-[1-9])$/;
 
 browser.commands.onCommand.addListener((name) => {
   if (name === "stop-agents") return stopAllAgents();
@@ -1510,7 +1510,8 @@ const EVENT_CAP = 1000;
 const ENGINE_NAMES = { claude: "Claude", codex: "Codex" };
 const HOST_DOWN = "The native host is not connected.";
 
-// chat id -> { id, windowId, events, engine, model, effort, status, awaiting, finished, resume, queue, tabIds, groupTimer, title, firstText }
+// chat id -> { id, windowId, events, engine, model, effort, status, awaiting, finished, resume, queue, tabIds, groupTimer, title, firstText,
+//   terminal: { cwd, label, command, opened } while the chat is continued in a terminal }
 const chats = new Map();
 const STARTED_AT = Date.now();
 const RESTORE_MS = 10_000; // a panel that loads this soon after the extension was open when Firefox quit
@@ -1681,6 +1682,7 @@ function offlineReply({ type, requestId, engine, chatId }) {
   if (type === "teach.save") return { type: "teach.saved", requestId, ok: false, error: HOST_DOWN };
   if (type === "chat.load") return { type: "chat.transcript", requestId, chatId, items: [], done: true };
   if (type === "chat.settings") return { type, requestId, hostDown: true };
+  if (type === "chat.handoff" || type === "chat.reclaim") return { type, requestId, chatId, ok: false, error: HOST_DOWN };
   return { type, requestId, engine, available: false, hostDown: true, version: null, error: HOST_DOWN, skills: [], plugins: [], connectors: [], models: [], efforts: [] };
 }
 
@@ -1716,6 +1718,7 @@ function answer(rid, msg) {
   if (msg.type === "chat.transcript") {
     const chat = chats.get(chatId ?? a.chatId);
     for (const item of msg.items ?? []) if (chat) record(chat, item);
+    if (msg.done) a.done?.();
   }
   if (panels.has(a.panel)) post(a.panel, { ...msg, requestId: a.requestId ?? msg.requestId });
 }
@@ -1728,9 +1731,64 @@ function chatFromHost(msg) {
     trackFinished(chat, msg.event);
     if (chat.finished && chat.omni && msg.event.kind === "result") notifyFinished(chat, msg.event);
     deliver(chat.id, msg);
+  } else if (msg.type === "chat.returned") {
+    chatReturned(msg).catch(() => {});
   } else if (msg.requestId != null) {
+    if (msg.type === "chat.handoff" && msg.ok && chats.has(msg.chatId)) setTerminal(chats.get(msg.chatId), { cwd: msg.cwd, label: msg.label, command: msg.command, opened: msg.opened !== false });
     answer(msg.requestId, msg);
   }
+}
+
+// ---- Terminal handoff: a chat continued in a terminal ("Continue in terminal") is the
+// terminal's until it comes back, by the panel's Continue here or /sidebar typed there.
+
+function setTerminal(chat, terminal) {
+  chat.terminal = terminal;
+  deliver(chat.id, { type: "terminal", chatId: chat.id, terminal });
+}
+
+// The terminal added turns the panel never saw: the transcript is read again from the session
+// file, and the next message resumes it.
+function reloadChat(chat, { source = "panel", path } = {}) {
+  chat.events = [];
+  chat.resume = true;
+  const redraw = () => {
+    for (const panel of panels) if (panel.chatId === chat.id) sendState(panel);
+  };
+  if (!port) return redraw();
+  const rid = `b${++requestCount}`;
+  asked.set(rid, { panel: null, chatId: chat.id, type: "chat.load", done: redraw });
+  port.postMessage({ type: "chat.load", requestId: rid, chatId: chat.id, source, path });
+}
+
+// Continue here: the host ends the terminal's Claude Code first, so its last turn is on disk.
+async function reclaimChat(chat) {
+  if (!chat?.terminal) return;
+  await askHost({ type: "chat.reclaim", chatId: chat.id });
+  setTerminal(chat, null);
+  reloadChat(chat);
+}
+
+// /sidebar was typed in a terminal session: its chat is shown in the window the user last used.
+// A session the panel never had (not handed off from here) opens like one from history.
+async function chatReturned(m) {
+  if (!validChatId(m.chatId)) return;
+  const known = chats.get(m.chatId);
+  const windowId = known?.windowId ?? (await lastNormalWindowId());
+  const chat = chatFor(m.chatId, windowId);
+  closedChats.delete(chat.id);
+  if (!known) {
+    chat.engine = "claude";
+    if (typeof m.title === "string") chat.title = m.title.slice(0, 200);
+  }
+  setTerminal(chat, null);
+  reloadChat(chat, { source: m.source === "terminal" ? "terminal" : "panel", path: m.path });
+  windowChat.set(windowId, chat.id);
+  const shown = [...panels].filter((p) => p.windowId === windowId);
+  for (const panel of shown) if (panel.chatId !== chat.id) await showChat(panel, chat);
+  browser.windows.update(windowId, { focused: true }).catch(() => {});
+  // Opening the sidebar needs a user action, which this isn't; it may still be allowed.
+  if (!shown.length) Promise.resolve(browser.sidebarAction.open()).catch(() => {});
 }
 
 // ---- Binding a chat to a tab group
@@ -1962,6 +2020,7 @@ async function sendState(panel) {
     model: chat.model,
     effort: chat.effort,
     teach: teachView(recordings.get(chat.id)),
+    terminal: chat.terminal ?? null,
   });
   panel.ready = true;
 }
@@ -2058,8 +2117,18 @@ const panelCommands = {
     const chat = chatFor(m.chatId ?? panel.chatId, panel.windowId);
     if (sessions.get(chat.id)?.groupId == null) chat.windowId = panel.windowId;
     for (const k of ["engine", "model", "effort"]) if (m[k] != null) chat[k] = m[k];
+    // A message takes the chat back from a terminal (the host ends that Claude Code first).
+    if (chat.terminal) setTerminal(chat, null);
     chat.queue = chat.queue.then(() => sendToHost(chat, m)).catch(() => {});
   },
+
+  // Continue in terminal, in `cwd` (none: the folder this chat, or the last handoff, used). The
+  // reply goes to the panel that asked; every panel showing the chat hears `terminal`.
+  "chat.handoff"(panel, m) {
+    const chat = chats.get(panel.chatId);
+    if (chat) ask(panel, { type: "chat.handoff", requestId: m.requestId, chatId: chat.id, ...(typeof m.cwd === "string" && { cwd: m.cwd }) });
+  },
+  "chat.reclaim": (panel) => reclaimChat(chats.get(panel.chatId)),
 
   async "chat.close"(panel, m) {
     const chat = chats.get(m.chatId ?? panel.chatId);

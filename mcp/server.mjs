@@ -530,7 +530,8 @@ async function handle(msg) {
       if (info && typeof info.name === "string" && info.name) {
         // The chat panel's agent is told apart from the same program run in a terminal, so
         // disconnecting one in Firefox doesn't block the other.
-        const name = process.env.FIREFOX_AGENT_BRIDGE_SESSION ? `${info.name} (sidebar)` : info.name;
+        // (A chat handed to a terminal keeps the session id, and is the terminal's again.)
+        const name = process.env.FIREFOX_AGENT_BRIDGE_SESSION && !process.env.FIREFOX_AGENT_BRIDGE_HANDOFF ? `${info.name} (sidebar)` : info.name;
         clientInfo = { name, version: typeof info.version === "string" ? info.version : null };
       }
       return {

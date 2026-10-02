@@ -47,6 +47,10 @@
       "suggested_key": { "default": "Alt+Shift+Period", "mac": "MacCtrl+Period" },
       "description": "Next session"
     },
+    "to-terminal": {
+      "suggested_key": { "default": "Alt+Shift+T", "mac": "MacCtrl+T" },
+      "description": "Continue the chat in a terminal, or bring it back"
+    },
     "shortcuts": {
       "suggested_key": { "default": "Alt+Shift+H", "mac": "MacCtrl+Shift+K" },
       "description": "Show keyboard shortcuts"
