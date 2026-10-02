@@ -2106,7 +2106,7 @@ function moreMenu() {
       caption("Run Claude Code in"),
       ...folders.map((f) => {
         const [name, parent] = split(f.label);
-        return mi(null, name, { check: true, sel: st.terminalFolder === f.cwd, right: parent, title: f.label, onclick: () => { closeMenu(false); toTerminal(f.cwd); } });
+        return mi(null, name, { check: true, sel: st.terminalFolder === f.cwd, sub: parent || f.label, title: f.label, onclick: () => { closeMenu(false); toTerminal(f.cwd); } });
       }),
       folders.length ? null : note(ready ? "No Claude Code projects yet. Run claude in a folder once." : "The bridge host isn't running."),
     ];

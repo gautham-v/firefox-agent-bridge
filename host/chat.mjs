@@ -315,6 +315,7 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
 
   // Where "Continue in terminal" can run: the folders of the user's Claude Code projects, the
   // most recently used first.
+  const TEMP_DIR = /^\/(private\/)?(tmp|var\/folders)\//;
   function terminalFolders() {
     ensureChatDir();
     const out = [];
@@ -333,7 +334,8 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     const folders = [];
     for (const { name } of out.sort((a, b) => b.at - a.at)) {
       const cwd = projectCwd(name);
-      if (cwd && isDir(cwd) && encodeCwd(realOr(cwd)) === name) folders.push({ cwd, label: tilde(cwd) });
+      // Not scratch folders: sessions run in a temp dir aren't projects to continue in.
+      if (cwd && isDir(cwd) && encodeCwd(realOr(cwd)) === name && !TEMP_DIR.test(cwd)) folders.push({ cwd, label: tilde(cwd) });
       if (folders.length === 8) break;
     }
     const last = settings().terminalFolder;
