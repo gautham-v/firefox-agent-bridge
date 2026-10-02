@@ -168,11 +168,27 @@ EOF
   echo "  native host manifest: $NMH_DIR/$HOST_NAME.json"
 }
 
+# /sidebar in Claude Code: moves the session to the Firefox sidebar (scripts/to-sidebar.mjs).
+install_sidebar_command() {
+  dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/commands"
+  mkdir -p "$dir"
+  cat > "$dir/sidebar.md" <<EOF
+---
+description: Move this session to the Firefox sidebar
+allowed-tools: Bash($NODE:*)
+---
+!\`$NODE $REPO/scripts/to-sidebar.mjs\`
+
+The line above is what happened. Reply with that line only and do nothing else.
+EOF
+}
+
 register_claude_code() {
   if ! command -v claude >/dev/null; then
     echo "Claude Code: skipped, claude is not on PATH."
     return
   fi
+  install_sidebar_command
   current="$(claude mcp get firefox 2>/dev/null || true)"
   if printf '%s\n' "$current" | grep -qxF "  Command: $NODE" && printf '%s\n' "$current" | grep -qxF "  Args: $SERVER"; then
     echo "Claude Code: already registered."

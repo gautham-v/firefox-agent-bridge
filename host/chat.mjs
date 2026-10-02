@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HIDDEN_TOOLS, classifyError, clip, contextBlock, parseResetTime, skillName, skillPrompt, skillSites, summarizePermission, summarizeToolResult, summarizeToolUse, toolMasked, toolTab } from "./chat-format.mjs";
+import { endProcesses, openTerminal, shq } from "./terminal.mjs";
 import { chunkItems, claudeSessionMeta, claudeTitle, claudeTranscript, codexTranscript, encodeCwd, findCodexRollout, isPhoneSession, scanTerminalSessions } from "./chat-history.mjs";
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -92,7 +93,7 @@ const isDir = (p) => {
   }
 };
 
-export function createChat({ send, log = () => {}, home = os.homedir(), env = process.env, idleMs = 10 * 60_000, mcpServer } = {}) {
+export function createChat({ send, log = () => {}, home = os.homedir(), env = process.env, idleMs = 10 * 60_000, mcpServer, terminal = { open: openTerminal, end: endProcesses } } = {}) {
   const dirs = {
     base: path.join(home, ".firefox-agent-bridge"),
     chat: path.join(home, ".firefox-agent-bridge", "chat"),
@@ -208,6 +209,10 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     settingsCache = {
       permissions: PERMISSIONS.includes(saved.permissions) ? saved.permissions : "ask",
       memory: validMemory(saved.memory ?? null) ? (saved.memory ?? null) : null,
+      // Terminal handoff: the app to open (ghostty, iterm, terminal; null picks the first
+      // installed; only set by editing the file) and the folder the last handoff ran in.
+      terminal: typeof saved.terminal === "string" ? saved.terminal : null,
+      terminalFolder: typeof saved.terminalFolder === "string" ? saved.terminalFolder : null,
     };
     return settingsCache;
   }
@@ -215,6 +220,7 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     const next = { ...settings() };
     if (PERMISSIONS.includes(set?.permissions)) next.permissions = set.permissions;
     if (set && "memory" in set && validMemory(set.memory)) next.memory = set.memory === homeMemory() ? null : set.memory;
+    if (typeof set?.terminalFolder === "string") next.terminalFolder = set.terminalFolder;
     settingsCache = next;
     ensureChatDir();
     fs.writeFileSync(`${settingsFile}.tmp`, JSON.stringify(next));
@@ -225,8 +231,9 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
   // The folder a project was started in, from the cwd its session files record; the folder name
   // alone can't be decoded (every non-alphanumeric character became "-").
   const labels = new Map();
-  function projectLabel(name) {
-    if (labels.has(name)) return labels.get(name);
+  const projectCwds = new Map();
+  function projectCwd(name) {
+    if (projectCwds.has(name)) return projectCwds.get(name);
     let cwd = null;
     try {
       const dir = path.join(dirs.projects, name);
@@ -244,6 +251,12 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
       }
     } catch {}
     cwd ??= decodeProject(name);
+    projectCwds.set(name, cwd);
+    return cwd;
+  }
+  function projectLabel(name) {
+    if (labels.has(name)) return labels.get(name);
+    const cwd = projectCwd(name);
     const homeName = encodeCwd(realOr(home));
     const label = cwd ? tilde(cwd) : name === homeName ? "~" : name.startsWith(`${homeName}-`) ? `~/${name.slice(homeName.length + 1)}` : name;
     labels.set(name, label);
@@ -300,9 +313,37 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     return out.sort((a, b) => b.notes - a.notes || a.label.localeCompare(b.label));
   }
 
+  // Where "Continue in terminal" can run: the folders of the user's Claude Code projects, the
+  // most recently used first.
+  function terminalFolders() {
+    ensureChatDir();
+    const out = [];
+    let names = [];
+    try {
+      names = fs.readdirSync(dirs.projects).filter((n) => MEMORY_NAME.test(n) && n !== encodeCwd(chatDirReal));
+    } catch {}
+    for (const name of names) {
+      let at = 0;
+      try {
+        const dir = path.join(dirs.projects, name);
+        for (const f of fs.readdirSync(dir)) if (f.endsWith(".jsonl")) at = Math.max(at, fs.statSync(path.join(dir, f)).mtimeMs);
+      } catch {}
+      out.push({ name, at });
+    }
+    const folders = [];
+    for (const { name } of out.sort((a, b) => b.at - a.at)) {
+      const cwd = projectCwd(name);
+      if (cwd && isDir(cwd) && encodeCwd(realOr(cwd)) === name) folders.push({ cwd, label: tilde(cwd) });
+      if (folders.length === 8) break;
+    }
+    const last = settings().terminalFolder;
+    if (last && isDir(last) && !folders.some((f) => f.cwd === last)) folders.unshift({ cwd: last, label: tilde(last) });
+    return folders;
+  }
+
   function settingsReply(requestId) {
     const s = settings();
-    return { type: "chat.settings", requestId, permissions: s.permissions, memory: s.memory === "off" ? "off" : memoryDir(), memories: memoryOptions() };
+    return { type: "chat.settings", requestId, permissions: s.permissions, memory: s.memory === "off" ? "off" : memoryDir(), memories: memoryOptions(), folders: terminalFolders(), terminalFolder: s.terminalFolder && isDir(s.terminalFolder) ? s.terminalFolder : null };
   }
 
   const MEMORY_GLOB = () => `/${path.join(dirs.projects, "*", "memory", "**")}`;
@@ -516,7 +557,10 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
       const file = path.join(dirs.projects, dir, `${id}.jsonl`);
       if (!fs.existsSync(file)) continue;
       const meta = await claudeSessionMeta(file, fs.statSync(file).size).catch(() => ({}));
-      return { file, cwd: meta.cwd ?? null };
+      // A session moved to another folder (terminal handoff) still opens with its old cwd; the
+      // registry knows where it went.
+      const moved = reg()[id]?.cwd;
+      return { file, cwd: typeof moved === "string" && encodeCwd(moved) === dir ? moved : (meta.cwd ?? null) };
     }
     return null;
   }
@@ -594,6 +638,7 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
   async function sendClaude(c, msg, prep) {
     if (c.proc && c.proc.key !== claudeKey(c)) await stopProc(c, { keep: 1 }); // the message being sent stays
     await c.stopping; // a process that is still shutting down owns the session file until it is gone
+    await endTerminal(c); // and so does a terminal the chat was handed to
     const p = c.proc ?? (await startClaude(c, msg.resume === true));
     clearTimeout(c.idleTimer);
     const content = [
@@ -1033,6 +1078,88 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     await stopProc(c, { keep: 0 });
   }
 
+  // ---- terminal handoff ---------------------------------------------------------------------
+  // "Continue in terminal": the chat's session file moves to the chosen folder's project, and a
+  // terminal window opens there running `claude --resume` on it, with the firefox server pinned
+  // to the chat's id so it keeps the chat's tab group. One side has the chat at a time: the
+  // registry's `terminal` marks it as the terminal's, and going back (the panel's Continue here,
+  // a message, or /sidebar in the terminal) ends that Claude Code first.
+
+  const handoffConfig = (id) => path.join(dirs.chat, "handoff", `${id}.json`);
+
+  async function endTerminal(c) {
+    const r = Object.hasOwn(reg(), c.id) ? reg()[c.id] : null;
+    if (!r?.terminal) return;
+    await terminal.end(handoffConfig(c.id)).catch((e) => log(`chat ${c.id}: ending its terminal failed: ${e.message}`));
+    r.terminal = false;
+    saveRegistry();
+  }
+
+  async function handoff(msg) {
+    const reply = (x) => send({ type: "chat.handoff", requestId: msg.requestId, chatId: msg.chatId, ...x });
+    if (!validId(msg.chatId) || !UUID.test(msg.chatId)) return reply({ ok: false, error: "This chat can't continue in a terminal." });
+    const c = getChat(msg.chatId);
+    if (c.engine !== "claude") return reply({ ok: false, error: "Only Claude chats can continue in a terminal." });
+    if (c.turns > 0) return reply({ ok: false, error: "Wait for the turn to finish, or stop it first." });
+    ensureChatDir();
+    // No folder given (the keyboard shortcut): where this chat last ran, else the last one picked.
+    const saved = Object.hasOwn(reg(), c.id) ? reg()[c.id]?.cwd : null;
+    const wanted = typeof msg.cwd === "string" && msg.cwd ? msg.cwd : saved && saved !== chatDirReal ? saved : settings().terminalFolder;
+    if (!wanted) return reply({ ok: false, pick: true });
+    const cwd = realOr(wanted);
+    if (!path.isAbsolute(cwd) || !isDir(cwd)) return reply({ ok: false, pick: true, error: "That folder doesn't exist any more." });
+    await c.chain;
+    await stopProc(c);
+    const session = await findClaudeSession(c.id, true);
+    if (!session) return reply({ ok: false, error: "Send a message first. There's nothing to continue yet." });
+    const destDir = path.join(dirs.projects, encodeCwd(cwd));
+    if (path.dirname(session.file) !== destDir) {
+      fs.mkdirSync(destDir, { recursive: true });
+      fs.renameSync(session.file, path.join(destDir, `${c.id}.jsonl`));
+      // Sub-agent transcripts and saved tool results sit beside the session file.
+      const side = session.file.replace(/\.jsonl$/, "");
+      if (isDir(side) && !fs.existsSync(path.join(destDir, c.id))) fs.renameSync(side, path.join(destDir, c.id));
+    }
+    const server = firefoxServer(c.id);
+    fs.mkdirSync(path.dirname(handoffConfig(c.id)), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(handoffConfig(c.id), JSON.stringify({ mcpServers: { firefox: { ...server, env: { ...server.env, FIREFOX_AGENT_BRIDGE_HANDOFF: "1" } } } }));
+    // Never wider than the chat had: with Ask before acting, the terminal asks too, whatever
+    // the user's own default mode is. The chat has read web pages.
+    const command = `claude --resume ${c.id} --mcp-config ${shq(handoffConfig(c.id))}${settings().permissions === "ask" ? " --permission-mode default" : ""}`;
+    saveChat(c, { cwd, terminal: true });
+    saveSettings({ terminalFolder: cwd });
+    let opened = true;
+    try {
+      await terminal.open({ cwd, command, app: settings().terminal });
+    } catch (e) {
+      opened = false;
+      log(`chat ${c.id}: couldn't open a terminal: ${e.message}`);
+    }
+    log(`chat ${c.id}: handed to a terminal in ${cwd}`);
+    reply({ ok: true, cwd, label: tilde(cwd), command: `cd ${shq(cwd)} && ${command}`, opened });
+  }
+
+  async function reclaim(msg) {
+    if (validId(msg.chatId)) await endTerminal(getChat(msg.chatId));
+    send({ type: "chat.reclaim", requestId: msg.requestId, chatId: msg.chatId, ok: true });
+  }
+
+  // /sidebar typed in a terminal session (scripts/to-sidebar.mjs, which ends that Claude Code
+  // itself): the panel opens the session. Returns whether there was one to open.
+  async function returned(id) {
+    if (!validId(id) || !UUID.test(id)) return false;
+    const session = await findClaudeSession(id, true);
+    if (!session) return false;
+    const r = Object.hasOwn(reg(), id) ? reg()[id] : null;
+    if (r?.terminal) {
+      r.terminal = false;
+      saveRegistry();
+    }
+    const meta = await claudeSessionMeta(session.file, fs.statSync(session.file).size).catch(() => ({}));
+    send({ type: "chat.returned", chatId: id, source: r ? "panel" : "terminal", path: session.file, title: r?.title ?? meta.title ?? null });
+    return true;
+  }
+
   // ---- history ------------------------------------------------------------------------------
 
   async function history() {
@@ -1273,6 +1400,8 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     "chat.close": guarded("chat.close", onClose),
     "chat.history": guarded("chat.history", async (msg) => send({ type: "chat.history", requestId: msg.requestId, chats: await history() })),
     "chat.load": guarded("chat.load", load),
+    "chat.handoff": guarded("chat.handoff", handoff),
+    "chat.reclaim": guarded("chat.reclaim", reclaim),
     "chat.settings": guarded("chat.settings", (msg) => {
       if (msg.set && typeof msg.set === "object") saveSettings(msg.set);
       send(settingsReply(msg.requestId));
@@ -1291,6 +1420,7 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
       else log(`ignoring unknown ${msg.type}`);
       return true;
     },
+    returned,
     shutdown() {
       for (const c of chats.values()) {
         clearTimeout(c.idleTimer);

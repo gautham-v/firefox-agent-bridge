@@ -202,6 +202,7 @@ p, ul, ol, pre, blockquote, h4 { margin: 0; }
 .banner > .ico, .perm > .ico { width: 16px; height: 16px; margin-top: 1px; }
 .banner b, .perm b { font-weight: 600; overflow-wrap: anywhere; }
 .banner .d, .perm .d { grid-column: 2; font-size: 12px; line-height: 17px; color: var(--p-ink2); overflow-wrap: anywhere; }
+.banner .d code { font: 11px/1.4 var(--mono); overflow-wrap: anywhere; user-select: text; }
 /* The whole command or input is shown, so a long one scrolls inside the card. */
 .perm .d code { display: block; white-space: pre-wrap; max-height: 160px; overflow-y: auto; font: 11.5px/1.4 var(--mono); background: var(--p-fill); padding: 4px 6px; border-radius: 4px; }
 .bs { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }

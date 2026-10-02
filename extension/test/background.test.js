@@ -2396,3 +2396,46 @@ test("show tabs: navigate without a tab and tabs_context_mcp createIfEmpty open 
   await callTool("tabs_create_mcp", {}, "s-ctx", { id: 3, name: "claude-code" });
   assert.deepEqual(active(), [1]);
 });
+
+// ---- Terminal handoff
+
+test("a chat handed to a terminal steps aside in every panel, and comes back by Continue here or /sidebar", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await env.host({ type: "chat.event", chatId: a.chatId, event: { kind: "user", text: "hi", attachments: [] } });
+  await a.send("chat.handoff", { requestId: "h1", cwd: "/repo" });
+  const asked = env.sentToHost("chat.handoff").at(-1);
+  assert.deepEqual([asked.chatId, asked.cwd], [a.chatId, "/repo"]);
+  await env.host({ type: "chat.handoff", requestId: asked.requestId, chatId: a.chatId, ok: true, cwd: "/repo", label: "~/repo", command: "cd /repo && claude", opened: true });
+  const terminal = { cwd: "/repo", label: "~/repo", command: "cd /repo && claude", opened: true };
+  assert.deepEqual(a.of("terminal"), [{ type: "terminal", chatId: a.chatId, terminal }]);
+  assert.equal(a.of("chat.handoff")[0].requestId, "h1", "the reply keeps the panel's request id");
+  assert.deepEqual((await env.panel()).of("state")[0].terminal, terminal, "a panel opened later sees it too");
+
+  // Continue here: the host ends the terminal's Claude Code, then the transcript is read again.
+  const reclaimed = a.send("chat.reclaim");
+  await wait(10);
+  const rec = env.sentToHost("chat.reclaim").at(-1);
+  await env.host({ type: "chat.reclaim", requestId: rec.requestId, chatId: a.chatId, ok: true });
+  await reclaimed;
+  assert.equal(a.of("terminal").at(-1).terminal, null);
+  const load_ = env.sentToHost("chat.load").at(-1);
+  assert.equal(load_.chatId, a.chatId);
+  await env.host({ type: "chat.transcript", requestId: load_.requestId, chatId: a.chatId, items: [{ kind: "user", text: "hi" }, { kind: "user", text: "from the terminal" }], done: true });
+  await wait(20);
+  assert.deepEqual(a.of("state").at(-1).events.map((e) => e.text), ["hi", "from the terminal"]);
+
+  // /sidebar in a terminal session the panel never had: it opens in the window's panel.
+  await env.host({ type: "chat.returned", chatId: "11111111-1111-4111-8111-111111111111", source: "terminal", path: "/p/s.jsonl", title: "Elsewhere" });
+  await wait(20);
+  assert.equal(a.of("state").at(-1).chatId, "11111111-1111-4111-8111-111111111111");
+  assert.deepEqual([env.sentToHost("chat.load").at(-1).source, env.sentToHost("chat.load").at(-1).path], ["terminal", "/p/s.jsonl"]);
+});
+
+test("the to-terminal key reaches the panel", async () => {
+  const env = await load();
+  const a = await env.panel();
+  await env.browser.commands.onCommand.fire("to-terminal");
+  await wait(50);
+  assert.deepEqual(a.of("key"), [{ type: "key", name: "to-terminal" }]);
+});

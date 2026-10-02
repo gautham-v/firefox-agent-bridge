@@ -115,6 +115,40 @@ Out of scope for now: turning connectors on and off per chat, and voice input.
 - The `claude` and `codex` binaries are found from `CLAUDE_BIN` / `CODEX_BIN` (written into the
   host launcher by `install.sh`), then common install paths, then a login shell's `command -v`.
 
+## Terminal handoff
+
+The ⋯ menu's **Continue in terminal** (or its shortcut, Ctrl+T on a Mac, Alt+Shift+T elsewhere)
+moves a Claude chat to Claude Code in a terminal window, and back.
+
+- To the terminal: the menu lists the folders of the user's Claude Code projects, most recent
+  first. The host (`chat.handoff`) stops the chat's process, moves its session file (and the
+  folder beside it) to that folder's project under `~/.claude/projects/`, records the folder as
+  the chat's `cwd` and `terminal: true` in the registry, and opens a terminal window there
+  (`host/terminal.mjs`) with `claude --resume <chatId> --mcp-config
+  ~/.firefox-agent-bridge/chat/handoff/<chatId>.json` typed into the user's shell. That config
+  pins the firefox server's session to the chat id, so the terminal works in the chat's tab
+  group. With Ask before acting, the command also passes `--permission-mode default`: the chat
+  has read web pages, and the user's own default mode may not ask. The shortcut sends no folder
+  and uses the one the chat last ran in, else the last one picked; with neither, the reply has
+  `pick: true` and the panel opens the folder list.
+- Terminal app: Ghostty (1.3+), iTerm, then Terminal on macOS, the first installed, by
+  AppleScript (macOS asks once to let Firefox control it); `x-terminal-emulator` on Linux.
+  `"terminal": "iterm"` in `chat/settings.json` picks one. When no window opens, the reply has
+  `opened: false` and the panel shows the command to paste.
+- While it is the terminal's, the panel shows a banner and the message box is off. Only one
+  side has the chat at a time.
+- Back to the sidebar: **Continue here** (banner, menu, or the same shortcut) sends
+  `chat.reclaim`; the host ends the Claude Code it started (matched by its `--mcp-config` file)
+  and the transcript is read again from the session file. A message sent to the chat does the
+  same first. Or type `/sidebar` in the terminal: the command `install.sh` writes to
+  `~/.claude/commands/sidebar.md` runs `scripts/to-sidebar.mjs`, which tells the host over
+  `bridge.sock` (`{type: "sidebar", session}`, answered `{ok}`), then ends its own Claude Code.
+  The host sends the extension `chat.returned {chatId, source, path, title}` and the chat shows
+  in the last used window's panel. `/sidebar` works in any Claude Code session; one that
+  didn't start in the panel opens like a "From your terminal" history row (no tab group).
+- Afterwards the chat keeps running in that folder from the sidebar too, with the folder's own
+  memory, and Claude Code doesn't ask before reading files inside it.
+
 ## Native messaging (extension <-> host)
 
 All chat messages have `type` starting with `chat.`. Host-to-extension messages must stay under
@@ -135,6 +169,8 @@ Extension to host:
 | `chat.load` | `requestId`, `chatId`, `source` (`panel` \| `terminal`), `path` for terminal sessions |
 | `chat.capabilities` | `requestId`, `engine` |
 | `chat.settings` | `requestId`, `set?: {permissions?, memory?}` (a memory folder outside `~/.claude/projects/*/memory` is ignored) |
+| `chat.handoff` | `requestId`, `chatId`, `cwd?` (Terminal handoff) |
+| `chat.reclaim` | `requestId`, `chatId` |
 | `teach.save` | Teach's Save and Try it once ([docs/teach.md](teach.md)): `requestId`, `chatId`, `engine`, `mode`, `draft`, `recording`, `replay`, `replace`, `shots` |
 
 Host to extension:
@@ -145,7 +181,10 @@ Host to extension:
 | `chat.history` | `requestId`, `chats: [{id, title, updatedAt, engine, model, source, origin?, cwd, path, running}]`, newest first; `updatedAt` is epoch ms; `running` means a turn is in progress; `origin: "phone"` marks a chat-folder session with a `bridge-session` entry, i.e. one started by `claude remote-control` (the panel shows "From phone"); `source: "terminal"` for Claude Code sessions outside the chat folder that used `mcp__firefox__` tools in the last 14 days (at most 30; panel chats at most 100) |
 | `chat.transcript` | `requestId`, `chatId`, `items` (the same shapes as events, each with its `kind`: `user`, `text`, `tool_start`, `tool_end`, `result`), `done`; the last 1500 items, in chunks under 600 KB |
 | `teach.saved` | `requestId`, `ok`, `dir`, `replayPath`, or `error` (and `exists` when a skill of that name is there) |
-| `chat.settings` | `requestId`, `permissions`, `memory` (the folder in use, or `"off"`), `memories: [{dir, label, notes}]` |
+| `chat.settings` | `requestId`, `permissions`, `memory` (the folder in use, or `"off"`), `memories: [{dir, label, notes}]`, `folders: [{cwd, label}]` (where a handoff can run, at most 9), `terminalFolder` (the last one used, or null) |
+| `chat.handoff` | `requestId`, `chatId`, `ok`, then `cwd`, `label`, `command`, `opened`, or `error` and/or `pick` |
+| `chat.reclaim` | `requestId`, `chatId`, `ok` |
+| `chat.returned` | `chatId`, `source` (`panel` \| `terminal`), `path`, `title` (after `/sidebar` in a terminal) |
 | `chat.capabilities` | `requestId`, `engine`, `available`, `version`, `error`, `skills: [{name, description, sites}]`, `plugins: [{name}]`, `connectors: [{name, status}]`, `models: [{id, label, efforts?, default?}]`, `efforts` |
 
 Capabilities cost no model tokens: for Claude Code the host asks a prompt-less `claude -p` for its

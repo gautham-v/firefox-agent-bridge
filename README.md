@@ -349,6 +349,7 @@ tabs from the group (the chat stays in Recent tasks).
 | `⌃1` to `⌃9` | Go to that open chat |
 | `⌃,` `⌃.` | Previous / next chat |
 | `⌃K` | Switcher: search open chats and history, arrows and Enter to open |
+| `⌃T` | Continue the chat in a terminal, or bring it back |
 | `⌥⇧X` | Stop all agents |
 
 These work from any page and can be changed in Firefox under Add-ons and themes, the gear menu,
@@ -356,6 +357,15 @@ Manage Extension Shortcuts (on Windows and Linux they default to Alt+Shift inste
 While the panel has focus: Enter sends, Shift+Enter adds a line, Esc stops the turn or closes a
 menu, `⌃↩` and `⌃⌫` allow or deny a permission request, `⌃W` closes the chat and `⌃M` opens the
 model menu. The ⋯ menu's Keyboard shortcuts lists them all.
+
+### Continue in a terminal
+
+The ⋯ menu's Continue in terminal (or `⌃T`) moves a Claude chat to Claude Code in a terminal
+window: pick the folder it should run in, and a window opens there with the conversation and the
+same tab group. The panel steps aside while the terminal has the chat. To come back, type
+`/sidebar` in the terminal, or use Continue here in the panel (or `⌃T` again); the panel then shows
+what the terminal did. With Ask before acting, the terminal asks before acting too. Details and
+the terminal apps it can open are in [docs/chat-panel.md](docs/chat-panel.md), "Terminal handoff".
 
 ### Fan-out
 
