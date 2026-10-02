@@ -434,6 +434,21 @@ this.claudePage = class extends ExtensionAPI {
           return browser.docShellIsActive;
         }),
 
+        // Moves keyboard focus to the window's extension sidebar panel, or back to the page. The
+        // panel is a browser inside the sidebar's own document. Answers whether it was found.
+        focusPanel: surfaced(async (windowId, panel) => {
+          const win = context.extension.windowManager.get(windowId, context).window;
+          if (!panel) {
+            win.gBrowser.selectedBrowser.focus();
+            return true;
+          }
+          const sidebar = win.SidebarController?.browser ?? win.document.getElementById("sidebar");
+          const inner = sidebar?.contentDocument?.getElementById("webext-panels-browser");
+          if (!inner) return false;
+          inner.focus();
+          return true;
+        }),
+
         // Keeps the windows holding these (session) tabs rendering while occluded, and lets go of
         // windows it kept before that hold none of them now. Answers how many windows it keeps.
         keepRendering: surfaced(async (tabIds) => {

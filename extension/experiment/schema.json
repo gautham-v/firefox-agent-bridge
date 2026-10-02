@@ -131,6 +131,22 @@
         ]
       },
       {
+        "name": "focusPanel",
+        "type": "function",
+        "async": true,
+        "description": "Move keyboard focus to the window's extension sidebar panel, or back to the page.",
+        "parameters": [
+          {
+            "name": "windowId",
+            "type": "integer"
+          },
+          {
+            "name": "panel",
+            "type": "boolean"
+          }
+        ]
+      },
+      {
         "name": "keepRendering",
         "type": "function",
         "async": true,

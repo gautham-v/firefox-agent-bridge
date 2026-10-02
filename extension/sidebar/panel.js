@@ -141,12 +141,16 @@ function whenLabel(t) {
   return d.toLocaleDateString([], { month: "short", day: "numeric", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
 }
 
-// "Alt+Shift+X" reads as "⌥⇧X" on a Mac.
+// "Alt+Shift+X" reads as "⌥⇧X" on a Mac, and "MacCtrl+Comma" as "⌃,".
+const MAC = /Mac/.test(navigator.platform);
 function formatShortcut(key) {
-  if (!/Mac/.test(navigator.platform)) return key;
-  const sym = { Alt: "⌥", Shift: "⇧", Ctrl: "⌘", Command: "⌘", MacCtrl: "⌃" };
-  return key.split("+").map((k) => sym[k] ?? k).join("");
+  const keys = { Comma: ",", Period: ".", Enter: "↩", Backspace: "⌫" };
+  const mods = MAC ? { Alt: "⌥", Shift: "⇧", Ctrl: "⌘", Command: "⌘", MacCtrl: "⌃" } : {};
+  return key.split("+").map((k) => mods[k] ?? keys[k] ?? k).join(MAC ? "" : "+");
 }
+// The panel's own keys: Control on a Mac, where Firefox leaves it alone, Alt+Shift elsewhere.
+const PANEL_MOD = MAC ? "MacCtrl" : "Alt+Shift";
+const panelMod = (e) => (MAC ? e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey : e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey);
 
 // ---------------------------------------------------------------------------------------------
 // Minimal markdown, built as DOM nodes. Paragraphs, headings, lists, quotes, code, tables, bold,
@@ -402,10 +406,11 @@ const S = {
   unechoed: null, // what was just sent, kept until the host echoes it
   resumeNext: false,
   stick: true,
-  shortcut: "",
+  keys: {}, // command name -> its shortcut as Firefox has it, e.g. "MacCtrl+K"
+  chats: [], // the open chats, oldest first: {id, title, state, tabs}
   fresh: new Map(), // tab id -> when it joined the group
   tabInfo: new Map(), // tab id -> {url, title, favIconUrl} as last seen, for sub-agents' closed tabs
-  ui: { menu: null, sheet: null, tray: false },
+  ui: { menu: null, sheet: null, tray: false, switcher: null },
   windowTabs: [],
   pendingAdd: null, // a tab to add once the chat's group exists
   rec: null, // the chat's Teach recording: {id, site, start, startedAt, stopped, drafted, steps, shots}
@@ -613,7 +618,15 @@ function onMessage(m) {
     case "chat.history":
       if (m.requestId !== historyRequest) return;
       S.history = m.chats ?? [];
+      fillSwitcher();
       return fillHistory();
+    case "chats":
+      S.chats = m.chats ?? [];
+      if (S.ui.menu?.id === "chats") renderMenu();
+      fillSwitcher();
+      return render("title");
+    case "key":
+      return onKey(m.name);
     case "chat.settings":
       S.settings = m;
       if (S.ui.menu) renderMenu();
@@ -687,6 +700,7 @@ function onState(s) {
   if (switched) {
     closeMenu(false);
     closeSheet();
+    closeSwitcher(false);
   }
   render();
 }
@@ -762,8 +776,16 @@ function flush() {
 }
 
 function renderHead() {
-  $("history-btn").classList.toggle("on", S.ui.sheet === "history");
-  $("more-btn").classList.toggle("on", S.ui.menu?.id === "more" || S.ui.sheet === "agents");
+  $("title").classList.toggle("on", S.ui.menu?.id === "chats" || S.ui.sheet === "history");
+  $("more-btn").classList.toggle("on", S.ui.menu?.id === "more" || S.ui.sheet === "agents" || S.ui.sheet === "keys");
+}
+
+// The same shapes as the tab group labels: an outline pointer when idle, solid purple while
+// working, a ring with a dot when it needs you, pause bars, a check for a finished turn not yet seen.
+const STATE_LABELS = { idle: "Idle", working: "Working", needs: "Needs you", paused: "Paused", done: "Done" };
+function stateIcon(state) {
+  const name = { needs: "record", paused: "pause", done: "check" }[state] ?? "pointer";
+  return icon(name, state === "working" ? "st work" : "st");
 }
 
 function chatTitle() {
@@ -777,14 +799,15 @@ function renderTitle() {
   const recording = recordingShown();
   const chat = S.turns.length > 0 || S.loading || recording;
   $("title").parentElement.classList.toggle("chat", chat);
-  let live = null;
   // Recording is the user acting, not the agent: ink with a red dot, never the agent's purple.
-  if (recording && !S.rec.stopped) live = el("span", { class: "live rec" }, el("span", { class: "rdot" }), el("span", { "data-since": String(S.rec.startedAt), text: `Recording ${clock(Date.now() - S.rec.startedAt)}` }));
-  else if (S.paused) live = el("span", { class: "live p" }, icon("pause"), "Paused");
-  else if (pendingPermission()) live = el("span", { class: "live p" }, "Needs approval");
-  else if (isRunning()) live = el("span", { class: "live" }, icon("pointer"), "Working");
+  const live = recording && !S.rec.stopped ? el("span", { class: "live rec" }, el("span", { class: "rdot" }), el("span", { "data-since": String(S.rec.startedAt), text: `Recording ${clock(Date.now() - S.rec.startedAt)}` })) : null;
+  const state = S.paused ? "paused" : pendingPermission() ? "needs" : isRunning() ? "working" : "idle";
   const t = recording ? "New skill" : chat ? chatTitle() : "New chat";
-  fill($("title"), el("span", { class: chat ? "t" : "t new", text: t, title: t }), live);
+  // How many chats are open, when there are others; filled in when one of them is waiting on you.
+  const others = S.chats.filter((c) => c.id !== S.chatId);
+  const count = others.length ? el("span", { class: `cnt${others.some((c) => c.state === "needs") ? " att" : ""}`, text: String(S.chats.length + (others.length === S.chats.length ? 1 : 0)) }) : null;
+  $("title").title = `${t}${S.keys.switcher ? ` (switch: ${formatShortcut(S.keys.switcher)})` : ""}`;
+  fill($("title"), live ? null : stateIcon(state), el("span", { class: chat ? "t" : "t new", text: t }), count, icon("chevd", "chev"), live);
 }
 
 // ---- Conversation
@@ -1145,18 +1168,20 @@ function stepsBlock(t) {
 
 const prettyTool = (name) => (isFirefoxTool(name) ? `Firefox ${name.slice(13).replace(/_(mcp|tool)$/, "").replace(/_/g, " ")}` : humanize(name));
 
+function answerPermission(b, decision) {
+  b.decision = decision;
+  for (const t of S.turns) t.dirty = true;
+  post("chat.permission", { chatId: S.chatId, requestId: b.requestId, decision });
+  render("head", "title", "body");
+}
+
 function permBlock(b) {
   if (b.decision === "resolved") return null;
   if (b.decision) {
     const allowed = b.decision !== "deny";
     return el("div", { class: "note" }, icon(allowed ? "check" : "x"), `${allowed ? (b.decision === "allow_always" ? "Always allowed" : "Allowed") : "Denied"}: ${prettyTool(b.tool)}`);
   }
-  const answer = (decision) => () => {
-    b.decision = decision;
-    for (const t of S.turns) t.dirty = true;
-    post("chat.permission", { chatId: S.chatId, requestId: b.requestId, decision });
-    render("head", "title", "body");
-  };
+  const answer = (decision) => () => answerPermission(b, decision);
   return el(
     "div",
     { class: "perm", role: "group", "aria-label": "Permission request" },
@@ -1586,7 +1611,190 @@ function openChat(c) {
     S.loading = false;
     render();
   }, 8000);
-  post("chat.open", { chatId: c.id, source: c.source, path: c.path, engine: c.engine, model: c.model });
+  post("chat.open", { chatId: c.id, source: c.source, path: c.path, engine: c.engine, model: c.model, title: c.title ?? "" });
+}
+
+// ---- Open chats: switching, closing, and the keys that do it
+
+function switchTo(id) {
+  if (id && id !== S.chatId) post("chat.open", { chatId: id });
+}
+
+function stepChat(by) {
+  const n = S.chats.length;
+  if (!n) return;
+  const at = S.chats.findIndex((c) => c.id === S.chatId);
+  switchTo(S.chats[at < 0 ? (by > 0 ? 0 : n - 1) : (at + by + n) % n].id);
+}
+
+const closeSession = (id) => post("chat.close", { chatId: id });
+
+// The page keeps keyboard focus when the sidebar opens, so the background moves it here.
+function focusInput() {
+  post("focus", { panel: true });
+  $("input").focus();
+}
+
+// The extension shortcut a key press is, if any: "MacCtrl+Shift+K" -> "shortcuts". A text box
+// takes some of these for itself (Control+K deletes to the end of the line on a Mac) before
+// Firefox sees them, so the panel answers them from its own keydown too.
+function commandFor(e) {
+  const key = /^Key[A-Z]$/.test(e.code) ? e.code.slice(3) : /^Digit\d$/.test(e.code) ? e.code.slice(5) : ["Comma", "Period"].includes(e.code) ? e.code : null;
+  if (!key) return null;
+  const mods = [e.ctrlKey && (MAC ? "MacCtrl" : "Ctrl"), e.altKey && "Alt", e.metaKey && "Command", e.shiftKey && "Shift"].filter(Boolean);
+  const pressed = [...mods, key].join("+");
+  const name = Object.keys(S.keys).find((n) => S.keys[n].replace(/\s+/g, "") === pressed);
+  return name && name !== "stop-agents" && !name.startsWith("_") ? name : null;
+}
+
+// A shortcut pressed anywhere in the window (background.js, PANEL_KEYS), or here (commandFor).
+// Firefox may deliver one press both ways; the second is dropped.
+let lastKey = { name: "", at: 0 };
+function onKey(name) {
+  const now = Date.now();
+  if (lastKey.name === name && now - lastKey.at < 300) return;
+  lastKey = { name, at: now };
+  if (name === "switcher") {
+    post("focus", { panel: true });
+    return S.ui.switcher ? closeSwitcher() : openSwitcher();
+  }
+  closeSwitcher(false);
+  if (name === "shortcuts") {
+    post("focus", { panel: true });
+    return openSheet("keys");
+  }
+  closeMenu(false);
+  if (name === "focus-input") {
+    // Pressed again in the message box, it goes back to the page.
+    if (document.hasFocus() && document.activeElement === $("input")) return post("focus", { panel: false });
+    closeSheet();
+  } else if (name === "new-chat") newChat();
+  else if (name === "prev-session") stepChat(-1);
+  else if (name === "next-session") stepChat(1);
+  else if (name.startsWith("session-")) switchTo(S.chats[Number(name.slice(8)) - 1]?.id);
+  focusInput();
+}
+
+function answerPending(decision) {
+  const b = pendingPermission();
+  if (b) answerPermission(b, decision);
+  return !!b;
+}
+
+const sessionTitle = (c) => (c.id === S.chatId ? chatTitle() : c.title || "New chat");
+
+function palRow({ lead, title, sub, working, tabs = [], current, hi, onclick, onclose }) {
+  return el(
+    "div",
+    { class: `srow${current ? " sel" : ""}${hi ? " hi" : ""}` },
+    el(
+      "button",
+      { class: "mi", role: "menuitem", onclick, title },
+      lead,
+      el("span", { class: "l" }, el("span", { class: "t", text: title }), el("span", { class: `sub${working ? " a" : ""}`, text: sub })),
+      tabs.length ? el("span", { class: "favs" }, tabs.slice(0, 3).map((t) => fav(t))) : null,
+    ),
+    onclose ? el("button", { class: "x", "aria-label": "Close session", title: `Close session (${formatShortcut(`${PANEL_MOD}+W`)})`, onclick: onclose }, icon("x")) : null,
+  );
+}
+
+function sessionRow(c, { tabNames = false, ...rest } = {}) {
+  const names = c.tabs.map((t) => siteName(t.url) || t.title).filter(Boolean).join(", ");
+  const sub = tabNames && names ? names : [STATE_LABELS[c.state], c.tabs.length ? plural(c.tabs.length, "tab") : null].filter(Boolean).join(" · ");
+  return palRow({ lead: stateIcon(c.state), title: sessionTitle(c), sub, working: c.state === "working" && !tabNames, tabs: c.tabs, current: c.id === S.chatId, ...rest });
+}
+
+function chatsMenu() {
+  const k = (name) => (S.keys[name] ? formatShortcut(S.keys[name]) : "");
+  const go = (c) => () => { closeMenu(false); switchTo(c.id); };
+  return [
+    ...(S.chats.length ? S.chats.map((c) => sessionRow(c, { onclick: go(c), onclose: () => closeSession(c.id) })) : [note("No open sessions yet.")]),
+    sep(),
+    mi("compose", "New chat", { right: k("new-chat"), onclick: newChat }),
+    mi("search", "Switch session", { right: k("switcher"), onclick: () => { closeMenu(false); openSwitcher(); } }),
+    mi("history", "Recent tasks", { onclick: () => { closeMenu(false); openSheet("history"); } }),
+  ];
+}
+
+// ---- The switcher: open chats and recent ones, filtered as you type.
+
+function closeSwitcher(refocus = true) {
+  if (!S.ui.switcher) return;
+  S.ui.switcher = null;
+  $("layer-pal").replaceChildren();
+  if (refocus) $("input").focus();
+}
+
+function openSwitcher() {
+  closeMenu(false);
+  closeSheet();
+  closeSlash();
+  S.ui.switcher = { q: "", index: 0, items: [] };
+  S.history = null;
+  historyRequest = `hist${++requestCount}`;
+  post("chat.history", { requestId: historyRequest });
+  const input = el("input", { type: "text", placeholder: "Search sessions and history", "aria-label": "Search sessions and history", spellcheck: 0 });
+  input.addEventListener("input", () => {
+    Object.assign(S.ui.switcher, { q: input.value, index: 0 });
+    fillSwitcher();
+  });
+  $("layer-pal").replaceChildren(
+    el("div", { class: "scrim dim", onmousedown: () => closeSwitcher() }),
+    el("div", { class: "pal", role: "dialog", "aria-label": "Switch session" }, el("div", { class: "srch" }, icon("search"), input), el("div", { class: "plist", id: "plist" })),
+  );
+  fillSwitcher();
+  input.focus();
+}
+
+function switcherItems(q) {
+  const hit = (...parts) => !q || parts.join(" ").toLowerCase().includes(q);
+  const open = S.chats.filter((c) => hit(sessionTitle(c), ...c.tabs.map((t) => `${t.title} ${hostOf(t.url)}`)));
+  const ids = new Set(S.chats.map((c) => c.id));
+  const earlier = (S.history ?? []).filter((c) => !ids.has(c.id) && hit(c.title ?? "", c.cwd ?? ""));
+  return [...open.map((c) => ({ open: true, c })), ...earlier.slice(0, q ? 20 : 6).map((c) => ({ open: false, c }))];
+}
+
+function pickSwitcher(item) {
+  closeSwitcher();
+  if (item.open) switchTo(item.c.id);
+  else openChat(item.c);
+}
+
+function fillSwitcher() {
+  const sw = S.ui.switcher;
+  const box = $("plist");
+  if (!sw || !box) return;
+  sw.items = switcherItems(sw.q.trim().toLowerCase());
+  sw.index = Math.min(sw.index, Math.max(0, sw.items.length - 1));
+  const rows = [];
+  sw.items.forEach((item, i) => {
+    if (i === 0 || sw.items[i - 1].open !== item.open) rows.push(el("div", { class: "mcap", text: item.open ? "Open" : "Earlier" }));
+    const c = item.c;
+    const row = item.open
+      ? sessionRow(c, { tabNames: true, hi: i === sw.index, onclick: () => pickSwitcher(item), onclose: () => closeSession(c.id) })
+      : palRow({ lead: icon("history"), title: c.title || "Untitled", sub: c.source === "terminal" ? `Terminal · ${shortCwd(c.cwd)}` : whenLabel(c.updatedAt), hi: i === sw.index, onclick: () => pickSwitcher(item) });
+    rows.push(row);
+  });
+  if (!rows.length) rows.push(note(S.history == null ? "Loading…" : "No matching sessions."));
+  fill(box, rows);
+  box.querySelector(".srow.hi")?.scrollIntoView({ block: "nearest" });
+}
+
+function switcherKey(e) {
+  const sw = S.ui.switcher;
+  if (!sw || e.isComposing) return false;
+  const item = sw.items[sw.index];
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    if (sw.items.length) sw.index = (sw.index + (e.key === "ArrowDown" ? 1 : -1) + sw.items.length) % sw.items.length;
+    fillSwitcher();
+  } else if (e.key === "Enter") {
+    if (item) pickSwitcher(item);
+  } else if (e.key === "Escape") closeSwitcher();
+  else if (panelMod(e) && e.code === "KeyW") {
+    if (item?.open) closeSession(item.c.id);
+  } else return false;
+  e.preventDefault();
+  return true;
 }
 
 function openLink(url) {
@@ -1850,13 +2058,14 @@ function moreMenu() {
   const memoryLabel = !ready ? "" : st.memory === "off" ? "Off" : (memories.find((m) => m.dir === st.memory)?.label ?? "");
   return [
     mi("list", "Agents and activity", { onclick: () => { closeMenu(false); openSheet("agents"); } }),
-    mi("stop", "Stop all agents", { right: S.shortcut, onclick: () => { closeMenu(false); post("stopAll"); } }),
+    mi("stop", "Stop all agents", { right: formatShortcut(S.keys["stop-agents"] || "Alt+Shift+X"), onclick: () => { closeMenu(false); post("stopAll"); } }),
     sep(),
     caption("Claude Code permissions"),
     mi(null, "Ask before acting", { check: true, sel: st?.permissions === "ask", disabled: !ready, onclick: () => setSetting({ permissions: "ask" }) }),
     mi(null, "Don't ask", { check: true, sel: st?.permissions === "bypass", disabled: !ready, sub: "Even if a page tells it to", onclick: () => setSetting({ permissions: "bypass" }) }),
     mi("file", "Memory", { disabled: !ready, right: [memoryLabel, icon("chevr")], onclick: () => { S.ui.menu.view = "memory"; renderMenu(); } }),
-    S.popout ? null : sep(),
+    sep(),
+    mi("skills", "Keyboard shortcuts", { right: S.keys.shortcuts ? formatShortcut(S.keys.shortcuts) : "", onclick: () => { closeMenu(false); openSheet("keys"); } }),
     S.popout ? null : mi("popout", "Pop out", { onclick: () => { closeMenu(false); post("popout"); } }),
   ];
 }
@@ -1865,16 +2074,16 @@ function renderMenu() {
   const m = S.ui.menu;
   const host = $("layer-menu");
   if (!m) return host.replaceChildren();
-  const rows = m.id === "plus" ? plusMenu() : m.id === "model" ? modelMenu() : m.id === "addtab" ? [caption("Add another tab"), ...tabRows()] : moreMenu();
+  const rows = m.id === "plus" ? plusMenu() : m.id === "model" ? modelMenu() : m.id === "addtab" ? [caption("Add another tab"), ...tabRows()] : m.id === "chats" ? chatsMenu() : moreMenu();
   const menu = el("div", { class: "menu", role: "menu", tabIndex: -1 }, rows);
   const scrim = el("div", { class: "scrim", onmousedown: () => closeMenu(false) });
   host.replaceChildren(scrim, menu);
   // Place it against its button, above for the composer's menus and below for the header's.
   const pr = $("app").getBoundingClientRect();
   const ar = (m.anchor.isConnected ? m.anchor : $("composer")).getBoundingClientRect();
-  const width = Math.min(m.id === "more" ? 236 : 260, pr.width - 16);
+  const width = Math.min(m.id === "more" ? 236 : m.id === "chats" ? 340 : 260, pr.width - 16);
   menu.style.width = `${width}px`;
-  const above = m.id !== "more";
+  const above = m.id !== "more" && m.id !== "chats";
   if (above) {
     menu.style.bottom = `${pr.bottom - ar.top + 6}px`;
     menu.style.maxHeight = `${Math.max(120, ar.top - pr.top - 12)}px`;
@@ -1888,7 +2097,7 @@ function renderMenu() {
   menu.addEventListener("keydown", (e) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
-    const items = [...menu.querySelectorAll("button:not(:disabled)")];
+    const items = [...menu.querySelectorAll("button:not(:disabled):not(.x)")];
     const at = items.indexOf(document.activeElement); // -1 while the menu itself has focus
     const down = e.key === "ArrowDown";
     items[at < 0 ? (down ? 0 : items.length - 1) : (at + (down ? 1 : -1) + items.length) % items.length]?.focus();
@@ -2028,6 +2237,8 @@ function openSheet(name) {
         el("iframe", { class: "frame", src: `../popup/popup.html?${q}`, title: "Agents and activity" }),
       ),
     );
+  } else if (name === "keys") {
+    host.replaceChildren(el("div", { class: "sheet" }, el("div", { class: "sh" }, el("button", { class: "ib", "aria-label": "Back", title: "Back", onclick: closeSheet }, icon("back")), "Keyboard shortcuts"), keysList()));
   } else {
     S.historyQuery = "";
     S.history = null;
@@ -2043,6 +2254,36 @@ function openSheet(name) {
     input.focus();
   }
   render("head");
+}
+
+// Every key the panel answers to. The first group are Firefox's extension shortcuts, shown as
+// they are bound now; the second only work while the panel has focus.
+function keysList() {
+  const k = (name) => (S.keys[name] ? formatShortcut(S.keys[name]) : "Not set");
+  const own = (key) => formatShortcut(`${PANEL_MOD}+${key}`);
+  const row = (label, ...keys) => el("div", { class: "krow" }, el("span", { text: label }), el("span", { class: "k" }, keys.map((x) => el("kbd", { text: x }))));
+  return el(
+    "div",
+    { class: "keys" },
+    el("div", { class: "hcap", text: "Anywhere in Firefox" }),
+    row("Open or close the sidebar", k("_execute_sidebar_action")),
+    row("Focus the message box", k("focus-input")),
+    row("New chat", k("new-chat")),
+    row("Go to session 1 to 9", k("session-1"), k("session-9")),
+    row("Previous / next session", k("prev-session"), k("next-session")),
+    row("Switch session", k("switcher")),
+    row("Stop all agents", k("stop-agents")),
+    row("Keyboard shortcuts", k("shortcuts")),
+    el("div", { class: "hcap", text: "While the panel has focus" }),
+    row("Send", "↩"),
+    row("New line", MAC ? "⇧↩" : "Shift+↩"),
+    row("Stop, or close a menu", "Esc"),
+    row("Allow / deny a permission", own("Enter"), own("Backspace")),
+    row("Close this session", own("W")),
+    row("Model and effort", own("M")),
+    row("Back to the page", k("focus-input")),
+    el("div", { class: "hnote", text: "To change the first group: Add-ons and themes, the gear menu, Manage Extension Shortcuts." }),
+  );
 }
 
 const shortCwd = (p) => (p ?? "").replace(/^\/(Users|home)\/[^/]+/, "~");
@@ -2359,9 +2600,9 @@ function saveStopped() {
 function wire() {
   hydrateIcons(document);
   const layer = $("layer");
-  layer.append(el("div", { id: "layer-sheet" }), el("div", { id: "layer-menu" }));
+  layer.append(el("div", { id: "layer-sheet" }), el("div", { id: "layer-menu" }), el("div", { id: "layer-pal" }));
 
-  $("history-btn").addEventListener("click", () => openSheet("history"));
+  $("title").addEventListener("click", (e) => openMenu("chats", e.currentTarget));
   $("new-btn").addEventListener("click", newChat);
   $("more-btn").addEventListener("click", (e) => openMenu("more", e.currentTarget));
   $("plus-btn").addEventListener("click", (e) => openMenu("plus", e.currentTarget));
@@ -2421,9 +2662,22 @@ function wire() {
   window.addEventListener("blur", () => closeMenu(false));
 
   document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape") return;
-    if (S.ui.menu) closeMenu();
-    else if (S.ui.sheet) closeSheet();
+    if (switcherKey(e)) return;
+    if (e.key === "Escape") {
+      if (S.ui.menu) closeMenu();
+      else if (S.ui.sheet) closeSheet();
+      else if (isRunning() && !e.isComposing) stop();
+      else if (document.activeElement === $("input")) $("input").blur();
+      return;
+    }
+    const command = commandFor(e);
+    if (command) {
+      e.preventDefault();
+      return onKey(command);
+    }
+    if (!panelMod(e)) return;
+    const done = { Enter: () => answerPending("allow"), Backspace: () => answerPending("deny"), KeyW: () => (closeSession(S.chatId), true), KeyM: () => (openMenu("model", $("model-btn")), true) }[e.code]?.();
+    if (done) e.preventDefault();
   });
   // Alt held over the page while typing here outlines what is under the pointer there; the page
   // never hears it let go, so the panel says so.
@@ -2552,9 +2806,8 @@ async function main() {
   browser.commands
     ?.getAll()
     .then((cmds) => {
-      const key = cmds.find((c) => c.name === "stop-agents")?.shortcut;
-      S.shortcut = formatShortcut(key || "Alt+Shift+X");
-      render("notices");
+      S.keys = Object.fromEntries(cmds.filter((c) => c.shortcut).map((c) => [c.name, c.shortcut]));
+      render("title", "notices");
     })
     .catch(() => {});
   render();

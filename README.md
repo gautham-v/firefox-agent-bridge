@@ -326,12 +326,36 @@ formats are in [docs/teach.md](docs/teach.md).
 
 ### Address bar
 
-Type `c` and a space, then a task: Enter starts it in a new tab group (with the engine, model and
-effort the panel last used) without opening the sidebar or leaving your tab. "Ask about this page"
-starts it with the viewed tab in the group, and the two most recent chats are offered to resume in
+Type `c` and a space, then a task: Enter starts it on the tab you're viewing (with the engine,
+model and effort the panel last used) and opens the sidebar on the new chat. On a tab that's already
+in a chat's group, the task continues that chat. The two most recent chats are offered to resume in
 the sidebar. The group label shows Working and Done as usual; if the task finishes while you're
 elsewhere, one notification ("Claude 2 finished" and the first line of the reply) takes you to the
 group when clicked.
+
+### Sessions and keyboard shortcuts
+
+The panel's title is the session switcher: it shows the chat's state, and a count when more than
+one chat is open (filled in when another chat is waiting on you). Click it for the open chats, each
+with its state and tabs; the x on a row closes that chat, which stops its turn and releases its
+tabs from the group (the chat stays in Recent tasks).
+
+| Key (Mac) | Does |
+| --- | --- |
+| `⌃B` | Open or close the sidebar |
+| `⌃⇧K` | Show the keyboard shortcuts |
+| `⌃L` | Focus the message box, opening the sidebar if needed. Pressed again there, back to the page. |
+| `⌃N` | New chat |
+| `⌃1` to `⌃9` | Go to that open chat |
+| `⌃,` `⌃.` | Previous / next chat |
+| `⌃K` | Switcher: search open chats and history, arrows and Enter to open |
+| `⌥⇧X` | Stop all agents |
+
+These work from any page and can be changed in Firefox under Add-ons and themes, the gear menu,
+Manage Extension Shortcuts (on Windows and Linux they default to Alt+Shift instead of Control).
+While the panel has focus: Enter sends, Shift+Enter adds a line, Esc stops the turn or closes a
+menu, `⌃↩` and `⌃⌫` allow or deny a permission request, `⌃W` closes the chat and `⌃M` opens the
+model menu. The ⋯ menu's Keyboard shortcuts lists them all.
 
 ### Fan-out
 

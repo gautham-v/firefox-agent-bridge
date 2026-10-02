@@ -26,6 +26,70 @@
     "stop-agents": {
       "suggested_key": { "default": "Alt+Shift+X" },
       "description": "Stop: pause every agent session"
+    },
+    "focus-input": {
+      "suggested_key": { "default": "Alt+Shift+L", "mac": "MacCtrl+L" },
+      "description": "Focus the message box, or go back to the page"
+    },
+    "new-chat": {
+      "suggested_key": { "default": "Alt+Shift+N", "mac": "MacCtrl+N" },
+      "description": "New chat"
+    },
+    "switcher": {
+      "suggested_key": { "default": "Alt+Shift+K", "mac": "MacCtrl+K" },
+      "description": "Switch session"
+    },
+    "prev-session": {
+      "suggested_key": { "default": "Alt+Shift+Comma", "mac": "MacCtrl+Comma" },
+      "description": "Previous session"
+    },
+    "next-session": {
+      "suggested_key": { "default": "Alt+Shift+Period", "mac": "MacCtrl+Period" },
+      "description": "Next session"
+    },
+    "shortcuts": {
+      "suggested_key": { "default": "Alt+Shift+H", "mac": "MacCtrl+Shift+K" },
+      "description": "Show keyboard shortcuts"
+    },
+    "_execute_sidebar_action": {
+      "suggested_key": { "default": "Alt+Shift+B", "mac": "MacCtrl+B" },
+      "description": "Open or close the sidebar"
+    },
+    "session-1": {
+      "suggested_key": { "default": "Alt+Shift+1", "mac": "MacCtrl+1" },
+      "description": "Go to session 1"
+    },
+    "session-2": {
+      "suggested_key": { "default": "Alt+Shift+2", "mac": "MacCtrl+2" },
+      "description": "Go to session 2"
+    },
+    "session-3": {
+      "suggested_key": { "default": "Alt+Shift+3", "mac": "MacCtrl+3" },
+      "description": "Go to session 3"
+    },
+    "session-4": {
+      "suggested_key": { "default": "Alt+Shift+4", "mac": "MacCtrl+4" },
+      "description": "Go to session 4"
+    },
+    "session-5": {
+      "suggested_key": { "default": "Alt+Shift+5", "mac": "MacCtrl+5" },
+      "description": "Go to session 5"
+    },
+    "session-6": {
+      "suggested_key": { "default": "Alt+Shift+6", "mac": "MacCtrl+6" },
+      "description": "Go to session 6"
+    },
+    "session-7": {
+      "suggested_key": { "default": "Alt+Shift+7", "mac": "MacCtrl+7" },
+      "description": "Go to session 7"
+    },
+    "session-8": {
+      "suggested_key": { "default": "Alt+Shift+8", "mac": "MacCtrl+8" },
+      "description": "Go to session 8"
+    },
+    "session-9": {
+      "suggested_key": { "default": "Alt+Shift+9", "mac": "MacCtrl+9" },
+      "description": "Go to session 9"
     }
   },
   "experiment_apis": {

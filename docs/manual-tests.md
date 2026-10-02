@@ -35,10 +35,18 @@ eval tasks is separate: see "Re-measured after restart" in [eval/README.md](../e
      `~/.claude/skills/<name>/`.
    - Try it once: it runs in a new agent tab.
    - Add a site selector for a field and record again: that field is "ask".
-9. **Address bar.** `c <task>` starts a new tab group without switching tabs. With the page
-   unseen, a notification comes when it finishes, and clicking it focuses the group.
-   - "Ask about this page" puts the current tab in the group, unless Teach is recording it.
+9. **Address bar.** `c <task>` starts a chat on the current tab (it joins a new group, unless
+   Teach is recording it) and the sidebar opens on that chat. If you switch away, a notification
+   comes when it finishes, and clicking it focuses the group.
+   - On a tab already in a chat's group, the task continues that chat.
    - Resuming a recent chat opens the sidebar on it.
+   - The sidebar opens on the chat and the message box has focus.
+   - **Sessions and keys.** With two or three chats started: the title shows a count, and its menu
+     lists them with state and tabs; x closes one and its tabs leave the group. From a page, ⌃L
+     focuses the message box (again: back to the page), ⌃N starts a chat, ⌃1/⌃2 and ⌃, ⌃. switch,
+     ⌃K opens the switcher (type, arrows, Enter; ⌃W closes the highlighted chat). In the panel,
+     ⌃↩ / ⌃⌫ answer a permission prompt, Esc stops a turn, ⌃M opens the model menu. ⋯ has
+     Keyboard shortcuts.
 10. **Sidebar skills.** `/` in the composer lists skills, the current site's first. Pick one and
     send it: it shows as a Skill step, and the chip is still there when the chat is reopened from
     history.

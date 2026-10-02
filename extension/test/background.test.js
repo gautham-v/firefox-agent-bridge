@@ -982,7 +982,7 @@ async function omniType(env, text) {
   return got;
 }
 
-test("c <task> starts a chat in a new group without switching tabs or opening the sidebar", async () => {
+test("c <task> starts a chat on the current tab and shows it in the sidebar", async () => {
   const env = await load({ store: { chatPrefs: { engine: "codex", codex: { model: "gpt-x", effort: "high" } } } });
   const { browser } = env;
   const hist = [1, 2, 3].map((n) => ({ id: `h${n}`, title: `Chat ${n}`, updatedAt: Date.now() - n * 86400000, engine: "claude", model: null, source: "panel", path: null }));
@@ -992,36 +992,39 @@ test("c <task> starts a chat in a new group without switching tabs or opening th
   await env.host({ type: "chat.history", requestId: rid, chats: hist });
   const suggestions = plain(await typing);
   assert.match(browser.action.defaultSuggestion.description, /find flights .* Start a Codex task/);
-  assert.equal(suggestions.length, 3, "ask about this page and two recent chats");
-  assert.match(suggestions[0].description, /Ask about this page/);
-  assert.match(suggestions[1].description, /Resume .Chat 1. .* Yesterday/);
+  assert.equal(suggestions.length, 2, "two recent chats");
+  assert.match(suggestions[0].description, /Resume .Chat 1. .* Yesterday/);
 
-  await browser.omnibox.onInputEntered.fire("find flights", "currentTab");
+  const p = await env.panel();
+  const entering = browser.omnibox.onInputEntered.fire("find flights", "currentTab");
+  assert.equal(browser.action.toggles, 1, "the sidebar opens in the handler's own call stack");
+  await entering;
   await wait(50);
   const send = env.sentToHost("chat.send")[0];
   assert.deepEqual([send.engine, send.model, send.effort, send.text], ["codex", "gpt-x", "high", "find flights"]);
-  const group = [...browser.groups.values()][0];
-  assert.equal(group.title, "Codex");
-  assert.equal(browser.tabsMap.get(1).groupId, -1, "the user's tab is left alone");
-  assert.equal(browser.tabsMap.get(1).active, true);
-  assert.equal(browser.action.toggles, 0);
+  assert.equal([...browser.groups.values()][0].title, "Codex");
+  assert.equal(browser.tabsMap.get(1).groupId, 100, "the tab being viewed joins the chat's group");
+  assert.deepEqual(send.context.tabs.map((t) => t.tabId), [1]);
+  assert.equal(p.of("state").at(-1).chatId, send.chatId, "the panel switches to the new chat");
 });
 
-test("Ask about this page puts the current tab in the group", async () => {
+test("c <task> on a tab in a chat's group continues that chat", async () => {
   const env = await load();
-  const s = (await omniType(env, "summarize"))[0];
-  await env.browser.omnibox.onInputEntered.fire(s.content, "currentTab");
+  const a = await env.panel();
+  await a.send("chat.send", { engine: "claude", text: "hi" });
   await wait(50);
-  assert.equal(env.browser.tabsMap.get(1).groupId, 100);
-  assert.deepEqual(env.sentToHost("chat.send")[0].context.tabs.map((t) => t.tabId), [1]);
+  await env.browser.omnibox.onInputEntered.fire("and then?", "currentTab");
+  await wait(50);
+  const sends = env.sentToHost("chat.send");
+  assert.deepEqual(sends.map((m) => [m.chatId, m.text]), [[a.chatId, "hi"], [a.chatId, "and then?"]]);
+  assert.equal(env.browser.groups.size, 1);
 });
 
 test("a tab Teach is recording isn't taken by a chat; the chat gets a blank tab", async () => {
   const env = await load();
   const a = await env.panel();
   await a.send("teach.start");
-  const s = (await omniType(env, "summarize"))[0];
-  await env.browser.omnibox.onInputEntered.fire(s.content, "currentTab");
+  await env.browser.omnibox.onInputEntered.fire("summarize", "currentTab");
   await wait(50);
   assert.equal(env.browser.tabsMap.get(1).groupId, -1, "the recorded tab stays the user's");
   assert.equal(env.sentToHost("chat.send")[0].context.tabs.length, 1);
@@ -1034,6 +1037,7 @@ test("an omnibox task that finishes unseen notifies once and the click shows its
   await browser.omnibox.onInputEntered.fire("book it", "currentTab");
   await wait(50);
   const chatId = env.sentToHost("chat.send")[0].chatId;
+  browser.tabsMap.get(1).active = false; // the user moved to another tab
   await chatEvent(env, chatId, { kind: "status", status: "running" });
   await chatEvent(env, chatId, { kind: "text", messageId: "m", text: "## JetBlue 916, Fri 7:05 am\nMore detail." });
   await chatEvent(env, chatId, { kind: "result", ok: true });
@@ -1041,7 +1045,7 @@ test("an omnibox task that finishes unseen notifies once and the click shows its
   assert.deepEqual(plain(browser.notifications.shown.map(({ id, title, message }) => ({ id, title, message }))), [{ id: `omni-${chatId}`, title: "Claude finished", message: "JetBlue 916, Fri 7:05 am" }]);
   await browser.notifications.onClicked.fire(`omni-${chatId}`);
   await wait(20);
-  assert.equal(browser.tabsMap.get(2).active, true);
+  assert.equal(browser.tabsMap.get(1).active, true);
   assert.deepEqual(browser.notifications.cleared, [`omni-${chatId}`]);
 });
 
@@ -1056,8 +1060,6 @@ test("no notification for sidebar chats, or when the user is on the group's tab"
   await env.browser.omnibox.onInputEntered.fire("task", "currentTab");
   await wait(50);
   const chatId = env.sentToHost("chat.send").at(-1).chatId;
-  env.browser.tabsMap.get(1).active = false;
-  [...env.browser.tabsMap.values()].find((t) => t.groupId === 101).active = true;
   await chatEvent(env, chatId, { kind: "result", ok: true });
   await wait(50);
   assert.equal(env.browser.notifications.shown.length, 0);
@@ -1076,6 +1078,63 @@ test("choosing a recent chat opens the sidebar on it", async () => {
   await opening;
   await wait(300);
   assert.equal(p.of("state").at(-1).chatId, "h1");
+});
+
+// ---- Open chats and the panel's keys
+
+test("panels are told the open chats, with each one's state, title and tabs", async () => {
+  const env = await load();
+  const a = await env.panel();
+  assert.deepEqual(a.of("chats")[0].chats, [], "an untouched chat isn't open yet");
+  await a.send("chat.send", { engine: "claude", text: "find   flights" });
+  await chatEvent(env, a.chatId, { kind: "user", text: "find   flights" });
+  await chatEvent(env, a.chatId, { kind: "status", status: "running" });
+  await wait(200);
+  const [c] = a.of("chats").at(-1).chats;
+  assert.deepEqual([c.id, c.title, c.state, c.tabs.map((t) => t.tabId)], [a.chatId, "find flights", "working", [1]]);
+  await chatEvent(env, a.chatId, { kind: "title", title: "Flights to Denver" });
+  await chatEvent(env, a.chatId, { kind: "permission", requestId: "p1", tool: "Bash" });
+  await wait(200);
+  assert.deepEqual([a.of("chats").at(-1).chats[0].title, a.of("chats").at(-1).chats[0].state], ["Flights to Denver", "needs"]);
+});
+
+test("closing a chat ends its turn, frees its tabs and moves the panel to the next chat", async () => {
+  const env = await load();
+  const a = await env.panel();
+  const first = a.chatId;
+  await a.send("chat.send", { engine: "claude", text: "one" });
+  await chatEvent(env, first, { kind: "user", text: "one" });
+  await a.send("chat.new");
+  const second = a.of("state").at(-1).chatId;
+  await a.send("chat.send", { engine: "claude", text: "two" });
+  await chatEvent(env, second, { kind: "user", text: "two" });
+  await chatEvent(env, second, { kind: "status", status: "running" });
+  await a.send("chat.close", { chatId: second });
+  await wait(200);
+  assert.deepEqual(env.sentToHost("chat.interrupt").map((m) => m.chatId), [second]);
+  assert.equal(a.of("state").at(-1).chatId, first);
+  assert.deepEqual(a.of("chats").at(-1).chats.map((c) => c.id), [first]);
+  assert.equal([...env.browser.tabsMap.values()].filter((t) => t.groupId !== -1 && t.groupId !== env.browser.tabsMap.get(1).groupId).length, 0, "the closed chat's tabs left their group");
+  // What its engine says afterwards doesn't bring it back.
+  await chatEvent(env, second, { kind: "result", ok: false, error: "Interrupted" });
+  await wait(200);
+  assert.deepEqual(a.of("chats").at(-1).chats.map((c) => c.id), [first]);
+});
+
+test("a panel key opens the sidebar and reaches its panel; focus goes through the experiment", async () => {
+  const env = await load();
+  const a = await env.panel();
+  const focused = [];
+  env.browser.claudePage.focusPanel = async (...args) => focused.push(args);
+  const pressed = env.browser.commands.onCommand.fire("session-2");
+  assert.equal(env.browser.action.toggles, 1, "opened in the command's own call stack");
+  await pressed;
+  await wait(50);
+  assert.deepEqual(a.of("key"), [{ type: "key", name: "session-2" }]);
+  await a.send("focus", { panel: false });
+  assert.deepEqual(focused, [[10, false]]);
+  await env.browser.commands.onCommand.fire("unknown");
+  assert.equal(env.browser.action.toggles, 1);
 });
 
 // ---- Redaction

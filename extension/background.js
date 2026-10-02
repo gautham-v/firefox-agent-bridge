@@ -1462,6 +1462,7 @@ function refresh() {
   // "Acting" lasts a few seconds past the last call; look again once it would lapse.
   clearTimeout(statusTimer);
   if (status === "acting") statusTimer = setTimeout(scheduleRefresh, control.RECENT_MS);
+  scheduleChatsPush();
   if (popupPorts.size) {
     const state = popupState();
     for (const p of popupPorts) p.postMessage({ type: "state", state });
@@ -1485,9 +1486,21 @@ browser.runtime.onConnect.addListener((p) => {
   p.postMessage({ type: "state", state: popupState() });
 });
 
+// The panel's keys (focus the message box, new chat, switch chats) work from any page: the
+// command opens the sidebar, which it may as a user action, and the panel there acts on the key.
+const PANEL_KEYS = /^(focus-input|new-chat|switcher|shortcuts|prev-session|next-session|session-[1-9])$/;
+
 browser.commands.onCommand.addListener((name) => {
-  if (name === "stop-agents") stopAllAgents();
+  if (name === "stop-agents") return stopAllAgents();
+  if (!PANEL_KEYS.test(name)) return;
+  browser.sidebarAction.open().catch(() => {});
+  panelKey(name).catch(() => {});
 });
+
+async function panelKey(name) {
+  const panel = await openedPanel(await lastNormalWindowId());
+  if (panel) post(panel, { type: "key", name });
+}
 
 // ---------------------------------------------------------------------------------------------
 // Chat panel. Panels connect on the "sidebar" port; see docs/chat-panel.md for the protocol.
@@ -1497,8 +1510,9 @@ const EVENT_CAP = 1000;
 const ENGINE_NAMES = { claude: "Claude", codex: "Codex" };
 const HOST_DOWN = "The native host is not connected.";
 
-// chat id -> { id, windowId, events, engine, model, effort, status, awaiting, finished, resume, queue, tabIds, groupTimer }
+// chat id -> { id, windowId, events, engine, model, effort, status, awaiting, finished, resume, queue, tabIds, groupTimer, title, firstText }
 const chats = new Map();
+const closedChats = new Set(); // chats the user closed: what their engine still says is dropped
 const validChatId = (id) => typeof id === "string" && /^[\w-]{1,64}$/.test(id) && !["__proto__", "constructor", "prototype"].includes(id);
 const windowChat = new Map(); // window id -> the chat its panel last showed
 const panels = new Set(); // { port, windowId, chatId, ready }
@@ -1508,7 +1522,7 @@ let requestCount = 0;
 function chatFor(id, windowId = null) {
   let chat = chats.get(id);
   if (!chat) {
-    chat = { id, windowId, events: [], engine: null, model: null, effort: null, status: "idle", awaiting: false, finished: false, resume: false, queue: Promise.resolve(), tabIds: new Set(), groupTimer: null };
+    chat = { id, windowId, events: [], engine: null, model: null, effort: null, status: "idle", awaiting: false, finished: false, resume: false, queue: Promise.resolve(), tabIds: new Set(), groupTimer: null, title: "", firstText: "" };
     chats.set(id, chat);
   }
   return chat;
@@ -1540,6 +1554,9 @@ function record(chat, ev) {
   }
   if (ev.kind === "text") while (evs.at(-1)?.kind === "text_delta" && evs.at(-1).messageId === ev.messageId) evs.pop();
   if (ev.kind === "status") chat.status = ev.status;
+  else if (ev.kind === "title") chat.title = ev.title ?? "";
+  else if (ev.kind === "user" && !chat.firstText) chat.firstText = String(ev.text ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
+  if (ev.kind === "status" || ev.kind === "title" || ev.kind === "user") scheduleChatsPush();
   trackApproval(chat, ev);
   evs.push({ ...ev });
   if (evs.length > EVENT_CAP) evs.splice(0, evs.length - EVENT_CAP);
@@ -1555,6 +1572,62 @@ function trackApproval(chat, ev) {
 }
 
 const chatShown = (chat) => [...panels].some((p) => p.chatId === chat.id);
+
+// ---- Open chats: what each panel's title menu and switcher list, in the order they were started.
+// A chat is open once it has a message, a group or a recording, until the user closes it.
+
+const chatOpen = (chat) => chat.events.length > 0 || sessions.has(chat.id) || recordings.has(chat.id);
+
+function chatState(chat) {
+  if (control.isPaused(chat.id)) return "paused";
+  if (chat.awaiting) return "needs";
+  if (chat.status === "starting" || chat.status === "running") return "working";
+  return chat.finished ? "done" : "idle";
+}
+
+async function openChats() {
+  const all = await browser.tabs.query({}).catch(() => []);
+  return [...chats.values()].filter(chatOpen).map((chat) => {
+    const groupId = sessions.get(chat.id)?.groupId;
+    const tabs = groupId == null ? [] : all.filter((t) => t.groupId === groupId).sort(byIndex);
+    return { id: chat.id, title: chat.title || (recordings.has(chat.id) ? "New skill" : chat.firstText), state: chatState(chat), tabs: tabs.map(tabInfo) };
+  });
+}
+
+let chatsTimer = null;
+let chatsSent = "";
+function scheduleChatsPush() {
+  if (chatsTimer || !panels.size) return;
+  chatsTimer = setTimeout(async () => {
+    chatsTimer = null;
+    const list = await openChats();
+    const json = JSON.stringify(list);
+    if (json === chatsSent) return;
+    chatsSent = json;
+    for (const panel of panels) post(panel, { type: "chats", chats: list });
+  }, 100);
+}
+
+// Closing a chat ends its turn and gives its tabs back: they leave the group and stay open. The
+// chat stays in history. Panels showing it move to the chat next to it, or a new one.
+async function closeChat(chat) {
+  const open = [...chats.values()].filter(chatOpen);
+  const at = open.indexOf(chat);
+  const next = open[at + 1] ?? open[at - 1] ?? null;
+  if (chat.status === "starting" || chat.status === "running") port?.postMessage({ type: "chat.interrupt", chatId: chat.id });
+  const rec = recordings.get(chat.id);
+  if (rec) {
+    await stopRecording(rec);
+    recordings.delete(chat.id);
+  }
+  for (const t of await sessionTabs(chat.id).catch(() => [])) await browser.tabs.ungroup(t.id).catch(() => {});
+  sessions.delete(chat.id);
+  chats.delete(chat.id);
+  closedChats.add(chat.id);
+  for (const [windowId, id] of windowChat) if (id === chat.id) windowChat.delete(windowId);
+  for (const panel of [...panels]) if (panel.chatId === chat.id) await showChat(panel, next ?? newChat(panel.windowId, chat));
+  scheduleRefresh();
+}
 
 // A chat waiting for approval that no open panel is showing.
 function unseenApproval() {
@@ -1647,6 +1720,7 @@ function answer(rid, msg) {
 
 function chatFromHost(msg) {
   if (msg.type === "chat.event") {
+    if (closedChats.has(msg.chatId)) return;
     const chat = chatFor(msg.chatId);
     record(chat, msg.event);
     trackFinished(chat, msg.event);
@@ -1712,6 +1786,7 @@ async function addToGroup(chat, tabId) {
 }
 
 function scheduleGroupPush(chatId) {
+  scheduleChatsPush();
   const chat = chats.get(chatId);
   if (!chat || chat.groupTimer) return;
   chat.groupTimer = setTimeout(async () => {
@@ -1941,7 +2016,8 @@ const panelCommands = {
     panel.windowId = m.windowId ?? (await lastNormalWindowId());
     schedulePointTabs();
     const id = validChatId(m.chatId) ? m.chatId : windowChat.get(panel.windowId);
-    return showChat(panel, id ? chatFor(id, panel.windowId) : newChat(panel.windowId));
+    await showChat(panel, id ? chatFor(id, panel.windowId) : newChat(panel.windowId));
+    post(panel, { type: "chats", chats: await openChats() });
   },
 
   async "chat.new"(panel) {
@@ -1964,7 +2040,9 @@ const panelCommands = {
     const known = chats.has(m.chatId);
     const chat = chatFor(m.chatId, panel.windowId);
     if (known) return showChat(panel, chat);
+    closedChats.delete(chat.id);
     chat.resume = true;
+    if (typeof m.title === "string") chat.title = m.title.slice(0, 200);
     // It continues on the engine and model it was started with, not whatever the panel last used.
     // Terminal sessions are Claude Code's, and their own model may no longer exist.
     if (m.source === "terminal") chat.engine = "claude";
@@ -1980,6 +2058,14 @@ const panelCommands = {
     for (const k of ["engine", "model", "effort"]) if (m[k] != null) chat[k] = m[k];
     chat.queue = chat.queue.then(() => sendToHost(chat, m)).catch(() => {});
   },
+
+  async "chat.close"(panel, m) {
+    const chat = chats.get(m.chatId ?? panel.chatId);
+    if (chat) await closeChat(chat);
+  },
+
+  // Keyboard focus, to the panel or back to the page. A panel can't take it from the page itself.
+  focus: (panel, m) => Promise.resolve(browser.claudePage.focusPanel?.(panel.windowId, m.panel !== false)).catch(() => {}),
 
   "chat.interrupt": (panel, m) => port?.postMessage({ type: "chat.interrupt", chatId: m.chatId ?? panel.chatId }),
   "chat.permission"(panel, m) {
@@ -2125,13 +2211,12 @@ browser.runtime.onConnect.addListener((p) => {
 });
 
 // ---- Ask from the address bar
-// "c <task>" starts a chat in a new group without opening the sidebar or leaving the tab. It is
-// the panel's own start path (chatFor, bindChat, sendToHost) with the engine, model and effort the
-// panel last saved. Its group label shows Working and Done like any chat's; when a turn finishes
-// unseen, one system notification says so and takes the user to the group.
+// "c <task>" acts on the tab being viewed and opens the sidebar on the chat. In a chat's group, the
+// task is that chat's next message; anywhere else it starts a chat that takes the tab (bindChat),
+// with the engine, model and effort the panel last saved. When a turn finishes unseen, one system
+// notification says so and takes the user to the group.
 
-const OMNI_PAGE = "⁣page⁣"; // suggestion contents; the default suggestion's is the typed text
-const OMNI_RESUME = "⁣resume⁣";
+const OMNI_RESUME = "⁣resume⁣"; // suggestion contents; the default suggestion's is the typed text
 let omniHistory = Promise.resolve([]);
 
 async function chatPrefs() {
@@ -2148,9 +2233,8 @@ function whenLabel(ms, now = Date.now()) {
 }
 
 // Suggestion descriptions are plain text, so the action follows the task after a dash.
-function omniSuggestions(text, history) {
+function omniSuggestions(history) {
   const out = [];
-  if (text) out.push({ content: OMNI_PAGE + text, description: `${text} — Ask about this page` });
   for (const c of history.slice(0, 2)) {
     const info = { id: c.id, engine: c.engine, model: c.model, source: c.source, path: c.path };
     out.push({ content: OMNI_RESUME + JSON.stringify(info), description: `Resume “${c.title}” — ${whenLabel(c.updatedAt)}` });
@@ -2158,27 +2242,37 @@ function omniSuggestions(text, history) {
   return out;
 }
 
-async function startOmniTask(text, withPage) {
-  const task = text.trim();
-  if (!task) return;
-  const chat = chatFor(crypto.randomUUID(), await lastNormalWindowId());
-  Object.assign(chat, await chatPrefs());
-  chat.omni = true;
-  // With the page, the tab being viewed joins in place (bindChat). Otherwise the group starts with
-  // a blank tab, which has to exist before the send so bindChat doesn't take the viewed tab.
-  if (!withPage) await createSessionTab(chat.id, ENGINE_NAMES[chat.engine], "about:blank", chat.windowId).catch(() => {});
-  chat.queue = chat.queue.then(() => sendToHost(chat, { text: task })).catch(() => {});
+// The sidebar panel of a window, once it has said hello. The address bar's input handler counts
+// as a user action, so the sidebar may open from it, but only in the handler's own call stack: the
+// caller opens it before anything is awaited, and this waits for its panel.
+async function openedPanel(windowId) {
+  const shown = () => [...panels].find((p) => p.windowId === windowId && p.ready);
+  for (let i = 0; i < 30 && !shown(); i++) await new Promise((r) => setTimeout(r, 100));
+  return shown();
 }
 
-// Opens a past chat in the sidebar of the window the user is in. The address bar's input handler
-// counts as a user action, so the sidebar may open from it, but only in the handler's own call
-// stack: the caller opens it before anything is awaited, and this waits for its panel.
+async function startOmniTask(text) {
+  const task = text.trim();
+  if (!task) return;
+  const windowId = await lastNormalWindowId();
+  const [tab] = windowId != null ? await browser.tabs.query({ active: true, windowId }).catch(() => []) : [];
+  let chat = tab?.groupId >= 0 ? [...chats.values()].find((c) => sessions.get(c.id)?.groupId === tab.groupId) : null;
+  if (!chat) {
+    chat = chatFor(crypto.randomUUID(), windowId);
+    Object.assign(chat, await chatPrefs());
+  }
+  chat.omni = true;
+  chat.queue = chat.queue.then(() => sendToHost(chat, { text: task })).catch(() => {});
+  const panel = await openedPanel(windowId);
+  if (!panel) windowChat.set(windowId, chat.id);
+  else if (panel.chatId !== chat.id) await showChat(panel, chat);
+}
+
+// Opens a past chat in the sidebar of the window the user is in.
 async function resumeOmniChat(info) {
   if (!validChatId(info?.id)) return;
   const windowId = await lastNormalWindowId();
-  const shown = () => [...panels].find((p) => p.windowId === windowId && p.ready);
-  for (let i = 0; i < 30 && !shown(); i++) await new Promise((r) => setTimeout(r, 100));
-  const panel = shown();
+  const panel = await openedPanel(windowId);
   if (panel) await panelCommands["chat.open"](panel, { chatId: info.id, source: info.source, path: info.path, engine: info.engine, model: info.model });
   else windowChat.set(windowId, info.id);
 }
@@ -2220,9 +2314,10 @@ if (browser.omnibox) {
     const t = text.trim();
     const name = ENGINE_NAMES[(await chatPrefs()).engine];
     browser.omnibox.setDefaultSuggestion({ description: t ? `${t} — Start a ${name} task` : `Start a ${name} task` });
-    suggest(omniSuggestions(t, await omniHistory));
+    suggest(omniSuggestions(await omniHistory));
   });
   browser.omnibox.onInputEntered.addListener((text) => {
+    browser.sidebarAction.open().catch(() => {});
     if (text.startsWith(OMNI_RESUME)) {
       let info = null;
       try {
@@ -2230,10 +2325,8 @@ if (browser.omnibox) {
       } catch {
         return;
       }
-      browser.sidebarAction.open().catch(() => {});
       resumeOmniChat(info).catch(() => {});
-    } else if (text.startsWith(OMNI_PAGE)) startOmniTask(text.slice(OMNI_PAGE.length), true).catch(() => {});
-    else startOmniTask(text, false).catch(() => {});
+    } else startOmniTask(text).catch(() => {});
   });
 }
 
