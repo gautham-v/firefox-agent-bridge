@@ -678,6 +678,7 @@ function onMessage(m) {
   }
 }
 
+let openedFocus = false;
 function onState(s) {
   const switched = s.chatId !== S.chatId;
   S.windowId = s.windowId ?? S.windowId;
@@ -703,6 +704,9 @@ function onState(s) {
     closeSwitcher(false);
   }
   render();
+  // The sidebar just opened: typing goes to the message box, not the page.
+  if (!openedFocus && !S.popout && !params.has("window")) focusInput();
+  openedFocus = true;
 }
 
 function onTranscript(m) {
