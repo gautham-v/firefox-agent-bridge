@@ -96,8 +96,12 @@ Out of scope for now: turning connectors on and off per chat, and voice input.
   none, Allow once only. `AskUserQuestion` is denied automatically, with a note to ask in plain
   text.
 - A message sent while a turn is running is queued behind it (Claude Code queues it in the same
-  process; for Codex it waits for the running process to exit). Changing engine mid-turn ends the
-  running turn as interrupted.
+  process; for Codex it waits for the running process to exit). Claude Code may instead take the
+  message into the running turn between tool calls, with one result for both: it echoes each
+  message as it takes it up (`--replay-user-messages`), and an echo that arrives mid-turn becomes
+  a `steer` event. The panel then ends the running turn's block there and shows the rest under
+  the queued message. In the session file such a message is a `queued_command` attachment, which
+  history reads as a user message. Changing engine mid-turn ends the running turn as interrupted.
 - Stop in the panel sends an interrupt (control request) to the running turn. The turn ends with a
   `result` whose `ok` is false and `error` is "Interrupted" (no `error` event), and the process
   stays usable. A permission card still open when a turn ends is resolved by the panel.
@@ -232,6 +236,14 @@ without `context` but with `elements`, the picked elements; background adds the 
 binds the chat first), `chat.interrupt`,
 `chat.permission`, `chat.history {requestId}`, `chat.capabilities {requestId, engine}`, `chat.settings {requestId, set?}`,
 `group.add {tabId}`, `teach.start`, `teach.stop {requestId, draft}`, `teach.discard`, `teach.save` (Teach, [docs/teach.md](teach.md); a `chat.send` with `teach: true` doesn't adopt the viewed tab),
+`chat.step {requestId, toolUseId}` (a finished step's row was opened; the host answers `chat.step {requestId, chatId,
+toolUseId, detail}` with `detail: {tool, input: [[key, value]], result, items: {total, rows: [{title, when}]} | null,
+raw: {input, result} | null, withheld, ok}` or null. The host keeps the last 400 calls of a live chat and reads
+older ones from Claude Code's session file. Tool events themselves still carry only summaries. A Firefox tool's
+detail is its harmless inputs and what the page returned (already masked by the extension); typed text, form
+values and scripts stay out, and it has no raw view),
+`tab.show {tabId}` (switches to a tab in the chat's group: the Show tab line above the message box, shown
+while the viewed tab is outside the group, and `[label](tab:<tabId>)` links in replies),
 `group.remove {tabId}`, `resume` (undoes Stop all agents: every paused session, and the pause on
 new ones), `stopAll` (pauses Firefox calls and also sends `chat.interrupt` for every chat whose
 turn is running; the Alt+Shift+X shortcut and the activity sheet's Stop do the same), `popout`,
@@ -279,6 +291,8 @@ Background answers `chat.history`, `chat.capabilities` and `chat.settings` itsel
 `code: "crashed"` and a `status: exited` event. Request ids the panel sends are its own: background
 swaps in its own id toward the host and puts the panel's back on the reply.
 
+A chat's tabs carry its id in Firefox's session store (`sessions.setTabValue`), so a chat reopened
+after a browser restart takes back the "earlier" group that session restore brought back for it.
 The tab adopted at binding is the user's own, so it is only grouped: it isn't pinned against
 discarding and no blank tab is opened. If it can't be taken (pinned, or already in another
 session's group), the chat starts with a blank tab in a new group instead, opened in the chat's own

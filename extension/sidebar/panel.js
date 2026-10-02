@@ -163,6 +163,8 @@ const SAFE_URL = /^(https?:|mailto:)/i;
 const ELEMENT_LINK = /^ref:(?:(\d+)\/)?(ref_\d+(?:@f\d+)?)$/;
 // The tab an element link without one points into: the turn's, set while it renders.
 let refTab = null;
+// The agent pointing at one of the chat's tabs: [label](tab:12). A click switches to it.
+const TAB_LINK = /^tab:(\d+)$/;
 const INLINE = /(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)|\*\*(\S(?:[\s\S]*?\S)?)\*\*|__(\S(?:[\s\S]*?\S)?)__|\[([^\]\n]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>]+)|\*(\S(?:[^*\n]*?\S)?)\*|(?<![\w])_(\S(?:[^_\n]*?\S)?)_(?![\w])/g;
 
 function linkNode(url, kids) {
@@ -170,6 +172,11 @@ function linkNode(url, kids) {
   if (ref) {
     const tabId = ref[1] ? Number(ref[1]) : refTab;
     return el("button", { class: "eref", type: "button", "data-ref": ref[2], "data-tab": tabId, title: "Show on the page" }, icon("pointer"), el("span", {}, kids));
+  }
+  const tab = TAB_LINK.exec(url);
+  if (tab) {
+    const known = S.group?.tabs?.find((t) => t.tabId === Number(tab[1]));
+    return el("button", { class: "tref", type: "button", "data-tab": tab[1], title: "Switch to this tab" }, known ? fav(known) : null, el("span", {}, kids));
   }
   return SAFE_URL.test(url) ? el("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, kids) : el("span", {}, kids);
 }
@@ -321,6 +328,8 @@ const FIREFOX_VERBS = {
   get_page_text: ["Reading text", "Read page text"],
   replay_steps: ["Replaying steps", "Replayed steps"],
 };
+// Summaries that add something to the verb, and the leading word they repeat; the rest only restate it.
+const FIREFOX_LEADS = { navigate: /^Open /, find: /^Find /, replay_steps: /^Replay /, file_upload: /^Upload / };
 const COMPUTER_VERBS = {
   click: ["Clicking", "Clicked"],
   left_click: ["Clicking", "Clicked"],
@@ -358,6 +367,10 @@ const BUILTIN_VERBS = {
   Write: ["Writing", "Wrote"],
 };
 
+const SEARCHING = ["Searching", "Searched"];
+const READING = ["Reading", "Read"];
+const MCP_VERBS = { search: SEARCHING, find: SEARCHING, query: SEARCHING, get: READING, read: READING, fetch: READING, list: READING, download: READING };
+
 const humanize = (name) => {
   const h = name.replace(/^mcp__/, "").replace(/__/g, " ").replace(/_/g, " ").trim();
   return h ? h[0].toUpperCase() + h.slice(1) : "tool";
@@ -372,6 +385,19 @@ function describeTool(name, summary = "") {
     const m = /^([a-z_-]+)\b\s*(.*)$/i.exec(summary);
     words = (m && COMPUTER_VERBS[m[1].toLowerCase()]) || ["Interacting", "Interacted"];
     if (m && COMPUTER_VERBS[m[1].toLowerCase()]) detail = m[2];
+  } else if (isFirefoxTool(name) && words) {
+    // The verb already says what the summary's first word does ("Navigated" / "Open x.com").
+    const lead = FIREFOX_LEADS[short];
+    detail = lead ? summary.replace(lead, "") : "";
+  }
+  // A connector's tool, mcp__claude_ai_Gmail__search_threads: "Searched Gmail", then what for.
+  const mcp = !words && /^mcp__(.+?)__(.+)$/.exec(name);
+  if (mcp) {
+    const server = mcp[1].replace(/^claude_ai_/, "").replace(/_/g, " ");
+    const [first, ...rest] = mcp[2].split("_");
+    const verb = MCP_VERBS[first.toLowerCase()];
+    words = verb ? [`${verb[0]} ${server}`, `${verb[1]} ${server}`] : [`Using ${server}`, `Used ${server}`];
+    detail ||= (verb ? rest : [first, ...rest]).join(" ");
   }
   if (!words) words = [`Using ${humanize(name)}`, `Used ${humanize(name)}`];
   return { ing: words[0], ed: words[1], detail };
@@ -506,6 +532,15 @@ function applyEvent(ev, replay = false) {
       finishSend();
       break;
     }
+    case "steer": {
+      // The agent took a queued message into the turn it was already running: what it does from
+      // here on answers that message too, so the rest of the turn is shown under it.
+      const q = S.turns.find((x) => x.queued);
+      if (!q) break;
+      for (const t of S.turns) if (t !== q && !t.queued) closeTurn(t, now);
+      Object.assign(q, { queued: false, t0: now });
+      break;
+    }
     case "text_delta":
     case "text": {
       const t = openTurn(now);
@@ -629,6 +664,17 @@ function onMessage(m) {
       return render("title");
     case "key":
       return onKey(m.name);
+    case "chat.step": {
+      if (m.chatId !== S.chatId) return;
+      for (const t of S.turns) {
+        const s = t.steps.find((x) => x.id === m.toolUseId);
+        if (!s) continue;
+        s.detail = m.detail ?? false;
+        if (s.open) S.reveal = s.id;
+        t.dirty = true;
+      }
+      return render("body");
+    }
     case "chat.settings":
       S.settings = m;
       if (S.ui.menu) renderMenu();
@@ -840,8 +886,12 @@ function activeSite() {
 // the group, otherwise the tab the user is viewing.
 function workSite(t) {
   const id = [...t.steps].reverse().find((s) => s.tabId != null)?.tabId;
-  const tab = id != null ? S.group?.tabs?.find((x) => x.tabId === id) : null;
-  return tab ? { tab, name: siteName(tab.url) } : activeSite();
+  if (id == null) return activeSite();
+  // A tab the steps name but the group doesn't list is shown from what was last known of it, or
+  // not at all: naming another tab would say the agent is working somewhere it isn't.
+  const known = S.tabInfo.get(id);
+  const tab = S.group?.tabs?.find((x) => x.tabId === id) ?? (known ? { tabId: id, ...known } : null);
+  return { tab, name: tab ? siteName(tab.url) : "" };
 }
 
 function fav(tab, cls = "") {
@@ -888,7 +938,76 @@ function stepRow(t, s, current, extra = "") {
   const at = current && !halted && s.start && t.t0 ? "live" : s.end && t.t0 ? clock(s.end - t.t0) : "";
   const tm = el("span", { class: "tm", text: at === "live" ? clock(Date.now() - t.t0) : at });
   if (at === "live") tm.dataset.live = String(t.t0);
-  return el("div", { class: cls, title: [words.detail, s.result].filter(Boolean).join(" — ") }, icon(mark), el("span", { class: "w", text: verb }), el("span", { class: "d", text: detail }), tm);
+  const kids = [icon(mark), el("span", { class: "w", text: verb }), el("span", { class: "d", text: detail }), tm];
+  const title = [words.detail, s.result].filter(Boolean).join(" — ");
+  // A finished call opens to what it was given and what came back (asked of the host on first open).
+  if (!s.done || !s.name) return [el("div", { class: cls, title }, kids)];
+  const toggle = () => {
+    s.open = !s.open;
+    if (s.open && s.detail === undefined) {
+      s.detail = null;
+      post("chat.step", { requestId: `step${++requestCount}`, toolUseId: s.id });
+    }
+    if (s.open) S.reveal = s.id;
+    t.dirty = true;
+    render("body");
+  };
+  const row = el("button", { class: `${cls} can`, "aria-expanded": String(!!s.open), title, onclick: toggle }, kids, icon("chevr", "cv"));
+  return s.open ? [row, stepDetail(t, s)] : [row];
+}
+
+// An open step: its inputs and its result as label/value rows (a long value gets a block of its
+// own), the result as a short list when it is one; the call as it was sent is one click further.
+const DETAIL_LABELS = { tabId: "Tab", url: "Address", ref: "Element", coordinate: "Position", query: "Query", q: "Query", action: "Action", duration: "Seconds", command: "Command", file_path: "File", pattern: "Pattern", description: "What for", prompt: "Prompt" };
+
+function stepDetail(t, s) {
+  const d = s.detail;
+  const box = (...kids) => el("div", { class: "sdet", "data-step": s.id }, kids);
+  if (d === null) return box(el("div", { class: "k", text: "Loading…" }));
+  if (!d) return box(el("div", { class: "k", text: "The details of this step aren't available any more." }));
+  const row = (label, value, mono = false) => {
+    const long = value.length > 48 || value.includes("\n");
+    return el("div", { class: `kv${long ? " long" : ""}` }, el("span", { class: "k", text: label }), long || mono ? el("pre", { text: value }) : el("span", { class: "v", text: value }));
+  };
+  const kids = [];
+  if (s.raw && d.raw) {
+    kids.push(row("Tool", d.tool, true), row("Sent", d.raw.input, true), row(d.ok ? "Got back" : "Failed with", d.raw.result || "Nothing", true));
+  } else {
+    for (const [k, v] of d.input) {
+      // A step already in the row's own words needs no "What for"; a tab reads better by its title.
+      if (k === "description" && v === s.summary) continue;
+      const tab = k === "tabId" ? S.group?.tabs?.find((x) => String(x.tabId) === v) : null;
+      kids.push(row(DETAIL_LABELS[k] ?? humanize(k), tab ? tab.title || siteName(tab.url) || v : v));
+    }
+    if (d.items) {
+      const more = d.items.total - d.items.rows.length;
+      kids.push(
+        el(
+          "div",
+          { class: "kv long" },
+          el("span", { class: "k", text: `Found ${d.items.total}` }),
+          el("ul", {}, d.items.rows.map((r) => el("li", {}, el("span", { text: r.title, title: r.title }), r.when ? el("span", { text: r.when }) : null)), more > 0 ? el("li", {}, el("span", { class: "k", text: `and ${more} more` })) : null),
+        ),
+      );
+    } else if (d.result) kids.push(row(d.ok ? "Result" : "Failed with", d.result));
+    if (d.withheld) kids.push(el("div", { class: "k", text: "What was typed or run isn't shown." }));
+    else if (!kids.length) kids.push(el("div", { class: "k", text: "Nothing more to show." }));
+  }
+  if (d.raw) {
+    kids.push(
+      el("button", {
+        class: "rawb",
+        text: s.raw ? "Show summary" : "Show raw call",
+        onclick: () => {
+          s.raw = !s.raw;
+          S.reveal = s.id;
+          t.dirty = true;
+          render("body");
+        },
+      }),
+    );
+  }
+  return box(...kids);
 }
 
 // The agent cam: a live thumbnail of the tab the running turn last acted on, in the steps card.
@@ -1120,7 +1239,7 @@ function agentRows(t, a) {
   ];
   if (info.status === "done" && info.result) out.push(el("div", { class: "step-res", text: info.result, title: info.result }));
   if (s.open) {
-    if (a.calls.length) out.push(...a.calls.map((c) => stepRow(t, c, c === info.current, "sub")));
+    if (a.calls.length) out.push(...a.calls.flatMap((c) => stepRow(t, c, c === info.current, "sub")));
     else out.push(el("div", { class: "step sub" }, el("span", { class: "d", text: "No calls yet" })));
   }
   return out;
@@ -1166,7 +1285,7 @@ function stepsBlock(t) {
       el("span", { class: "st", text: title }),
       el("span", { class: "n", text: S.paused && running ? "Paused" : running ? `${done} of ${total} done` : plural(t.steps.length, "step") }),
     );
-    const rows = fan.rows.flatMap((r) => (r.agent ? agentRows(t, r.agent) : [stepRow(t, r.step, r.step === cur)]));
+    const rows = fan.rows.flatMap((r) => (r.agent ? agentRows(t, r.agent) : stepRow(t, r.step, r.step === cur)));
     kids.push(el("div", { class: `steps fan${t.done ? " open" : ""}` }, head, el("div", { class: "list" }, rows), ...maskedNotes(t)));
     return kids;
   }
@@ -1175,12 +1294,12 @@ function stepsBlock(t) {
   const head = el(
     "div",
     { class: "sh" },
-    fav(site.tab),
+    site.tab ? fav(site.tab) : icon("pointer"),
     el("span", { class: "st", text: usedFirefox ? `${running ? "Using" : "Used"} Firefox${name ? ` in ${name}` : ""}` : running ? "Working" : "Steps" }),
     el("span", { class: "n", text: S.paused && running ? "Paused" : plural(t.steps.length, "step") }),
   );
   const live = running && cam.img?.getAttribute("src") && cam.tabId === camTarget() ? camEl() : null;
-  kids.push(el("div", { class: `steps${t.done ? " open" : ""}` }, head, live, el("div", { class: "list" }, t.steps.map((s) => stepRow(t, s, s === cur))), ...maskedNotes(t)));
+  kids.push(el("div", { class: `steps${t.done ? " open" : ""}` }, head, live, el("div", { class: "list" }, t.steps.flatMap((s) => stepRow(t, s, s === cur))), ...maskedNotes(t)));
   return kids;
 }
 
@@ -1271,10 +1390,13 @@ function renderBody() {
   }
   const kids = S.turns.map((t) => {
     if (!t.el || t.dirty) {
+      // A steps list with a row open keeps its place when the turn is drawn again.
+      const top = t.steps.some((s) => s.open) ? t.el?.querySelector(".steps .list")?.scrollTop : null;
       const fresh = renderTurn(t);
       t.el?.replaceWith(fresh);
       t.el = fresh;
       t.dirty = false;
+      if (top != null) for (const list of fresh.querySelectorAll(".steps .list")) list.scrollTop = top;
     }
     return t.el;
   });
@@ -1282,8 +1404,20 @@ function renderBody() {
   if (kids.length !== msgs.children.length || kids.some((k, i) => k !== msgs.children[i])) msgs.replaceChildren(...kids);
   const live = activeTurn();
   // A fan-out card's rows change in place, and one the user opened shouldn't scroll away.
-  if (live?.el) for (const list of live.el.querySelectorAll(".steps:not(.fan) .list")) list.scrollTop = list.scrollHeight;
+  // Nor should a step the user opened to read.
+  if (live?.el && !live.steps.some((s) => s.open)) for (const list of live.el.querySelectorAll(".steps:not(.fan) .list")) list.scrollTop = list.scrollHeight;
   if (S.stick) $("scroll").scrollTop = $("scroll").scrollHeight;
+  // A step just opened (or its details just arrived): bring it into view inside its list.
+  if (S.reveal) {
+    const det = [...msgs.querySelectorAll(".sdet")].find((n) => n.dataset.step === S.reveal);
+    S.reveal = null;
+    const list = det?.closest(".list");
+    if (list) {
+      const row = det.previousElementSibling ?? det;
+      if (det.offsetTop + det.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = det.offsetTop + det.offsetHeight - list.clientHeight;
+      if (row.offsetTop < list.scrollTop) list.scrollTop = row.offsetTop;
+    }
+  }
 }
 
 function renderEmpty() {
@@ -1413,6 +1547,28 @@ function renderTray() {
 
 // ---- Composer
 
+// The chat's tab the user would want to see: the one the agent last worked in, else the group's first.
+function chatTab() {
+  const tabs = S.group?.tabs ?? [];
+  const id = S.turns.flatMap((t) => t.steps).findLast((s) => s.tabId != null && tabs.some((t) => t.tabId === s.tabId))?.tabId;
+  return tabs.find((t) => t.tabId === id) ?? tabs[0] ?? null;
+}
+
+// Shown while the user is viewing a tab outside the chat's group: names the chat's tab and
+// switches to it.
+function renderAway() {
+  const away = $("away");
+  const tab = chatTab();
+  away.hidden = !tab || recordingShown() || !S.activeTab || S.group.tabs.some((t) => t.tabId === S.activeTab.tabId);
+  if (away.hidden) return;
+  fill(
+    away,
+    fav(tab),
+    el("span", { class: "n", title: tab.url, text: `This chat's tab: ${tab.title || siteName(tab.url) || "Tab"}` }),
+    el("button", { class: "go", onclick: () => post("tab.show", { tabId: tab.tabId }) }, "Show tab"),
+  );
+}
+
 function contextTab() {
   const tabs = S.group?.tabs ?? [];
   if (tabs.length > 1) return { label: `${tabs.length} tabs`, tab: tabs.find((t) => t.active) ?? tabs[0], many: true };
@@ -1459,6 +1615,7 @@ function placeholder() {
 function renderDock() {
   // While recording, the panel is the recording's controls; there's nothing to send yet.
   const recording = recordingShown();
+  renderAway();
   $("composer").hidden = recording;
   $("foot").hidden = recording;
   const down = (engineDown() && !S.turns.length) || !!S.terminal;
@@ -2789,6 +2946,8 @@ function wire() {
       b.dataset.revealed = "1";
       return markRef(b, { reveal: true });
     }
+    const t = e.target.closest(".tref");
+    if (t) return post("tab.show", { tabId: Number(t.dataset.tab) });
     const a = e.target.closest("a[href]");
     if (!a) return;
     e.preventDefault();

@@ -117,9 +117,82 @@ export function summarizeToolUse(name, input) {
     case "Task":
     case "Agent":
       return clip(a.description || "Run a sub-agent", 80);
-    default:
-      return clip(name.replace(/^mcp__/, "").replace(/__/g, " "), 60);
+    default: {
+      // A connector's tool: the panel names it from the tool's name, so this is what it was asked.
+      const asked = ["query", "q", "search_query", "title", "subject", "name"].map((k) => a[k]).find((v) => typeof v === "string" && v.trim());
+      return clip(asked ?? "", 80);
+    }
   }
+}
+
+// ---- Step details ---------------------------------------------------------------------------
+// What a step's row opens to in the panel, sent only when the user opens it: what the call was
+// given and what came back, clipped. A Firefox tool's detail leaves out typed text, form values
+// and script source, like its summary; what the page returned is shown, since the user opened it.
+
+const DETAIL_TEXT = 6000;
+const DETAIL_ITEMS = 20;
+const FIREFOX_SAFE_KEYS = ["action", "url", "tabId", "ref", "coordinate", "query", "duration", "scroll_direction", "scroll_amount", "filter"];
+const TITLE_KEYS = ["subject", "title", "name", "summary", "snippet", "filename", "path", "url", "text"];
+const WHEN_KEYS = ["date", "time", "timestamp", "created_at", "updated_at", "createdTime", "modifiedTime", "start"];
+
+const cut = (s, n = DETAIL_TEXT) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+const show = (v) => (typeof v === "string" ? v : JSON.stringify(v));
+
+// The first string under one of `keys`, in the object or one level into its objects and lists.
+function pick(obj, keys, depth = 2) {
+  if (!obj || typeof obj !== "object") return null;
+  for (const k of keys) if (typeof obj[k] === "string" && obj[k].trim()) return obj[k];
+  if (depth <= 1) return null;
+  for (const v of Object.values(obj)) {
+    const found = pick(Array.isArray(v) ? v[0] : v, keys, depth - 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+// A result that is a list of things (search hits, files, events), as one line each.
+function resultItems(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const list = Array.isArray(data) ? data : data && typeof data === "object" ? Object.values(data).find((v) => Array.isArray(v) && v.length && typeof v[0] === "object") : null;
+  if (!Array.isArray(list) || !list.length || typeof list[0] !== "object") return null;
+  const rows = list.slice(0, DETAIL_ITEMS).map((it) => ({ title: clip(pick(it, TITLE_KEYS) ?? "", 120), when: clip(pick(it, WHEN_KEYS) ?? "", 40) }));
+  return rows.some((r) => r.title) ? { total: list.length, rows: rows.filter((r) => r.title) } : null;
+}
+
+export function stepDetail(name, input, content, isError) {
+  const a = input && typeof input === "object" ? input : {};
+  const parts = Array.isArray(content) ? content : typeof content === "string" ? [{ type: "text", text: content }] : [];
+  const fx = String(name).startsWith("mcp__firefox__");
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
+  const tool = mcp ? `${mcp[1].replace(/^claude_ai_/, "").replace(/_/g, " ")} · ${mcp[2]}` : String(name);
+  if (fx) {
+    const safe = FIREFOX_SAFE_KEYS.filter((k) => a[k] != null).map((k) => [k, k === "url" ? urlLabel(String(a[k])) : cut(show(a[k]), 200)]);
+    // What the agent read back is shown (the extension has already masked the redacted fields in
+    // it); what it typed, filled in or ran is not, and there is no raw view of the call.
+    const hidden = ["text", "value", "fields", "inputs"].some((k) => a[k] != null);
+    const said = parts.filter((p) => p?.type === "text").map((p) => p.text).join("\n").trim();
+    const shots = parts.filter((p) => p?.type === "image").length;
+    const result = isError ? summarizeToolResult(name, content, true) : cut(said) || (shots ? "Screenshot captured" : "");
+    return { tool, input: safe, result, items: null, raw: null, withheld: hidden, ok: !isError };
+  }
+  const text = parts.filter((p) => p?.type === "text").map((p) => p.text).join("\n");
+  const images = parts.filter((p) => p?.type === "image").length;
+  const result = cut(text) || (images ? `${images} image${images > 1 ? "s" : ""}` : "");
+  return {
+    tool,
+    input: Object.keys(a).map((k) => [k, cut(show(a[k]), 2000)]),
+    result,
+    items: isError ? null : resultItems(text),
+    raw: { input: cut(JSON.stringify(a, null, 2) ?? "{}"), result },
+    withheld: false,
+    ok: !isError,
+  };
 }
 
 const CARD_COMMAND_CHARS = 2000;
@@ -143,7 +216,7 @@ export function summarizePermission(tool, input, { content = false } = {}) {
   }
   if (typeof target === "string" && target) return fit(target, CARD_TARGET_CHARS);
   const keys = Object.keys(a);
-  if (!keys.length) return { summary: summarizeToolUse(tool, a), complete: true };
+  if (!keys.length) return { summary: summarizeToolUse(tool, a) || clip(tool.replace(/^mcp__/, "").replace(/__/g, " "), 60), complete: true };
   const lines = keys.map((k) => `${k}: ${typeof a[k] === "string" ? a[k] : JSON.stringify(a[k])}`);
   return fit(lines.join("\n"), CARD_INPUT_CHARS);
 }

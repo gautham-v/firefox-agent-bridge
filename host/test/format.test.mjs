@@ -33,7 +33,8 @@ test("built-in tool summaries are short and name the target", () => {
   assert.equal(summarizeToolUse("Bash", { command: "ls", description: "List files" }), "List files");
   assert.equal(summarizeToolUse("Bash", { command: "x".repeat(300) }).length, 80);
   assert.equal(summarizeToolUse("WebFetch", { url: "https://example.com/p?q=1" }), "Fetch example.com/p");
-  assert.equal(summarizeToolUse("mcp__claude_ai_Gmail__search_threads", {}), "claude_ai_Gmail search_threads");
+  assert.equal(summarizeToolUse("mcp__claude_ai_Gmail__search_threads", {}), ""); // the panel names a connector tool itself
+  assert.equal(summarizeToolUse("mcp__claude_ai_Gmail__search_threads", { query: "from:daycare" }), "from:daycare");
 });
 
 test("a permission card shows what would run, and says when it couldn't show all of it", () => {
@@ -157,4 +158,17 @@ test("what redaction masked is passed on only from its own content part of a Fir
   assert.deepEqual(toolMasked("mcp__firefox__get_page_text", [{ type: "text", text: "Title: x\n\n3 fields masked on bank.com" }]), {});
   assert.deepEqual(toolMasked("mcp__other__tool", [masked]), {});
   assert.deepEqual(toolMasked("mcp__firefox__find", "3 fields masked on x.com"), {});
+});
+
+test("stepDetail: a connector call shows its inputs, its result as a list when it is one, and the raw call", async () => {
+  const { stepDetail, summarizeToolUse } = await import("../chat-format.mjs");
+  const name = "mcp__claude_ai_Gmail__search_threads";
+  assert.equal(summarizeToolUse(name, { query: "in:sent daily report" }), "in:sent daily report");
+  const result = JSON.stringify({ threads: [{ id: "1", messages: [{ subject: "Fwd: Daily Report", date: "Thu, 1 Oct 2026 17:06" }] }, { id: "2", snippet: "Second" }] });
+  const d = stepDetail(name, { query: "in:sent daily report", max: 5 }, [{ type: "text", text: result }], false);
+  assert.equal(d.tool, "Gmail · search_threads");
+  assert.deepEqual(d.input, [["query", "in:sent daily report"], ["max", "5"]]);
+  assert.deepEqual(d.items, { total: 2, rows: [{ title: "Fwd: Daily Report", when: "Thu, 1 Oct 2026 17:06" }, { title: "Second", when: "" }] });
+  assert.equal(d.raw.result, result);
+  assert.equal(stepDetail("Bash", { command: "ls" }, "a\nb", false).result, "a\nb");
 });

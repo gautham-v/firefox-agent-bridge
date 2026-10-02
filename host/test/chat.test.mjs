@@ -257,6 +257,24 @@ test("claude: tool events carry short summaries that never include typed text, s
   }
 });
 
+test("chat.step: an opened step gets its details; a Firefox tool's never carry typed text or scripts", async () => {
+  const t = setup();
+  try {
+    const id = newId();
+    await t.turn(id, "[tool] go");
+    const typed = await t.ask("chat.step", { chatId: id, toolUseId: "toolu_type" });
+    assert.deepEqual(typed.detail.input, [["action", "type"], ["tabId", "1"]]);
+    assert.equal(typed.detail.withheld, true);
+    assert.equal(typed.detail.result, "Typed 7 characters");
+    assert.equal(typed.detail.raw, null);
+    const js = await t.ask("chat.step", { chatId: id, toolUseId: "toolu_js" });
+    for (const secret of ["hunter2", "document.cookie"]) assert.ok(!JSON.stringify([typed, js]).includes(secret), `${secret} must not appear`);
+    assert.equal((await t.ask("chat.step", { chatId: id, toolUseId: "toolu_nope" })).detail, null);
+  } finally {
+    t.done();
+  }
+});
+
 test("claude: sub-agents' calls are reported under their Agent step, and each Agent step ends with what it returned", async () => {
   const t = setup();
   try {
@@ -442,6 +460,24 @@ test("claude: Stop interrupts the running turn and the process stays usable", as
     assert.equal(t.events(id).at(-1).status, "idle");
     await t.turn(id, "again");
     assert.equal(t.runs().length, 1);
+  } finally {
+    t.done();
+  }
+});
+
+test("claude: a message taken into the running turn is reported as a steer, in the stream and in the loaded transcript", async () => {
+  const t = setup();
+  try {
+    const id = newId();
+    t.send(id, "[steerable] first");
+    await t.until("the first text", () => t.events(id).some((e) => e.kind === "text" && e.text === "First part"));
+    t.send(id, "and second");
+    await t.until("result", () => t.results(id).length === 1);
+    const kinds = t.events(id).filter((e) => ["user", "text", "steer", "result"].includes(e.kind)).map((e) => e.text ?? e.kind);
+    assert.deepEqual(kinds, ["[steerable] first", "First part", "and second", "steer", "Both parts", "result"]);
+    assert.equal(t.events(id).at(-1).status, "idle", "one result ends both messages");
+    const r = await t.ask("chat.load", { chatId: id, source: "panel" });
+    assert.deepEqual(r.items.filter((i) => i.kind === "user" || i.kind === "text").map((i) => i.text), ["[steerable] first", "First part", "and second", "Both parts"]);
   } finally {
     t.done();
   }

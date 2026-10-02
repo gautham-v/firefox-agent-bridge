@@ -195,7 +195,10 @@ const cap = (s, n = 20_000) => (s.length > n ? `${s.slice(0, n)}…` : s);
 export async function claudeTranscript(file, maxItems = 1500) {
   const items = [];
   const names = new Map(); // tool_use id -> tool name, for result summaries
-  for await (const e of jsonLines(file)) {
+  for await (const line of jsonLines(file)) {
+    // A message the agent took up mid-turn is recorded as an attachment, not as a user entry.
+    const queued = line.type === "attachment" && line.attachment?.type === "queued_command" && line.attachment.commandMode === "prompt";
+    const e = queued ? { type: "user", message: { content: line.attachment.prompt } } : line;
     if (e.isSidechain) continue;
     if (e.type === "system" && e.subtype === "turn_duration") {
       items.push({ kind: "result", ok: true, durationMs: e.durationMs ?? null, numTurns: null, error: null });
@@ -228,6 +231,19 @@ export async function claudeTranscript(file, maxItems = 1500) {
     }
   }
   return items.slice(-maxItems);
+}
+
+// One tool call of a Claude Code session, for its step's details: {name, input, content, isError}.
+export async function claudeStep(file, toolUseId) {
+  let call = null;
+  for await (const e of jsonLines(file)) {
+    const blocks = Array.isArray(e.message?.content) ? e.message.content : [];
+    for (const b of blocks) {
+      if (b.type === "tool_use" && b.id === toolUseId) call = { name: b.name, input: b.input, content: null, isError: false };
+      else if (b.type === "tool_result" && b.tool_use_id === toolUseId && call) return { ...call, content: b.content, isError: !!b.is_error };
+    }
+  }
+  return call;
 }
 
 // Codex rollouts record every item twice (raw model input and structured events); the structured

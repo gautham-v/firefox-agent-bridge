@@ -1393,7 +1393,7 @@ async function closeOrphanGroups() {
 // Per-client consent was replaced by Disconnect/Unblock; drop what older versions stored.
 browser.storage.local.remove("allowedClients").catch(() => {});
 
-closeOrphanGroups().catch(() => {});
+const orphansClosed = closeOrphanGroups().catch(() => {});
 
 // ---------------------------------------------------------------------------------------------
 // Toolbar button, Stop shortcut and popup
@@ -1682,6 +1682,7 @@ function offlineReply({ type, requestId, engine, chatId }) {
   if (type === "teach.save") return { type: "teach.saved", requestId, ok: false, error: HOST_DOWN };
   if (type === "chat.load") return { type: "chat.transcript", requestId, chatId, items: [], done: true };
   if (type === "chat.settings") return { type, requestId, hostDown: true };
+  if (type === "chat.step") return { type, requestId, chatId, detail: null };
   if (type === "chat.handoff" || type === "chat.reclaim") return { type, requestId, chatId, ok: false, error: HOST_DOWN };
   return { type, requestId, engine, available: false, hostDown: true, version: null, error: HOST_DOWN, skills: [], plugins: [], connectors: [], models: [], efforts: [] };
 }
@@ -1798,8 +1799,31 @@ const tabInfo = (t) => ({ tabId: t.id, title: t.title, url: t.url, favIconUrl: t
 
 async function groupTabs(chat) {
   const tabs = (await sessionTabs(chat.id)).sort(byIndex);
+  for (const t of tabs) if (!chat.tabIds.has(t.id)) browser.sessions?.setTabValue(t.id, CHAT_TAB_KEY, chat.id).catch(() => {});
   chat.tabIds = new Set(tabs.map((t) => t.id));
   return tabs;
+}
+
+// A chat's tabs carry its id in Firefox's session store. A chat reopened after a restart takes
+// back the group session restore brought back for it (an "earlier" group until then), so the
+// panel knows its tabs again. Only our own orphaned groups: a tagged tab the user has since moved
+// into a group of theirs is left alone.
+const CHAT_TAB_KEY = "chat";
+
+async function adoptRestoredGroup(chat) {
+  if (!browser.sessions || chat.adoptTried || sessions.get(chat.id)?.groupId != null) return;
+  chat.adoptTried = true;
+  await orphansClosed;
+  for (const tab of await browser.tabs.query({}).catch(() => [])) {
+    if (!earlierGroups.has(tab.groupId)) continue;
+    if ((await browser.sessions.getTabValue(tab.id, CHAT_TAB_KEY).catch(() => null)) !== chat.id) continue;
+    const s = await newSessionEntry(ENGINE_NAMES[chat.engine] ?? "Claude");
+    s.groupId = tab.groupId;
+    sessions.set(chat.id, s);
+    earlierGroups.delete(tab.groupId);
+    await paintGroup(tab.groupId, s.label, sessionState(chat.id)).catch(() => {});
+    return;
+  }
 }
 
 // Not-yet-bound chats have an empty group, so panels can treat every state the same way.
@@ -2077,6 +2101,7 @@ const panelCommands = {
     panel.windowId = m.windowId ?? (await lastNormalWindowId());
     schedulePointTabs();
     const id = validChatId(m.chatId) ? m.chatId : windowChat.get(panel.windowId);
+    if (id) await adoptRestoredGroup(chatFor(id, panel.windowId));
     await showChat(panel, id ? chatFor(id, panel.windowId) : newChat(panel.windowId));
     post(panel, { type: "chats", chats: await openChats() });
   },
@@ -2108,6 +2133,7 @@ const panelCommands = {
     // Terminal sessions are Claude Code's, and their own model may no longer exist.
     if (m.source === "terminal") chat.engine = "claude";
     else if (ENGINE_NAMES[m.engine]) Object.assign(chat, { engine: m.engine, model: typeof m.model === "string" ? m.model : null });
+    await adoptRestoredGroup(chat);
     await showChat(panel, chat);
     if (!port) return emit(chat, { kind: "error", code: "spawn", message: HOST_DOWN });
     ask(panel, { type: "chat.load", chatId: chat.id, source: m.source ?? "panel", path: m.path });
@@ -2154,7 +2180,18 @@ const panelCommands = {
   },
   "chat.history": (panel, m) => ask(panel, { type: "chat.history", requestId: m.requestId }),
   "chat.capabilities": (panel, m) => ask(panel, { type: "chat.capabilities", requestId: m.requestId, engine: m.engine }),
+  "chat.step": (panel, m) => typeof m.toolUseId === "string" && ask(panel, { type: "chat.step", requestId: m.requestId, chatId: panel.chatId, toolUseId: m.toolUseId.slice(0, 200) }),
   "chat.settings": (panel, m) => ask(panel, { type: "chat.settings", requestId: m.requestId, ...(m.set && typeof m.set === "object" && { set: m.set }) }),
+
+  // Show tab, or a tab link in the agent's reply: bring one of the chat's tabs forward.
+  async "tab.show"(panel, m) {
+    if (typeof m.tabId !== "number") return;
+    const groupId = await sessionGroupId(panel.chatId);
+    const tab = await browser.tabs.get(m.tabId).catch(() => null);
+    if (groupId == null || tab?.groupId !== groupId) return;
+    await browser.tabs.update(tab.id, { active: true });
+    await browser.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  },
 
   "group.add"(panel, m) {
     if (typeof m.tabId !== "number") return;
@@ -2167,6 +2204,7 @@ const panelCommands = {
     const tab = await browser.tabs.get(m.tabId).catch(() => null);
     if (groupId == null || tab?.groupId !== groupId) return;
     await browser.tabs.ungroup(tab.id);
+    browser.sessions?.removeTabValue(tab.id, CHAT_TAB_KEY).catch(() => {});
     scheduleGroupPush(chat.id);
   },
 

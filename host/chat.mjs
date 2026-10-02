@@ -11,9 +11,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { HIDDEN_TOOLS, classifyError, clip, contextBlock, parseResetTime, skillName, skillPrompt, skillSites, summarizePermission, summarizeToolResult, summarizeToolUse, toolMasked, toolTab } from "./chat-format.mjs";
+import { HIDDEN_TOOLS, classifyError, clip, contextBlock, parseResetTime, skillName, skillPrompt, skillSites, summarizePermission, summarizeToolResult, stepDetail, summarizeToolUse, toolMasked, toolTab } from "./chat-format.mjs";
 import { endProcesses, openTerminal, shq } from "./terminal.mjs";
-import { chunkItems, claudeSessionMeta, claudeTitle, claudeTranscript, codexTranscript, encodeCwd, findCodexRollout, isPhoneSession, scanTerminalSessions } from "./chat-history.mjs";
+import { chunkItems, claudeSessionMeta, claudeStep, claudeTitle, claudeTranscript, codexTranscript, encodeCwd, findCodexRollout, isPhoneSession, scanTerminalSessions } from "./chat-history.mjs";
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -42,7 +42,8 @@ const SYSTEM_PROMPT =
   "and if a large result is saved to a file, open it with the Read tool, not shell commands, which need the user's approval. " +
   "When you talk about a specific element on a page, you can link it as [label](ref:ref_N), with a ref from find or read_page " +
   "in the tab you last used (for another tab, [label](ref:<tabId>/ref_N)); the user sees a chip that outlines the element " +
-  "in the page when they point at it. Keep answers short.";
+  "in the page when they point at it. When you mention one of the tabs in your group, link it as [label](tab:<tabId>): the user " +
+  "may be looking at another tab, and clicking the link switches to it. Keep answers short.";
 
 // Claude Code only (Codex has no sub-agents). From an eval of compare-several-pages tasks: fanning
 // out cut the median time 18-41% at 2.75x the cost, the gain is small below 4 pages, and most of
@@ -456,6 +457,31 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     emit(c.id, event);
   }
 
+  // What each recent step was given and got back, for the panel to ask about when its row is
+  // opened (chat.step). Kept here, clipped, instead of riding along on every tool event.
+  const MAX_STEP_DETAILS = 400;
+  function noteStep(c, id, name, input) {
+    c.details ??= new Map();
+    c.details.set(id, { name, input, detail: null });
+    if (c.details.size > MAX_STEP_DETAILS) c.details.delete(c.details.keys().next().value);
+  }
+  function noteStepEnd(c, id, content, isError) {
+    const d = c.details?.get(id);
+    if (d) d.detail = stepDetail(d.name, d.input, content, isError);
+  }
+
+  async function step(msg) {
+    const c = validId(msg.chatId) ? chats.get(msg.chatId) : null;
+    const id = String(msg.toolUseId ?? "");
+    const reply = (detail) => send({ type: "chat.step", requestId: msg.requestId, chatId: msg.chatId, toolUseId: id, detail });
+    const kept = c?.details?.get(id);
+    if (kept) return reply(kept.detail ?? stepDetail(kept.name, kept.input, null, false));
+    // A chat loaded from history: Claude Code's session file has the call.
+    const session = validId(msg.chatId) ? await findClaudeSession(msg.chatId, true).catch(() => null) : null;
+    const call = session ? await claudeStep(session.file, id).catch(() => null) : null;
+    reply(call ? stepDetail(call.name, call.input, call.content, call.isError) : null);
+  }
+
   // A turn that ended without the engine's own result: report the error, then close the turn so
   // the panel stops showing it as running.
   function failTurn(c, code, message, resetsAt = null) {
@@ -582,7 +608,7 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     const effort = claudeEffort(c);
     const modelInfo = CLAUDE_MODELS.find((m) => m.id === model);
     const args = [
-      "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+      "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--replay-user-messages",
       session ? "--resume" : "--session-id", c.id,
       "--model", model,
       ...(modelInfo?.efforts?.length === 0 ? [] : ["--effort", effort]),
@@ -713,13 +739,25 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
         emitText(c, `${j.message.id}:${n}`, "text", b.text);
       } else if (b.type === "tool_use" && !p.tools.has(b.id) && !HIDDEN_TOOLS.has(b.name)) {
         p.tools.set(b.id, b.name);
+        noteStep(c, b.id, b.name, b.input);
         emit(c.id, { kind: "tool_start", toolUseId: b.id, name: b.name, summary: summarizeToolUse(b.name, b.input), ...toolTab(b.name, b.input) });
       }
     }
   }
 
   function onClaudeUser(c, p, j) {
+    // Claude Code echoes each message as it takes it up (--replay-user-messages). One taken up
+    // while a turn is running was folded into that turn and gets no result of its own.
+    if (j.isReplay) {
+      if (p.inTurn) {
+        c.turns = Math.max(1, c.turns - 1);
+        emit(c.id, { kind: "steer" });
+      }
+      p.inTurn = true;
+      return;
+    }
     for (const b of Array.isArray(j.message?.content) ? j.message.content : []) {
+      if (b.type === "tool_result" && p.tools.has(b.tool_use_id)) noteStepEnd(c, b.tool_use_id, b.content, b.is_error);
       if (b.type === "tool_result" && p.tools.has(b.tool_use_id)) emit(c.id, { kind: "tool_end", toolUseId: b.tool_use_id, ok: !b.is_error, summary: summarizeToolResult(p.tools.get(b.tool_use_id) ?? "", b.content, b.is_error), ...toolMasked(p.tools.get(b.tool_use_id) ?? "", b.content) });
     }
   }
@@ -732,6 +770,7 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     for (const b of Array.isArray(j.message?.content) ? j.message.content : []) {
       if (b.type !== "tool_use" || p.tools.has(b.id) || HIDDEN_TOOLS.has(b.name)) continue;
       p.tools.set(b.id, b.name);
+      noteStep(c, b.id, b.name, b.input);
       emit(c.id, { kind: "tool_start", toolUseId: b.id, name: b.name, summary: summarizeToolUse(b.name, b.input), ...toolTab(b.name, b.input), parent: String(j.parent_tool_use_id) });
     }
   }
@@ -832,6 +871,7 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     p.texts.clear();
     p.tools.clear();
     p.stream = null;
+    p.inTurn = false;
     clearTimeout(p.interruptTimer);
     const interrupted = j.terminal_reason === "aborted_streaming" || p.interrupted;
     p.interrupted = false;
@@ -1012,12 +1052,14 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     } else return;
     if (!p.tools.has(it.id)) {
       p.tools.add(it.id);
+      noteStep(c, it.id, name, input);
       emit(c.id, { kind: "tool_start", toolUseId: it.id, name, summary: summarizeToolUse(name, input), ...toolTab(name, input) });
     }
     if (!completed) return;
     const ok = it.status !== "failed" && !it.error && (it.exit_code == null || it.exit_code === 0);
     const text = it.result?.content?.filter((b) => b.type === "text").map((b) => b.text).join("\n") ?? "";
     const summary = ok ? summarizeToolResult(name, it.result?.content?.some((b) => b.type === "image") ? [{ type: "image" }] : text, false) : clip(it.error?.message ?? it.error ?? "Failed", 120);
+    noteStepEnd(c, it.id, ok ? (it.result?.content ?? it.aggregated_output ?? "") : String(it.error?.message ?? it.error ?? "Failed"), !ok);
     emit(c.id, { kind: "tool_end", toolUseId: it.id, ok, summary, ...toolMasked(name, it.result?.content) });
   }
 
@@ -1402,6 +1444,7 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
     "chat.close": guarded("chat.close", onClose),
     "chat.history": guarded("chat.history", async (msg) => send({ type: "chat.history", requestId: msg.requestId, chats: await history() })),
     "chat.load": guarded("chat.load", load),
+    "chat.step": guarded("chat.step", step),
     "chat.handoff": guarded("chat.handoff", handoff),
     "chat.reclaim": guarded("chat.reclaim", reclaim),
     "chat.settings": guarded("chat.settings", (msg) => {

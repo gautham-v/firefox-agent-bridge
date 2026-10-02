@@ -89,7 +89,20 @@ async function runTurn(content) {
   const images = blocks.filter((b) => b.type === "image").length;
   init();
   record({ type: "user", uuid: `q-${++counter}`, message: { role: "user", content } });
+  write({ type: "user", message: { role: "user", content }, parent_tool_use_id: null, isReplay: true });
   const id = `msg_${++counter}`;
+
+  // A message that arrives while this turn runs is taken into it, as Claude Code does between
+  // tool calls: echoed, recorded as an attachment, and answered by this turn's one result.
+  if (text.includes("[steerable]")) {
+    await assistantText(id, "First part", {});
+    const next = await new Promise((resolve) => (steer = resolve));
+    steer = null;
+    write({ type: "user", message: { role: "user", content: next }, parent_tool_use_id: null, isReplay: true });
+    record({ type: "attachment", uuid: `q-${++counter}`, attachment: { type: "queued_command", prompt: next, commandMode: "prompt" } });
+    await assistantText(`msg_${++counter}`, "Both parts", {});
+    return result();
+  }
 
   if (text.includes("[crash]")) {
     process.stderr.write("Error: boom, the engine crashed\n");
@@ -214,6 +227,7 @@ function controlRequest(msg) {
   write({ type: "control_response", response: { subtype: "error", request_id: msg.request_id, error: `unsupported ${r.subtype}` } });
 }
 
+let steer = null;
 let chain = Promise.resolve();
 const rl = readline.createInterface({ input: process.stdin });
 rl.on("line", (line) => {
@@ -229,6 +243,7 @@ rl.on("line", (line) => {
     pendingResponses.delete(msg.response?.request_id);
     return;
   }
+  if (msg.type === "user" && steer) return steer(msg.message.content);
   if (msg.type === "user") chain = chain.then(() => runTurn(msg.message.content));
 });
 rl.on("close", async () => {
