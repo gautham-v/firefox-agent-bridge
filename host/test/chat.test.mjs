@@ -198,14 +198,14 @@ test("claude: later messages reuse the process; a model or effort change restart
     assert.equal(t.runs().length, 1, "same process");
     await t.turn(id, "three", { model: "claude-sonnet-5-5" });
     await t.turn(id, "four", { model: "claude-sonnet-5-5", effort: "low" });
-    await t.turn(id, "five", { model: "claude-haiku-4-5-20251001" });
+    await t.turn(id, "five", { model: "claude-haiku-5-5" });
     const runs = t.runs();
     assert.equal(runs.length, 4);
     assert.equal(flagValue(runs[1].argv, "--resume"), id);
     assert.ok(!runs[1].argv.includes("--session-id"));
     assert.equal(flagValue(runs[1].argv, "--model"), "claude-sonnet-5-5");
     assert.equal(flagValue(runs[2].argv, "--effort"), "low");
-    assert.ok(!runs[3].argv.includes("--effort"), "Haiku has no effort setting");
+    assert.equal(flagValue(runs[3].argv, "--effort"), "high", "Haiku 5.5 takes an effort, the default when none is picked");
     assert.equal(t.results(id).every((r) => r.ok), true);
   } finally {
     t.done();
@@ -520,7 +520,7 @@ test("claude capabilities come from the CLI's control protocol and cost no model
     assert.deepEqual(caps.skills, [{ name: "tdd", description: "Test-driven development with a red-green loop.", sites: [] }, { name: "viz", description: "Turn a discussion into a visual.", sites: [] }]);
     assert.deepEqual(caps.plugins, [{ name: "swift-lsp" }]);
     assert.deepEqual(caps.connectors, [{ name: "Gmail", status: "connected" }, { name: "Stripe", status: "needs-auth" }], "waits for pending connectors and leaves out firefox itself");
-    assert.deepEqual(caps.models.map((m) => [m.id, m.label]), [["claude-sonnet-5-5", "Sonnet 5.5"], ["claude-opus-5-5", "Opus 5.5"], ["claude-fable-5-1", "Fable 5.1"], ["claude-haiku-4-5-20251001", "Haiku 4.5"]]);
+    assert.deepEqual(caps.models.map((m) => [m.id, m.label]), [["claude-sonnet-5-5", "Sonnet 5.5"], ["claude-opus-5-5", "Opus 5.5"], ["claude-fable-5-1", "Fable 5.1"], ["claude-haiku-5-5", "Haiku 5.5"]]);
     assert.equal(caps.models[0].default, true);
     assert.deepEqual(caps.efforts, ["low", "medium", "high", "xhigh", "max"]);
     assert.ok(!t.runs().some((r) => r.argv.includes("--model")), "the probe never sends a prompt");
@@ -916,10 +916,10 @@ test("an empty model or effort resets to the engine's default; a stored one from
   try {
     // Haiku, then the default model: the default is what the next process gets.
     const a = newId();
-    await t.turn(a, "one", { model: "claude-haiku-4-5-20251001", effort: "" });
+    await t.turn(a, "one", { model: "claude-haiku-5-5", effort: "" });
     await t.turn(a, "two", { model: "", effort: "" });
     const [first, second] = t.runs();
-    assert.equal(flagValue(first.argv, "--model"), "claude-haiku-4-5-20251001");
+    assert.equal(flagValue(first.argv, "--model"), "claude-haiku-5-5");
     assert.equal(flagValue(second.argv, "--model"), "claude-sonnet-5-5", "the empty model is the default, not the old one");
     assert.equal(flagValue(second.argv, "--effort"), "high");
 

@@ -1582,7 +1582,7 @@ function currentModel() {
   return models.find((x) => x.id === S.model) ?? (S.model ? null : models.find((x) => x.default)) ?? null;
 }
 
-// "claude-haiku-4-5-20251001" reads as "Haiku 4.5" until the model list arrives.
+// "claude-haiku-5-5" reads as "Haiku 5.5" until the model list arrives.
 function prettyModelId(id) {
   const m = /^claude-([a-z]+)-(\d+)-(\d+)(?:-\d{8})?$/.exec(id);
   return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}.${m[3]}` : id;
@@ -1592,7 +1592,7 @@ function modelLabel() {
   return currentModel()?.label ?? (S.model ? prettyModelId(S.model) : "Default");
 }
 
-// A model's own efforts narrow the engine's (Haiku has none).
+// A model's own efforts narrow the engine's (an empty list means no effort row).
 function effortsFor() {
   const c = S.caps[S.engine];
   return (currentModel()?.efforts ?? c?.efforts ?? []).map((e) => (typeof e === "string" ? e : e.id));

@@ -49,7 +49,7 @@ const TAIL = Number(opt("tail", 3)) * SPEED; // seconds the finished frame stays
 const HOLD = opt("hold", "close");
 if (!["close", "result"].includes(HOLD)) throw new Error("--hold is close or result");
 const LABELS = { firefox: "Firefox Agent Bridge", chrome: "Claude in Chrome" };
-const MODEL_NAMES = { "claude-sonnet-5-5": "Sonnet 5.5", "claude-opus-5-5": "Opus 5.5", "claude-fable-5-1": "Fable 5.1", "claude-haiku-4-5-20251001": "Haiku 4.5" };
+const MODEL_NAMES = { "claude-sonnet-5-5": "Sonnet 5.5", "claude-opus-5-5": "Opus 5.5", "claude-fable-5-1": "Fable 5.1", "claude-haiku-4-5-20251001": "Haiku 4.5", "claude-haiku-5-5": "Haiku 5.5" };
 const cap1 = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 // Labels: flat near-black bars with hairline edges and square corners; a timer cell on the right
 // that turns green when that side is done; a race line along the bottom.

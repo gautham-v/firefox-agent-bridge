@@ -196,7 +196,7 @@ Capabilities cost no model tokens: for Claude Code the host asks a prompt-less `
 `connectors` are its MCP servers other than `firefox`, with Claude Code's own status strings such as
 `connected`, `needs-auth`, `pending`, `failed`, and the `claude.ai ` prefix dropped), and runs
 `claude plugin list --json`. `efforts` is the union for the engine, and a model's own `efforts`
-narrows it (Haiku 4.5 has none). `default: true` marks the model a new chat starts with. Results
+narrows it (an empty list means no effort row). `default: true` marks the model a new chat starts with. Results
 are cached for a minute, except that an engine that isn't available is asked again after two
 seconds, so Try again after installing or signing in sees the change. Claude Code adds its claude.ai connectors a moment after start, so the host
 asks `mcp_status` again (up to 8 times, a second apart) while the list is empty or has a `pending`
@@ -357,7 +357,7 @@ while paused resumes first; tabs that join the group while the agent is running 
 `tabs_create_mcp`) don't open the tray or toast; a turn with Task steps draws its steps card as
 fan-out rows (`sidebar/fanout.js`: one row per top-level Task step holding every call under it,
 its site taken from the tab of its latest call, remembered after the tab closes, or from its
-navigate summary, and its reply shown under it once it ends; the agent cam is off for such a turn); a model's `efforts` narrows the effort row (none for Haiku 4.5,
+navigate summary, and its reply shown under it once it ends; the agent cam is off for such a turn); a model's `efforts` narrows the effort row (an empty list means no row,
 and the panel then sends an empty effort); a model marked `default` stands for the panel's empty
 model; a `limit` error shows "Your <engine> plan resets at <time>" when `resetsAt` is set, else the
 error's own message; and the message paused calls get from the extension points at the panel, not
