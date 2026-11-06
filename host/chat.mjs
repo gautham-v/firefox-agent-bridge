@@ -616,7 +616,9 @@ export function createChat({ send, log = () => {}, home = os.homedir(), env = pr
       "--permission-mode", settings().permissions === "bypass" ? "bypassPermissions" : "default",
       "--permission-prompt-tool", "stdio",
       "--allowedTools", ALLOWED_TOOLS.join(","),
-      "--mcp-config", JSON.stringify({ mcpServers: { firefox: firefoxServer(c.id) } }),
+      // Only this server: the user's own MCP servers (e.g. the Go-based Looker toolbox, whose
+      // Snowflake driver trips Gatekeeper on an ad-hoc dylib) add nothing the chat can call.
+      "--strict-mcp-config", "--mcp-config", JSON.stringify({ mcpServers: { firefox: firefoxServer(c.id) } }),
       "--settings", claudeSettings(cwd),
       "--append-system-prompt", `${SYSTEM_PROMPT} ${FANOUT_PROMPT} ${memoryPrompt(cwd)}`,
     ];
