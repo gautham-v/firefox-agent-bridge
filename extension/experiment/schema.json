@@ -115,6 +115,49 @@
         ]
       },
       {
+        "name": "dialog",
+        "type": "function",
+        "async": true,
+        "description": "Answer the alert, confirm, prompt or beforeunload dialog open in a tab: OK when accept is true (after typing text into a prompt), Cancel otherwise. Resolves to a line saying what it did.",
+        "parameters": [
+          {
+            "name": "tabId",
+            "type": "integer"
+          },
+          {
+            "name": "accept",
+            "type": "boolean"
+          },
+          {
+            "name": "text",
+            "type": "string",
+            "optional": true
+          }
+        ]
+      },
+      {
+        "name": "setViewport",
+        "type": "function",
+        "async": true,
+        "description": "Set the size of a tab's page area in CSS pixels without resizing the window, or give it back to the window with nulls. Resolves to { width, height } afterwards.",
+        "parameters": [
+          {
+            "name": "tabId",
+            "type": "integer"
+          },
+          {
+            "name": "width",
+            "type": "integer",
+            "optional": true
+          },
+          {
+            "name": "height",
+            "type": "integer",
+            "optional": true
+          }
+        ]
+      },
+      {
         "name": "setActive",
         "type": "function",
         "async": true,

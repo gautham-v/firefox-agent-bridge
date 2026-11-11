@@ -145,6 +145,12 @@ These have the same names and arguments as Claude in Chrome: `tabs_context_mcp`,
 `form_input`, `javascript_tool`, `file_upload` and `get_page_text`. In Claude Code they show up
 as `mcp__firefox__<name>`; Codex lists them under `mcp__firefox`.
 
+`resize_window {width, height, tabId}` is Chrome's name too, but here it sets the size of that
+tab's page area in CSS pixels and leaves the window alone (the way WebDriver BiDi's
+`setViewport` does), so a phone layout can be had in a background tab; without `width` and
+`height` it resets. `handle_dialog {accept, text, tabId}` answers a page's `alert`, `confirm`,
+`prompt` or `beforeunload` dialog: OK or Cancel, with `text` typed into a prompt first.
+
 `replay_steps {path, inputs, tabId}` is this bridge's own: it runs a `replay.json` saved by
 [Teach](#teach) step by step without the model, and at the first step that doesn't match it
 stops and returns the step, what was expected, the recorded screenshot of it and the page's
@@ -176,8 +182,14 @@ Differences from Chrome:
   text to stop growing (up to 5s), as navigate did before. The MCP server sets
   `wait: "interactive"` when a call leaves `wait` out; `scripts/ffctl.mjs` talks to Firefox
   directly, so there the default is still `"load"`.
-- A click waits only when it opened a tab, to name that tab in its result. A click that opened
-  nothing answers at once, so keys and typing sent right after it aren't held up.
+- A click waits only when it opened a tab, to name that tab in its result, or started a
+  navigation (a link, a form's submit; Enter does the same). It then answers once the new page is
+  parsed and says where it landed, so a read in the same `batch` reads the new page. Telling
+  takes 40ms; a click that did neither answers after that, and other keys answer at once.
+- A page script stops inside `alert`, `confirm` and `prompt` until the dialog is answered, and
+  so does the click or `javascript_tool` call that opened it. The call is answered as soon as
+  the dialog opens, with the dialog's type and text, and every other call in that tab fails with
+  the same note until `handle_dialog` answers it.
 - `read_page` names elements as the accessibility tree would: labels, an image's alt, an icon's
   svg title, the title of a child with no text. An editor is one textbox, not a line per span.
   A focusable wrapper that only holds other controls is left out; they are listed.
@@ -186,10 +198,10 @@ Differences from Chrome:
 
 ### devtools
 
-`devtools {kind, tabId, pattern, level, onlyFailed, limit, clear}` reads a tab's console
+`devtools {kind, tabId, pattern, level, onlyFailed, bodies, limit, clear}` reads a tab's console
 messages (`kind: "console"`) or network requests (`kind: "network"`), like Chrome's
 `read_console_messages` and `read_network_requests` in one tool. It's off by default, since every
-tool definition is sent on every turn (this one is 591 characters; the other 13 are about 11.5k).
+tool definition is sent on every turn (this one is 649 characters; the other 15 are about 13k).
 The MCP server lists it only when it runs with `FIREFOX_BRIDGE_DEVTOOLS=1`:
 
 - **Claude Code:** start it as `FIREFOX_BRIDGE_DEVTOOLS=1 claude`; the server inherits it.
@@ -211,7 +223,12 @@ What it does:
   warnings Firefox reports for the page: uncaught exceptions, CSP, failed loads and blocked CORS
   requests. `level` is a minimum (`"warning"` gives warnings and errors).
 - **Network:** method, URL, status, type, size when known, duration, and the error for requests
-  that failed, from `webRequest`. No headers or bodies. `onlyFailed` keeps errors and 4xx/5xx.
+  that failed, from `webRequest`. No headers. `onlyFailed` keeps errors and 4xx/5xx.
+- **Bodies:** with `bodies: true`, each xhr or fetch request is followed by what it sent and
+  the response's text (the first 20kB is kept; 4,000 characters of each are shown, 20,000 in one
+  answer). Responses are copied as they stream through a `webRequest` response filter, which is
+  why the extension asks for `webRequestBlocking`; the listener is only there while a session
+  with the tool has tabs. Documents, scripts and images aren't kept.
 - **Output.** One line per entry, newest last, after a header saying how many were filtered out,
   cut by `limit` (default 50) and dropped from the buffer. `pattern` is a case-insensitive
   regex over the message text or the URL.
@@ -532,6 +549,10 @@ Limits:
   `signature`, `session`, `code`, `otp`, ...), which read `[redacted]`. A fragment without `=`
   is an anchor and is kept.
 - **Tokens:** JWTs and `Bearer`/`Basic` values are cut out anywhere.
+- **Bodies** (`bodies: true`) get the URL and token rules, and in JSON and form-encoded bodies
+  the values of fields named like secrets (the parameter names above) read `[redacted]`. Masked
+  field values are not looked for, so a password posted under another name shows; keep the tool
+  off for sessions that sign in.
 - `pattern` is matched against the redacted text, so it can't be used to probe for a secret.
 
 It doesn't redact secrets in URL paths (`/reset/<token>`), parameters with other names, a card

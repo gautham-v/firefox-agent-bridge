@@ -737,7 +737,21 @@ async function openedTabsNote(tabId, since) {
 // ---------------------------------------------------------------------------------------------
 // Tools
 
-const page = (tabId, op, args) => browser.claudePage.call(tabId, op, { ...args, redact: redactRules });
+// A read sent just as the page navigates away (a click that submits, then get_page_text in the
+// same batch) loses its actor with the old document. The read is what was asked for, so it waits
+// for the new document to be parsed and is asked again, once.
+const READ_OPS = new Set(["text", "readPage"]);
+const NAVIGATED_AWAY = /destroyed before query|no window in this frame yet/;
+async function page(tabId, op, args) {
+  const call = () => browser.claudePage.call(tabId, op, { ...args, redact: redactRules });
+  try {
+    return await call();
+  } catch (e) {
+    if (!READ_OPS.has(op) || !NAVIGATED_AWAY.test(e?.message ?? "")) throw e;
+    await waitForInteractive(tabId, null, Date.now());
+    return call();
+  }
+}
 
 // read_page with child frames: each frame's tree goes under its iframe's line (the one ending in
 // frame=f<id>), cross-origin frames and frames inside shadow roots included, so their elements
@@ -901,6 +915,28 @@ async function scrollToRef(tabId, ref) {
   return `Scrolled ${ref} into view; its center is now at (${Math.round(x * scale)}, ${Math.round(y * scale)})${after}`;
 }
 
+// A click or key press that starts a navigation (a link, a form's submit) is answered once the
+// new page is parsed, and says where it landed, so a read in the same batch reads the new page
+// instead of the one being left. `before` is the tab and its docState from before the action. A
+// page that was still loading then can't be told apart from one that started to, so it's left.
+const NAV_START_MS = 40;
+async function followNavigation(tabId, before, started) {
+  if (before.tab.status === "loading" || before.doc == null) return "";
+  await sleep(NAV_START_MS);
+  let tab;
+  try {
+    tab = await browser.tabs.get(tabId);
+  } catch {
+    return ""; // the action closed the tab
+  }
+  if (tab.status !== "loading") return "";
+  const early = await waitForInteractive(tabId, before.doc, started);
+  tab = early?.tab ?? tab;
+  return `\nThat loaded ${tab.url}${early?.title ? ` (${early.title})` : ""}.`;
+}
+
+const DIALOG_OPEN = /^A \w+ dialog is open on this page/;
+
 async function computer(session, args) {
   const { action, tabId } = args;
   const tab = await requireTab(session, tabId);
@@ -922,10 +958,12 @@ async function computer(session, args) {
       const clickCount = { double_click: 2, triple_click: 3 }[action] ?? 1;
       const button = action === "right_click" ? 2 : 0;
       const since = Date.now();
-      const [point, before] = await Promise.all([toCss(tabId, args.coordinate), openerTabs(tabId)]);
+      const [point, before, doc] = await Promise.all([toCss(tabId, args.coordinate), openerTabs(tabId), docState(tabId)]);
       const result = await page(tabId, "click", { ...point, ref: args.ref, button, clickCount, modifiers: args.modifiers, animate });
+      if (typeof result === "string" && DIALOG_OPEN.test(result)) return [text(result)];
       const opened = result?.opens || [...(await openerTabs(tabId))].some((id) => !before.has(id));
-      return pageContent(result, opened ? await openedTabsNote(tabId, since) : "");
+      const landed = await followNavigation(tabId, { tab, doc }, since);
+      return pageContent(result, landed + (opened ? await openedTabsNote(tabId, since) : ""));
     }
     case "hover":
       needsTarget();
@@ -939,9 +977,17 @@ async function computer(session, args) {
     case "type":
       if (typeof args.text !== "string") throw new Error("type needs text.");
       return pageContent(await page(tabId, "type", { text: args.text }));
-    case "key":
+    case "key": {
       if (!args.text) throw new Error("key needs text, e.g. \"Enter\" or \"cmd+a\".");
-      return pageContent(await page(tabId, "key", { keys: args.text, repeat: args.repeat ?? 1 }));
+      // Only Enter is taken as able to start a navigation (a form's submit), so other keys
+      // answer at once.
+      const submits = /\b(enter|return)\b/i.test(args.text);
+      const started = Date.now();
+      const doc = submits ? await docState(tabId) : null;
+      const result = await page(tabId, "key", { keys: args.text, repeat: args.repeat ?? 1 });
+      if (typeof result === "string" && DIALOG_OPEN.test(result)) return [text(result)];
+      return pageContent(result, submits ? await followNavigation(tabId, { tab, doc }, started) : "");
+    }
     case "scroll":
       return [text(await page(tabId, "scroll", { ...(await toCss(tabId, args.coordinate)), direction: args.scroll_direction ?? "down", amount: args.scroll_amount ?? 3 }))];
     case "scroll_to":
@@ -1041,6 +1087,25 @@ async function runTool(session, tool, args, client) {
     case "replay_steps":
       return replaySteps(session, args, client);
 
+    case "handle_dialog":
+      await requireTab(session, args.tabId);
+      return [text(await browser.claudePage.dialog(args.tabId, args.accept !== false, typeof args.text === "string" ? args.text : null))];
+
+    case "resize_window": {
+      await requireTab(session, args.tabId);
+      const side = (name) => {
+        const v = args[name];
+        if (v == null) return null;
+        if (!Number.isInteger(v) || v < 200 || v > 4000) throw new Error(`${name} must be a whole number of CSS pixels from 200 to 4000.`);
+        return v;
+      };
+      const [width, height] = [side("width"), side("height")];
+      const size = await browser.claudePage.setViewport(args.tabId, width, height);
+      frameRatio.delete(args.tabId);
+      const now = `${size.width}x${size.height} CSS px`;
+      return [text(width == null && height == null ? `Tab ${args.tabId}'s page area follows the window again (${now}).` : `Tab ${args.tabId}'s page area is now ${now}; the page sees that as its viewport. The window was not resized.`)];
+    }
+
     case "devtools":
       await requireTab(session, args.tabId);
       if (!watchedTabs.has(args.tabId) && !devtools.has(args.tabId)) {
@@ -1129,7 +1194,36 @@ browser.claudePage.onConsole?.addListener((tabId, batch) => {
   if (watchedTabs.has(tabId)) devtools.consoleBatch(tabId, batch);
 });
 
-const requestStarted = (d) => watchedTabs.has(d.tabId) && devtools.requestStarted(d);
+// xhr and fetch responses of watched tabs are copied as they stream through (the first
+// BODY_KEEP_BYTES), for devtools' bodies option. Firefox only hands out a response filter to a
+// blocking listener, which needs the webRequestBlocking permission; without it bodies are left out.
+const BODY_KEEP_BYTES = 20000;
+let filterBodies = true;
+function requestStarted(d) {
+  if (!watchedTabs.has(d.tabId)) return;
+  const entry = devtools.requestStarted(d);
+  if (!filterBodies || d.type !== "xmlhttprequest") return;
+  try {
+    const filter = browser.webRequest.filterResponseData(d.requestId);
+    const chunks = [];
+    let kept = 0;
+    let total = 0;
+    filter.ondata = (e) => {
+      filter.write(e.data);
+      total += e.data.byteLength;
+      if (kept >= BODY_KEEP_BYTES) return;
+      const part = e.data.slice(0, BODY_KEEP_BYTES - kept);
+      chunks.push(part);
+      kept += part.byteLength;
+    };
+    filter.onstop = () => {
+      filter.close();
+      devtools.responseBody(entry, chunks, total);
+    };
+  } catch {
+    filterBodies = false;
+  }
+}
 const requestRedirected = (d) => devtools.requestEnded(d, "redirect");
 const requestCompleted = (d) => devtools.requestEnded(d, "done");
 const requestFailed = (d) => devtools.requestEnded(d, "failed");
@@ -1141,10 +1235,17 @@ function listenRequests(on) {
   const wr = browser.webRequest;
   if (!wr || on === listeningRequests) return;
   listeningRequests = on;
-  const pairs = [[wr.onBeforeRequest, requestStarted], [wr.onBeforeRedirect, requestRedirected], [wr.onCompleted, requestCompleted], [wr.onErrorOccurred, requestFailed]];
+  const pairs = [[wr.onBeforeRedirect, requestRedirected], [wr.onCompleted, requestCompleted], [wr.onErrorOccurred, requestFailed]];
   for (const [event, listener] of pairs) {
     if (on) event.addListener(listener, { urls: ["<all_urls>"] });
     else event.removeListener(listener);
+  }
+  if (!on) return wr.onBeforeRequest.removeListener(requestStarted);
+  try {
+    wr.onBeforeRequest.addListener(requestStarted, { urls: ["<all_urls>"] }, ["blocking", "requestBody"]);
+  } catch {
+    filterBodies = false;
+    wr.onBeforeRequest.addListener(requestStarted, { urls: ["<all_urls>"] });
   }
 }
 

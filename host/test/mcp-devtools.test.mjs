@@ -96,7 +96,7 @@ test("with FIREFOX_BRIDGE_DEVTOOLS=1, devtools is listed, batchable and small, a
     assert.ok(def);
     assert.deepEqual(def.inputSchema.required, ["kind"]);
     const size = JSON.stringify(def).length;
-    assert.ok(size < 600, `devtools definition is ${size} chars`);
+    assert.ok(size < 650, `devtools definition is ${size} chars`);
     const batch = tools.find((t) => t.name === "batch");
     assert.ok(batch.inputSchema.properties.actions.items.properties.tool.enum.includes("devtools"));
     // Everything else is as before.

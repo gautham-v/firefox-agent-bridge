@@ -173,6 +173,33 @@ const TOOLS = [
     inputSchema: { type: "object", properties: { tabId: tabId() } },
   },
   {
+    name: "handle_dialog",
+    description:
+      "Answer a page's alert, confirm, prompt or beforeunload dialog. When an action opens one, its result says so and the page stays stopped until this is called. accept true is OK, false is Cancel.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        accept: { type: "boolean", description: "true for OK, false for Cancel." },
+        text: { type: "string", description: "Text to enter in a prompt dialog before accepting." },
+        tabId: tabId(),
+      },
+      required: ["accept"],
+    },
+  },
+  {
+    name: "resize_window",
+    description:
+      "Set the size of a tab's page area (its viewport) in CSS pixels, e.g. 480x800 for a site's phone layout. Only that tab's page changes; the browser window keeps its size. Leave out width and height to reset.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        width: { type: "integer", description: "Viewport width in CSS pixels." },
+        height: { type: "integer", description: "Viewport height in CSS pixels." },
+        tabId: tabId(),
+      },
+    },
+  },
+  {
     name: "replay_steps",
     description:
       "Run a recorded replay.json (saved by Teach in the Firefox panel, next to a skill's SKILL.md) in a tab, without reasoning about each step. Each step's element is found by role and name (then its CSS selector and nearby text), acted on, and its expected result checked. It stops at the first step that doesn't match and returns the step number, what was expected, the recorded screenshot of that step and the page's interactive elements; finish the task from there with the other tools.",
@@ -198,9 +225,9 @@ const DEVTOOLS = process.env.FIREFOX_BRIDGE_DEVTOOLS === "1";
 if (DEVTOOLS) {
   TOOLS.push({
     name: "devtools",
-    // Kept short: under 600 characters of JSON (host/test/mcp-devtools.test.mjs checks).
+    // Kept short: under 650 characters of JSON (host/test/mcp-devtools.test.mjs checks).
     description:
-      "A tab's console messages or network requests, kept from page load on, across navigations. level is a minimum. onlyFailed: errors and 4xx/5xx. limit: newest N (50). clear: empty after reading.",
+      "A tab's console messages or network requests, kept from page load on, across navigations. level is a minimum. onlyFailed: errors and 4xx/5xx. bodies: add xhr/fetch bodies. limit: newest N (50). clear: empty after reading.",
     inputSchema: {
       type: "object",
       properties: {
@@ -209,6 +236,7 @@ if (DEVTOOLS) {
         pattern: { type: "string", description: "Regex on text or URL." },
         level: { type: "string", enum: ["error", "warning", "info", "log"] },
         onlyFailed: { type: "boolean" },
+        bodies: { type: "boolean" },
         limit: { type: "number" },
         clear: { type: "boolean" },
       },

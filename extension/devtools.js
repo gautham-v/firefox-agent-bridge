@@ -95,6 +95,46 @@ function bytes(n) {
   return `${(n / 1024 / 1024).toFixed(1)}MB`;
 }
 
+// Bodies as the bodies option shows them: each cut to BODY_SHOWN, and BODIES_TOTAL in one answer.
+const BODY_SHOWN = 4000;
+const BODIES_TOTAL = 20000;
+
+// A body with the values of fields named like secrets (password, token, apiKey...) cut out:
+// in JSON at any depth, and in form-encoded text. Other text gets the URL and token rules.
+function scrubBody(text) {
+  const t = text.trim();
+  if (/^[\[{]/.test(t)) {
+    try {
+      const walk = (v) => {
+        if (Array.isArray(v)) return v.map(walk);
+        if (v === null || typeof v !== "object") return v;
+        return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, secretParam(k) && x != null && typeof x !== "object" ? REDACTED : walk(x)]));
+      };
+      return redactText(JSON.stringify(walk(JSON.parse(t))));
+    } catch {
+      // not JSON after all
+    }
+  } else if (/^[^=&\s]+=[^&\s]*(&[^=&\s]+=[^&\s]*)*$/.test(t)) {
+    return scrubTokens(scrubParams(t));
+  }
+  return redactText(text);
+}
+
+// A request body from webRequest's requestBody ({ formData } or { raw: [{ bytes }] }) as text.
+function sentText(body) {
+  if (!body) return null;
+  if (body.formData) return cut(scrubBody(JSON.stringify(body.formData)), BODY_SHOWN);
+  const parts = (body.raw ?? []).filter((p) => p?.bytes).map((p) => new Uint8Array(p.bytes));
+  return parts.length ? bodyText(parts) : null;
+}
+
+// Bytes as text, or null when they aren't text.
+function bodyText(chunks) {
+  const decoder = new TextDecoder("utf-8");
+  const out = chunks.map((c) => decoder.decode(c, { stream: true })).join("") + decoder.decode();
+  return !out || out.includes("\u0000") ? null : scrubBody(out);
+}
+
 function createDevtools({ keep = DEVTOOLS_KEEP } = {}) {
   const tabs = new Map(); // tab id -> { console: {entries, dropped}, network: {entries, dropped} }
   const pending = new Map(); // webRequest requestId -> its entry, until it finishes
@@ -144,8 +184,19 @@ function createDevtools({ keep = DEVTOOLS_KEEP } = {}) {
       size: null,
       ms: null,
       error: null,
+      sent: sentText(d.requestBody),
+      body: null,
+      bodyBytes: 0,
     });
     pending.set(d.requestId, entry);
+    return entry;
+  }
+
+  // The start of a response body (the first bytes of `total`), once it has all arrived.
+  function responseBody(entry, chunks, total) {
+    if (!entry) return;
+    entry.body = bodyText(chunks);
+    entry.bodyBytes = total;
   }
 
   function requestEnded(d, how) {
@@ -219,11 +270,29 @@ function createDevtools({ keep = DEVTOOLS_KEEP } = {}) {
       b.entries = [];
       b.dropped = 0;
     }
-    const lines = shown.map(kind === "console" ? consoleLine : networkLine);
+    if (kind === "console") return [head + (args.clear ? " Cleared." : ""), ...shown.map(consoleLine)].join("\n");
+    const hasBodies = shown.some((e) => e.sent || e.body);
+    if (!args.bodies) return [head + (args.clear ? " Cleared." : "") + (hasBodies ? " bodies: true adds the request and response bodies." : ""), ...shown.map(networkLine)].join("\n");
+    const lines = [];
+    let room = BODIES_TOTAL;
+    for (const e of shown) {
+      lines.push(networkLine(e));
+      for (const [label, value] of [["sent", e.sent], ["response", e.body]]) {
+        if (!value) continue;
+        if (room <= 0) {
+          lines.push(`  ${label}: (left out: this answer already holds ${BODIES_TOTAL} characters of bodies; narrow it with pattern or limit)`);
+          continue;
+        }
+        const shownBody = cut(value, Math.min(BODY_SHOWN, room));
+        room -= shownBody.length;
+        const more = label === "response" && shownBody.length < value.length ? ` (cut; ${bytes(e.bodyBytes) ?? "?"} in all)` : "";
+        lines.push(`  ${label}: ${shownBody}${more}`);
+      }
+    }
     return [head + (args.clear ? " Cleared." : ""), ...lines].join("\n");
   }
 
-  return { consoleBatch, requestStarted, requestEnded, forget, read, has: (tabId) => tabs.has(tabId) };
+  return { consoleBatch, requestStarted, requestEnded, responseBody, forget, read, has: (tabId) => tabs.has(tabId) };
 }
 
 if (typeof module !== "undefined") module.exports = { createDevtools, redactUrl, redactText, consoleLevel, sourceOf };

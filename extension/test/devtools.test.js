@@ -130,3 +130,43 @@ test("network: method, status, type, size, duration and URL; redirects, failures
   assert.equal(d.has(5), false);
   assert.equal(d.read(5, { kind: "network" }), "Tab 5 network: 0 requests.");
 });
+
+test("network bodies: xhr request and response bodies are kept, shown only when asked for, cut and capped", () => {
+  const d = createDevtools();
+  const enc = (t) => new TextEncoder().encode(t);
+  const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+  const quote = d.requestStarted({ requestId: "1", tabId: 5, url: "https://a.example/api/quote", type: "xmlhttprequest", method: "POST", timeStamp: T0, requestBody: { raw: [{ bytes: enc('{"kg":40}').buffer }] } });
+  d.requestEnded({ requestId: "1", statusCode: 200, responseSize: 30, timeStamp: T0 + 5 }, "done");
+  d.responseBody(quote, [enc('{"total":226,'), enc(`"rate":1.4397,"t":"${jwt}"}`)], 120);
+  const page = d.requestStarted({ requestId: "2", tabId: 5, url: "https://a.example/", type: "main_frame", method: "GET", timeStamp: T0 + 100 });
+  d.requestEnded({ requestId: "2", statusCode: 200, timeStamp: T0 + 110 }, "done");
+  assert.equal(page.body, null, "only responses the caller hands over are kept");
+  const image = d.requestStarted({ requestId: "3", tabId: 5, url: "https://a.example/api/blob", type: "xmlhttprequest", method: "GET", timeStamp: T0 + 200 });
+  d.responseBody(image, [new Uint8Array([0x89, 0x50, 0x00, 0x01])], 4);
+  assert.equal(image.body, null, "bytes that aren't text are left out");
+  const form = d.requestStarted({ requestId: "4", tabId: 5, url: "https://a.example/login", type: "xmlhttprequest", method: "POST", timeStamp: T0 + 300, requestBody: { formData: { user: ["dana"] } } });
+  d.responseBody(form, [enc("x".repeat(5000))], 25000);
+
+  assert.deepEqual(lines(d.read(5, { kind: "network", pattern: "quote" })), [
+    "Tab 5 network: 1 request; 3 of 4 kept didn't match pattern /quote/i. Newest last. bodies: true adds the request and response bodies.",
+    "12:00:01.234 POST 200 xhr 30B 5ms https://a.example/api/quote",
+  ]);
+  assert.deepEqual(lines(d.read(5, { kind: "network", pattern: "^https://a.example/$" })), [
+    "Tab 5 network: 1 request; 3 of 4 kept didn't match pattern /^https:\\/\\/a.example\\/$/i. Newest last.",
+    "12:00:01.334 GET 200 document - 10ms https://a.example/",
+  ]);
+  const login = d.requestStarted({ requestId: "9", tabId: 6, url: "https://a.example/session", type: "xmlhttprequest", method: "POST", timeStamp: T0, requestBody: { raw: [{ bytes: enc('{"user":"dana","password":"hunter2","profile":{"apiKey":"k1","zip":"94110"}}').buffer }] } });
+  d.responseBody(login, [enc("user=dana&access_token=abc123&next=%2Fhome")], 40);
+  assert.deepEqual(lines(d.read(6, { kind: "network", bodies: true })).slice(2), [
+    '  sent: {"user":"dana","password":"[redacted]","profile":{"apiKey":"[redacted]","zip":"94110"}}',
+    "  response: user=dana&access_token=[redacted]&next=%2Fhome",
+  ]);
+  const out = lines(d.read(5, { kind: "network", bodies: true }));
+  assert.equal(out[1], "12:00:01.234 POST 200 xhr 30B 5ms https://a.example/api/quote");
+  assert.equal(out[2], '  sent: {"kg":40}');
+  assert.equal(out[3], '  response: {"total":226,"rate":1.4397,"t":"[redacted: jwt]"}');
+  assert.equal(out[6], "12:00:01.534 POST pending xhr - - https://a.example/login");
+  assert.equal(out[7], '  sent: {"user":["dana"]}');
+  assert.match(out[8], /^ {2}response: x{3999}… \(cut; 24\.4kB in all\)$/);
+  assert.equal(out.length, 9);
+});

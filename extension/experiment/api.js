@@ -175,6 +175,58 @@ function frameAt(top, path) {
   return bc;
 }
 
+// Page dialogs (alert, confirm, prompt, beforeunload). While one is open the page's script is
+// stopped inside it, so the operation that opened it (a click, a script) can't answer until the
+// dialog is closed. The parent watches the tab while an operation runs and answers for it.
+const { setTimeout, clearTimeout } = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");
+const DIALOG_POLL_MS = 60;
+
+// The tab's open dialog as commonDialog.js's Dialog object ({ args, ui }), or null.
+function openDialog(browser) {
+  try {
+    const box = browser?.tabDialogBox;
+    if (!box) return null;
+    for (const manager of [box.getContentDialogManager(), box.getTabDialogManager()]) {
+      const dialog = manager?.dialogs?.[0]?.frameContentWindow?.Dialog;
+      if (dialog?.ui && dialog.args) return dialog;
+    }
+  } catch {
+    // tab closing
+  }
+  return null;
+}
+
+function dialogInfo(dialog) {
+  // alertCheck and confirmCheck are the same dialogs with Firefox's "don't allow more" checkbox.
+  const type = dialog.args.inPermitUnload ? "beforeunload" : String(dialog.args.promptType ?? "alert").replace(/Check$/, "");
+  const message = String(dialog.ui.infoBody?.textContent || dialog.args.text || "").slice(0, 500);
+  return { type, message };
+}
+
+const dialogNote = ({ type, message }) =>
+  `A ${type} dialog is open on this page${message ? `: ${JSON.stringify(message)}` : ""}. The page is stopped until it is answered: call handle_dialog (accept true or false) before anything else in this tab.`;
+
+// Resolves with the query's answer, or with a note as soon as a dialog opens in the tab; the
+// query then stays unanswered until the dialog closes, and its answer is dropped.
+function orDialog(browser, query) {
+  return new Promise((resolve, reject) => {
+    let timer = null;
+    const done = (fn, value) => {
+      clearTimeout(timer);
+      timer = undefined;
+      fn(value);
+    };
+    const poll = () => {
+      if (timer === undefined) return;
+      const dialog = openDialog(browser);
+      if (dialog) return done(resolve, dialogNote(dialogInfo(dialog)));
+      timer = setTimeout(poll, DIALOG_POLL_MS);
+    };
+    query.then((r) => timer !== undefined && done(resolve, r), (e) => timer !== undefined && done(reject, e));
+    timer = setTimeout(poll, DIALOG_POLL_MS);
+  });
+}
+
 // An extension tab group id is the internal id ("<13 digit ms>-<n>") without its hyphen, as in
 // Firefox's ext-browser.js. Ids it can't parse aren't found, and the caller falls back to titles.
 function internalGroupId(id) {
@@ -332,6 +384,9 @@ this.claudePage = class extends ExtensionAPI {
     async function run(tabId, op, args) {
       await self.ready;
       const top = topContext(tabId);
+      const browser = top.embedderElement;
+      const waiting = openDialog(browser);
+      if (waiting) throw new Error(dialogNote(dialogInfo(waiting)));
       let bc = Array.isArray(args?.frame) && args.frame.length ? frameAt(top, args.frame) : top;
       let current = args ?? {};
       const framed = FRAME_REF.exec(current.ref ?? current.refId ?? "");
@@ -348,7 +403,7 @@ this.claudePage = class extends ExtensionAPI {
       for (let hop = 0; hop <= 2 * MAX_FRAME_HOPS; hop++) {
         const wg = bc?.currentWindowGlobal;
         if (!wg) throw new Error("The page is still loading (no window in this frame yet). Wait and retry.");
-        const result = await wg.getActor(ACTOR).sendQuery(op, current);
+        const result = await orDialog(browser, wg.getActor(ACTOR).sendQuery(op, current));
         if (result?.bubble) {
           if (!path.length) return result.bubble;
           [bc, current] = path.pop();
@@ -398,6 +453,8 @@ this.claudePage = class extends ExtensionAPI {
         broadcast: surfaced(async (tabId, op, args) => {
           await self.ready;
           const top = topContext(tabId);
+          const waiting = openDialog(top.embedderElement);
+          if (waiting) throw new Error(dialogNote(dialogInfo(waiting)));
           const offsets = args?.frameOffsets ? await frameOffsetsUnder(top) : null;
           return Promise.all(
             top.getAllBrowsingContextsInSubtree().map(async (bc) => {
@@ -424,6 +481,41 @@ this.claudePage = class extends ExtensionAPI {
           await self.ready;
           const bc = topContext(tabId).getAllBrowsingContextsInSubtree().find((c) => c.id === frameId);
           return bc ? frameOffsetOf(bc) : null;
+        }),
+
+        // Answers the tab's open dialog: OK (accept) or Cancel, with `text` typed into a prompt
+        // first. Resolves to what it did, and says so if the page opened another one right after.
+        dialog: surfaced(async (tabId, accept, text) => {
+          const browser = tabManager.get(tabId).nativeTab.linkedBrowser;
+          const dialog = openDialog(browser);
+          if (!dialog) throw new Error("No dialog is open in this tab.");
+          const info = dialogInfo(dialog);
+          const { button0, button1, loginTextbox } = dialog.ui;
+          if (accept && typeof text === "string" && info.type === "prompt" && loginTextbox) loginTextbox.value = text;
+          (accept ? button0 : button1 ?? button0).click();
+          let next = null;
+          for (let i = 0; i < 10; i++) {
+            await new Promise((r) => setTimeout(r, 50));
+            next = openDialog(browser);
+            if (next !== dialog) break;
+          }
+          const did = `${accept ? "Accepted" : "Dismissed"} the ${info.type} dialog${info.message ? ` (${JSON.stringify(info.message)})` : ""}.`;
+          return next && next !== dialog ? `${did}\n${dialogNote(dialogInfo(next))}` : did;
+        }),
+
+        // Sets the size of a tab's page area in CSS pixels (as WebDriver BiDi's setViewport does:
+        // the <browser> element's own size), or with nulls gives it back to the window. Resolves
+        // to the size it has afterwards. The window itself is not resized.
+        setViewport: surfaced(async (tabId, width, height) => {
+          const browser = tabManager.get(tabId).nativeTab.linkedBrowser;
+          for (const [prop, value] of [["width", width], ["height", height]]) {
+            if (value == null) browser.style.removeProperty(prop);
+            else browser.style.setProperty(prop, `${value}px`);
+          }
+          // Background tabs are only resized when asked.
+          browser.ownerDocument.synchronouslyUpdateRemoteBrowserDimensions?.(true);
+          await new Promise((r) => setTimeout(r, 150));
+          return { width: browser.clientWidth, height: browser.clientHeight };
         }),
 
         setActive: surfaced(async (tabId, active) => {
