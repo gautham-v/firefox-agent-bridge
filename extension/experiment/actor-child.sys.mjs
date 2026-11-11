@@ -762,10 +762,28 @@ function ownTextOf(el) {
 // ---------------------------------------------------------------------------------------------
 // get_page_text
 
+// The text of aria-hidden subtrees is cut out, as read_page and find leave those elements out:
+// a parked template or an off-screen copy isn't on the page for someone reading it. innerText is
+// laid-out text, so each hidden subtree's own innerText is looked for, in document order, in the
+// body's; one that isn't found as it stands is left in.
+function withoutAriaHidden(source, text) {
+  let from = 0;
+  for (const el of source.querySelectorAll?.('[aria-hidden="true"]') ?? []) {
+    if (el.parentElement?.closest('[aria-hidden="true"]')) continue;
+    const hidden = (el.innerText ?? "").trim();
+    if (!hidden) continue;
+    const at = text.indexOf(hidden, from);
+    if (at < 0) continue;
+    text = text.slice(0, at) + text.slice(at + hidden.length);
+    from = at;
+  }
+  return text;
+}
+
 function pageText(doc, { redact } = {}) {
   const red = redactor(doc, redact);
   const source = doc.body ?? doc.documentElement;
-  const raw = (source.innerText ?? source.textContent ?? "")
+  const raw = withoutAriaHidden(source, source.innerText ?? source.textContent ?? "")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
