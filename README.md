@@ -193,6 +193,10 @@ Differences from Chrome:
   navigation (a link, a form's submit; Enter does the same). It then answers once the new page is
   parsed and says where it landed, so a read in the same `batch` reads the new page. Telling
   takes 40ms; a click that did neither answers after that, and other keys answer at once.
+- A click or Enter also says when the page is showing a dialog of its own (`<dialog open>`,
+  `role="dialog"` or `alertdialog`, `aria-modal`) that hasn't been announced: its heading and
+  its buttons, once per dialog. "Clicked button" alone doesn't show that a prompt is now over the
+  page, or that one came up on a timer after the page was read.
 - A page script stops inside `alert`, `confirm` and `prompt` until the dialog is answered, and
   so does the click or `javascript_tool` call that opened it. The call is answered as soon as
   the dialog opens, with the dialog's type and text, and every other call in that tab fails with

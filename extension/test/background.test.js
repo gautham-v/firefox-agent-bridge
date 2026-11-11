@@ -2185,13 +2185,14 @@ test("key and type answer where the keys went, with a masked line when the field
 // ---- Click latency
 
 // A session tab (id 2); its page answers a click with `answer`, and `onClick` runs as it does.
-async function clickEnv({ answer = 'Clicked button "Go"', onClick } = {}) {
+async function clickEnv({ answer = 'Clicked button "Go"', onClick, dialogs = "" } = {}) {
   const env = await load();
   await env.callTool("tabs_create_mcp");
   const calls = [];
   env.browser.claudePage.call = async (tabId, op, args) => {
     calls.push({ op, args: plain(args) });
     if (op === "viewport") return { width: 1000, height: 800, dpr: 1, scrollX: 0, scrollY: 0 };
+    if (op === "newDialogs") return dialogs;
     if (op === "click") {
       onClick?.();
       return answer;
@@ -2218,6 +2219,18 @@ test("a click that opens no tab answers at once, so keys right after it aren't h
   const took = Date.now() - t0;
   assert.equal(r.result.content[0].text, 'Clicked button "Go"');
   assert.ok(took < 95, `click and key took ${took}ms`);
+});
+
+test("a click says when the page is showing a dialog of its own that hasn't been announced", async () => {
+  const note = 'A dialog is showing on the page: "Enable notifications?" with buttons "Enable", "Not now".';
+  const env = await clickEnv({ dialogs: note });
+  const r = await env.callTool("computer", { action: "left_click", tabId: 2, coordinate: [10, 10] });
+  assert.equal(r.result.content[0].text, `Clicked button "Go"\n${note}`);
+  const enter = await env.callTool("computer", { action: "key", tabId: 2, text: "Enter" });
+  assert.ok(enter.result.content[0].text.endsWith(`\n${note}`));
+  env.calls.length = 0;
+  await env.callTool("computer", { action: "key", tabId: 2, text: "Tab" });
+  assert.ok(!env.calls.some((c) => c.op === "newDialogs"), "other keys answer without asking");
 });
 
 test("a click whose page opened a tab (window.open) waits for onCreated and names it", async () => {

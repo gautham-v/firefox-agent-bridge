@@ -937,6 +937,17 @@ async function followNavigation(tabId, before, started) {
 
 const DIALOG_OPEN = /^A \w+ dialog is open on this page/;
 
+// A line for the result of a click or Enter when the page is showing a dialog of its own that
+// hasn't been announced yet (actor-child.sys.mjs newDialogs), or a native one opened just after.
+async function pageDialogNote(tabId) {
+  try {
+    const note = await browser.claudePage.call(tabId, "newDialogs", { redact: redactRules });
+    return typeof note === "string" && note ? `\n${note}` : "";
+  } catch (e) {
+    return DIALOG_OPEN.test(e?.message ?? "") ? `\n${e.message}` : ""; // mid-navigation, or an actor from before the restart
+  }
+}
+
 async function computer(session, args) {
   const { action, tabId } = args;
   const tab = await requireTab(session, tabId);
@@ -963,7 +974,7 @@ async function computer(session, args) {
       if (typeof result === "string" && DIALOG_OPEN.test(result)) return [text(result)];
       const opened = result?.opens || [...(await openerTabs(tabId))].some((id) => !before.has(id));
       const landed = await followNavigation(tabId, { tab, doc }, since);
-      return pageContent(result, landed + (opened ? await openedTabsNote(tabId, since) : ""));
+      return pageContent(result, landed + (await pageDialogNote(tabId)) + (opened ? await openedTabsNote(tabId, since) : ""));
     }
     case "hover":
       needsTarget();
@@ -986,7 +997,7 @@ async function computer(session, args) {
       const doc = submits ? await docState(tabId) : null;
       const result = await page(tabId, "key", { keys: args.text, repeat: args.repeat ?? 1 });
       if (typeof result === "string" && DIALOG_OPEN.test(result)) return [text(result)];
-      return pageContent(result, submits ? await followNavigation(tabId, { tab, doc }, started) : "");
+      return pageContent(result, submits ? (await followNavigation(tabId, { tab, doc }, started)) + (await pageDialogNote(tabId)) : "");
     }
     case "scroll":
       return [text(await page(tabId, "scroll", { ...(await toCss(tabId, args.coordinate)), direction: args.scroll_direction ?? "down", amount: args.scroll_amount ?? 3 }))];

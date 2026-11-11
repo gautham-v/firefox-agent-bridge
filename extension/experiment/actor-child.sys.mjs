@@ -1034,6 +1034,39 @@ function cursorVisible(doc, { visible }) {
   return true;
 }
 
+// Dialogs the page itself draws (a subscribe prompt, a cookie wall, a confirm box): a click's
+// result says "Clicked button", which doesn't show that one is now over the page, or that one
+// came up on a timer since the page was read. Each is announced once, in the result of the first
+// click or Enter after it appears, by its heading (or name, or first words) and its buttons.
+const PAGE_DIALOGS = 'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
+const announcedDialogs = new WeakSet();
+
+function newDialogs(doc, { redact } = {}) {
+  const lines = [];
+  for (const el of doc.querySelectorAll(PAGE_DIALOGS)) {
+    if (announcedDialogs.has(el) || !isRendered(el) || el.closest('[aria-hidden="true"]')) continue;
+    const box = el.getBoundingClientRect();
+    if (box.width < 1 || box.height < 1) continue;
+    announcedDialogs.add(el);
+    if (el.parentElement?.closest(PAGE_DIALOGS)) continue; // its outer dialog speaks for it
+    const heading = el.querySelector('h1, h2, h3, h4, [role="heading"]');
+    const title = clean(heading?.textContent || nameOf(el, roleOf(el)) || el.innerText || "", 80);
+    const buttons = [];
+    for (const b of el.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"]')) {
+      if (!isRendered(b)) continue;
+      const label = clean(nameOf(b, roleOf(b)) || b.textContent || b.value || "", 30);
+      if (label && !buttons.includes(label)) buttons.push(label);
+      if (buttons.length === 5) break;
+    }
+    lines.push(`${JSON.stringify(title || "untitled")}${buttons.length ? ` with buttons ${buttons.map((b) => JSON.stringify(b)).join(", ")}` : ""}`);
+    if (lines.length === 3) break;
+  }
+  if (!lines.length) return "";
+  const out = `A dialog is showing on the page: ${lines.join("; ")}.`;
+  const red = redactor(doc, redact);
+  return red.siteRules ? red.scrub(out) : out;
+}
+
 // What a click hit, in words: the nearest interactive ancestor if the target itself is a bare
 // span or label inside one, plus its name or text.
 function clickedLabel(el) {
@@ -2486,6 +2519,7 @@ const OPS = {
   readPage,
   find: findElements,
   text: pageText,
+  newDialogs,
   click,
   hover,
   drag,
