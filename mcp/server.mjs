@@ -257,7 +257,17 @@ const SHOW_TABS = process.env.FIREFOX_BRIDGE_SHOW_TABS === "1";
 // default; one flag turns that back off, for measuring against the old behavior:
 //   waitForLoad: navigate waits for the load event and the text to settle, as before 2026-09-30,
 //     instead of returning once the page is parsed.
-const EXPERIMENT_FLAGS = ["waitForLoad"];
+//   navigateBare: navigate answers with the URL and title only, as before 2026-11-10, instead of
+//     also carrying the page's text (as get_page_text gives it, cut to NAVIGATE_TEXT_CHARS).
+//   tabsFirst: tabs_context_mcp's description asks for a call before any other tool, and
+//     tabs_create_mcp's for a tab per conversation, as before; navigate with a url opens the
+//     session's tab by itself, so neither call is needed to start.
+//   plainType: computer's type action takes no ref or submit, as before; with them the field is
+//     clicked first and Enter pressed after, one call instead of three.
+// The three were measured together on 12 zoo-sites tasks (Haiku 5.5, one run each): 189 turns
+// with them off, 130 on, and fewer on every task.
+const EXPERIMENT_FLAGS = ["waitForLoad", "navigateBare", "tabsFirst", "plainType"];
+const NAVIGATE_TEXT_CHARS = 6000;
 if (process.argv.includes("--list-experiments")) {
   console.log(EXPERIMENT_FLAGS.join("\n"));
   process.exit(0);
@@ -270,6 +280,23 @@ for (const item of (process.env.FIREFOX_BRIDGE_EXPERIMENTS ?? "").split(",")) {
   else process.stderr.write(`firefox-agent-bridge: unknown experiment "${name}" ignored\n`);
 }
 const on = (flag) => EXPERIMENTS.has(flag);
+// What the kept experiments changed in the definitions above, applied unless switched back off.
+const toolNamed = (name) => TOOLS.find((t) => t.name === name);
+if (!on("navigateBare")) {
+  toolNamed("navigate").description =
+    'Navigate a tab to a URL, or "back"/"forward" in history, wait for the page to load, and return the page\'s visible text (as get_page_text would), so don\'t call get_page_text after it. If tabId is omitted for a URL, the first tab in this session\'s group is used (created if needed) and the tab list is appended.';
+}
+if (!on("tabsFirst")) {
+  toolNamed("tabs_context_mcp").description =
+    "List the tabs in the agent's tab group in Firefox. Not needed to get started: navigate with a url opens this session's tab by itself and says its id.";
+  toolNamed("tabs_create_mcp").description =
+    "Open another background tab in the agent's tab group. The first tab needs no call: navigate with a url opens it. Tabs open without taking focus, so the user can keep working.";
+}
+if (!on("plainType")) {
+  const props = toolNamed("computer").inputSchema.properties;
+  props.ref.description = 'Element ref from read_page or find (e.g. "ref_12"). Alternative to coordinate for clicks and hover; required for scroll_to. With type: the field to click first, so no separate click is needed.';
+  props.submit = { type: "boolean", description: "type only: press Enter after typing, to send the form or search." };
+}
 
 const REPLAY_TIMEOUT_MS = 600_000;
 const MAX_REPLAY_BYTES = 1_000_000;
@@ -443,6 +470,22 @@ async function formInput(args) {
   return { content: [{ type: "text", text: lines.join("\n") }] };
 }
 
+// computer type with a ref and/or submit: click the field, type, press Enter; one line each,
+// stopping at the first that fails.
+async function typeInto(args) {
+  const steps = [];
+  if (args.ref) steps.push({ action: "left_click", ref: args.ref });
+  steps.push({ action: "type", text: args.text });
+  if (args.submit) steps.push({ action: "key", text: "Enter" });
+  const lines = [];
+  for (const step of steps) {
+    const r = await callOne("computer", { tabId: args.tabId, ...step });
+    lines.push(textOf(r));
+    if (r.isError) return { content: [{ type: "text", text: lines.join("\n") }], isError: true };
+  }
+  return { content: [{ type: "text", text: lines.join("\n") }] };
+}
+
 const textOf = (r) => (r?.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
 
 // ---- the session's current tab -------------------------------------------------------------
@@ -499,7 +542,9 @@ async function resolveTab() {
 
 const NO_TAB = new Set(["tabs_context_mcp", "tabs_create_mcp"]);
 
-async function runTool(name, args) {
+// `more`: in a batch, whether another action follows; a navigate that isn't the last action
+// leaves the page text to what comes after it (usually the read).
+async function runTool(name, args, more = false) {
   args = { ...args };
   if (typeof args.tabId === "string" && /^\s*\d+\s*$/.test(args.tabId)) args.tabId = Number(args.tabId);
   let filled = null;
@@ -514,8 +559,16 @@ async function runTool(name, args) {
   // settling (0.6s a page against 1.9s in the eval, with the same text read right after). A call
   // can still ask for wait: "load".
   if (name === "navigate" && args.wait == null && !on("waitForLoad")) args.wait = "interactive";
-  const result = name === "form_input" ? await formInput(args) : await callOne(name, args);
+  const result = name === "form_input" ? await formInput(args) : name === "computer" && args.action === "type" && !on("plainType") && (args.ref || args.submit) ? await typeInto(args) : await callOne(name, args);
   noteTabs(name, args, result);
+  if (name === "navigate" && !on("navigateBare") && !more && !result.isError && lastTab != null) {
+    const read = await callOne("get_page_text", { tabId: lastTab });
+    if (!read.isError) {
+      const body = textOf(read).replace(/^Title: [^\n]*\nURL: [^\n]*\n\n?/, ""); // navigate's own lines say both
+      const shown = body.length > NAVIGATE_TEXT_CHARS ? `${body.slice(0, NAVIGATE_TEXT_CHARS)}\n(cut at ${NAVIGATE_TEXT_CHARS} of ${body.length} characters; get_page_text returns all of it)` : body;
+      result.content = [...(result.content ?? []), { type: "text", text: `Page text:\n${shown}` }];
+    }
+  }
   if (filled != null) result.content = [...(result.content ?? []), { type: "text", text: `(No tabId given; used tab ${filled}.)` }];
   return result;
 }
@@ -532,7 +585,7 @@ async function batch(args) {
     const head = `[${i + 1}/${actions.length}] ${a?.tool}`;
     const r = !BATCHABLE.includes(a?.tool)
       ? errorResult(`Unknown or unbatchable tool ${a?.tool}.`)
-      : await runTool(a.tool, a.args && typeof a.args === "object" ? a.args : {});
+      : await runTool(a.tool, a.args && typeof a.args === "object" ? a.args : {}, i + 1 < actions.length);
     content.push({ type: "text", text: `${head}${r.isError ? " failed" : ""}:` });
     for (const c of r.content ?? []) content.push(c);
     if (r.isError) {
@@ -567,7 +620,7 @@ async function handle(msg) {
         capabilities: { tools: {} },
         serverInfo: { name: "firefox-agent-bridge", version: VERSION },
         instructions:
-          "Browser tools for Firefox Developer Edition. Tabs live in the agent's own per-session tab group and run in the background; input is trusted and never moves the user's cursor. Each tool call is a round trip: use batch to run several known steps (e.g. navigate + get_page_text for each of several pages) in one call, and form_input's fields to fill a form at once.",
+          "Browser tools for Firefox Developer Edition. Tabs live in the agent's own per-session tab group and run in the background; input is trusted and never moves the user's cursor. Each tool call is a round trip: navigate returns the page's text and opens the session's tab by itself, batch runs several known steps in one call, and form_input's fields fill a form at once.",
       };
     }
     case "tools/list":

@@ -173,6 +173,13 @@ Differences from Chrome:
   reach into any frame; a scroll over a frame that can't scroll scrolls the page around it.
   Typing and keys go to the frame the last click landed in, and their result names the element
   that got them and its value.
+- `navigate` answers with the page's visible text after the URL and title (what `get_page_text`
+  gives, cut at 6,000 characters), since a read followed most navigations. In a `batch` only a
+  navigate that is the last action does, so one followed by its own read isn't doubled.
+- No call is needed before the first `navigate`: it opens the session's tab. The descriptions of
+  `tabs_context_mcp` and `tabs_create_mcp` say so, where Chrome's ask for a call first.
+- `computer`'s `type` takes a `ref` (the field is clicked first) and `submit` (Enter is pressed
+  after), so filling and sending a search box is one call.
 - `navigate` returns once the new page is parsed and no other page has replaced it for 300ms,
   and says when the page is still loading. That takes about 0.6s a page, against 1.9s for
   waiting on the load event. A read right after it (`get_page_text`, `find`) gets the page as
@@ -536,6 +543,8 @@ Limits:
   script's result, but a script can return it transformed (split, reversed, encoded) and get it out.
 - Masking follows the rules, not the meaning: a card number typed into a field without
   `autocomplete="cc-number"`, or shown as plain text, isn't masked unless a site rule covers it.
+- `get_page_text` leaves out the text of `aria-hidden="true"` elements, as `read_page` and `find`
+  leave the elements out.
 - `get_page_text` only reads the top frame. `read_page` and `find` read every frame with the
   rules for that frame's own site; screenshots cover iframes as described above.
 

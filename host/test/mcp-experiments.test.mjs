@@ -92,7 +92,7 @@ const byName = (tools, name) => tools.find((t) => t.name === name);
 
 test("--list-experiments prints every flag", () => {
   const out = execFileSync(process.execPath, [SERVER, "--list-experiments"], { encoding: "utf8" });
-  assert.deepEqual(out.trim().split("\n"), ["waitForLoad"]);
+  assert.deepEqual(out.trim().split("\n"), ["waitForLoad", "navigateBare", "tabsFirst", "plainType"]);
 });
 
 // waitForLoad only changes what navigate asks Firefox for; the flags measured and dropped on
@@ -139,5 +139,61 @@ test("waitForLoad: navigate goes to Firefox as it did before, with no wait", asy
     assert.deepEqual(s.calls[0].args, { url: "back", tabId: 3 });
     await s.call("navigate", { url: "a", tabId: 3, wait: "interactive" });
     assert.equal(s.calls[0].args.wait, "interactive", "a call can still ask for it");
+  });
+});
+
+test("navigate carries the page's text unless another batch action follows it; navigateBare turns that off", async () => {
+  const page = `Title: A\nURL: https://a/\n\n${"word ".repeat(2000)}`;
+  const reply = (tool, args) => ok(tool === "get_page_text" ? page : `Tab ${args.tabId ?? 3}: https://a/\nTitle: A`);
+  await withServer(undefined, reply, async (s) => {
+    const t = texts(await s.call("navigate", { url: "a", tabId: 3 }));
+    assert.deepEqual(s.calls.map((c) => c.tool), ["navigate", "get_page_text"]);
+    assert.match(t, /^Tab 3: https:\/\/a\/\nTitle: A\nPage text:\nword word/);
+    assert.ok(!t.includes("URL: https://a/"), "the text's own title and URL lines are dropped");
+    assert.match(t, /\(cut at 6000 of \d+ characters; get_page_text returns all of it\)$/);
+    await s.call("batch", { actions: [{ tool: "navigate", args: { url: "a", tabId: 3 } }, { tool: "find", args: { query: "x", tabId: 3 } }] });
+    assert.deepEqual(s.calls.map((c) => c.tool), ["navigate", "find"]);
+    await s.call("batch", { actions: [{ tool: "find", args: { query: "x", tabId: 3 } }, { tool: "navigate", args: { url: "a", tabId: 3 } }] });
+    assert.deepEqual(s.calls.map((c) => c.tool), ["find", "navigate", "get_page_text"]);
+    assert.match(byName(await s.tools(), "navigate").description, /don't call get_page_text after it/);
+  });
+  await withServer("navigateBare", reply, async (s) => {
+    assert.equal(texts(await s.call("navigate", { url: "a", tabId: 3 })), "Tab 3: https://a/\nTitle: A");
+    assert.deepEqual(s.calls.map((c) => c.tool), ["navigate"]);
+    assert.match(byName(await s.tools(), "navigate").description, /into one batch call/);
+  });
+});
+
+test("type with a ref clicks the field first and with submit presses Enter after; plainType turns that off", async () => {
+  const reply = (tool, args) => ok(args.action === "left_click" ? "Clicked textbox" : args.action === "key" ? "Pressed Enter" : "Typed 3 character(s)");
+  await withServer(undefined, reply, async (s) => {
+    const t = texts(await s.call("computer", { action: "type", text: "abc", ref: "ref_4", submit: true, tabId: 3 }));
+    assert.deepEqual(s.calls.map((c) => c.args), [
+      { tabId: 3, action: "left_click", ref: "ref_4" },
+      { tabId: 3, action: "type", text: "abc" },
+      { tabId: 3, action: "key", text: "Enter" },
+    ]);
+    assert.equal(t, "Clicked textbox\nTyped 3 character(s)\nPressed Enter");
+    await s.call("computer", { action: "type", text: "abc", tabId: 3 });
+    assert.deepEqual(s.calls.map((c) => c.args), [{ action: "type", text: "abc", tabId: 3 }]);
+    assert.ok(byName(await s.tools(), "computer").inputSchema.properties.submit);
+  });
+  await withServer("plainType", reply, async (s) => {
+    await s.call("computer", { action: "type", text: "abc", ref: "ref_4", submit: true, tabId: 3 });
+    assert.equal(s.calls.length, 1);
+    assert.equal(byName(await s.tools(), "computer").inputSchema.properties.submit, undefined);
+  });
+});
+
+test("tabs_context_mcp isn't asked for before other tools; tabsFirst asks for it as before", async () => {
+  await withServer(undefined, undefined, async (s) => {
+    const tools = await s.tools();
+    assert.match(byName(tools, "tabs_context_mcp").description, /Not needed to get started/);
+    assert.match(byName(tools, "tabs_create_mcp").description, /The first tab needs no call/);
+  });
+  await withServer("tabsFirst", undefined, async (s) => {
+    const tools = await s.tools();
+    assert.match(byName(tools, "tabs_context_mcp").description, /You must call this at least once/);
+    assert.match(byName(tools, "tabs_create_mcp").description, /Each new conversation should use its own tab|Open a new background tab/);
   });
 });
